@@ -20,19 +20,23 @@ Implemented:
 - `POST /v1/memories/search`
 - `POST /v1/memories/candidates`
 - `POST /v1/memories/extract`
+- `POST /v1/memories/list`
+- `GET /v1/memories/:id`
+- `PATCH /v1/memories/:id`
+- `DELETE /v1/memories/:id`
 - D1 schema and migrations
 - D1 + Vectorize write path
 - Vectorize + D1 lexical hybrid search
 - Candidate add / merge / ignore pipeline
 - Workers AI extraction
 - Single `ADMIN_API_KEY` auth
+- Pi and MCP search/add/list/update/delete integrations
 
 Deferred:
-- Table-driven API keys
-- Memory list / update / delete APIs
+- Candidate review queue and review API
 - Review UI
 - Cron maintenance
-- MCP server
+- Table-driven API keys
 
 ## Key files
 
@@ -54,6 +58,7 @@ Deferred:
 ```bash
 npm install
 npm run typecheck
+npm run smoke:management
 npm run db:migrate:local
 npm run dev
 ```
