@@ -191,7 +191,7 @@ function resolveProjectId(ctx: unknown, explicit?: string): string | undefined {
   return explicit || config.projectId || slugProjectId(cwdFromContext(ctx));
 }
 
-async function memoryRequest(path: string, body: unknown, signal?: AbortSignal) {
+async function memoryRequest(path: string, body: unknown, signal?: AbortSignal, method = "POST") {
   const { baseUrl, apiKey } = memoryConfig();
   if (!apiKey) {
     throw new Error(
@@ -200,13 +200,13 @@ async function memoryRequest(path: string, body: unknown, signal?: AbortSignal) 
   }
 
   const response = await fetch(`${baseUrl}${path}`, {
-    method: "POST",
+    method,
     headers: {
       Authorization: `Bearer ${apiKey}`,
       Accept: "application/json",
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(body),
+    body: body == null ? undefined : JSON.stringify(body),
     signal,
   });
 

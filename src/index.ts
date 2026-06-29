@@ -2,8 +2,8 @@ import { Hono } from 'hono';
 import type { Env } from './types';
 import { processMemoryCandidates } from './services/candidates';
 import { extractMemories } from './services/extract';
-import { createMemory, searchMemories } from './services/memories';
-import { validateCreateMemory, validateExtractMemories, validateProcessCandidates, validateSearchMemories } from './utils/validation';
+import { createMemory, deleteMemory, getMemory, listMemories, searchMemories, updateMemory } from './services/memories';
+import { validateCreateMemory, validateExtractMemories, validateListMemories, validateMemoryIdInput, validateProcessCandidates, validateSearchMemories, validateUpdateMemory } from './utils/validation';
 
 type Bindings = Env;
 
@@ -89,6 +89,66 @@ app.post('/v1/memories/extract', async (c) => {
 
   const result = await extractMemories(c.env, validation.data);
   return c.json(result);
+});
+
+app.post('/v1/memories/list', async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON body.' }, 400);
+  }
+
+  const validation = validateListMemories(body);
+  if (!validation.ok) return c.json({ error: validation.error }, 400);
+
+  const memories = await listMemories(c.env, validation.data);
+  return c.json({ memories });
+});
+
+app.get('/v1/memories/:id', async (c) => {
+  const validation = validateMemoryIdInput({ user_id: c.req.query('user_id') });
+  if (!validation.ok) return c.json({ error: validation.error }, 400);
+
+  const memory = await getMemory(c.env, c.req.param('id'), validation.data.user_id);
+  if (!memory) return c.json({ error: 'Memory not found.' }, 404);
+  return c.json({ memory });
+});
+
+app.patch('/v1/memories/:id', async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON body.' }, 400);
+  }
+
+  const validation = validateUpdateMemory(body);
+  if (!validation.ok) return c.json({ error: validation.error }, 400);
+
+  try {
+    const memory = await updateMemory(c.env, c.req.param('id'), validation.data);
+    if (!memory) return c.json({ error: 'Memory not found.' }, 404);
+    return c.json({ memory });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+  }
+});
+
+app.delete('/v1/memories/:id', async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON body.' }, 400);
+  }
+
+  const validation = validateMemoryIdInput(body);
+  if (!validation.ok) return c.json({ error: validation.error }, 400);
+
+  const memory = await deleteMemory(c.env, c.req.param('id'), validation.data.user_id);
+  if (!memory) return c.json({ error: 'Memory not found.' }, 404);
+  return c.json({ memory });
 });
 
 app.notFound((c) => c.json({ error: 'Not found.' }, 404));
