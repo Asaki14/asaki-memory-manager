@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "asaki-memory-manager",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-26",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "EMBEDDING_MODEL": "@cf/baai/bge-m3",
+    "MEMORY_LLM_MODEL": "@cf/meta/llama-3.1-8b-instruct-fp8"
+  },
+  "ai": {
+    "binding": "AI"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "asaki-memory-manager",
+      "database_id": "replace-with-your-d1-database-id"
+    }
+  ],
+  "vectorize": [
+    {
+      "binding": "VECTORIZE",
+      "index_name": "asaki-memory-manager"
+    }
+  ]
+}

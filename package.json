@@ -1,0 +1,41 @@
+{
+  "name": "asaki-memory-manager",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "start": "wrangler dev --local",
+    "typecheck": "tsc --noEmit",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply asaki-memory-manager --local",
+    "db:migrate:remote": "wrangler d1 migrations apply asaki-memory-manager --remote"
+  },
+  "dependencies": {
+    "hono": "^4.10.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20251224.0",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.105.0"
+  },
+  "description": "Cloudflare-native memory layer for AI agents: D1, Vectorize, Workers AI, REST, and Pi integration.",
+  "license": "MIT",
+  "keywords": [
+    "ai-memory",
+    "agents",
+    "cloudflare-workers",
+    "d1",
+    "vectorize",
+    "workers-ai",
+    "hono",
+    "typescript"
+  ],
+  "homepage": "https://github.com/your-name/asaki-memory-manager#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-name/asaki-memory-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-name/asaki-memory-manager/issues"
+  }
+}

@@ -1,0 +1,13 @@
+node_modules/
+.wrangler/
+.dev.vars
+.env
+.env.*
+!.env.example
+*.pem
+*_token*
+*_secret*
+dist/
+.DS_Store
+wrangler.jsonc
+PLAN.md
