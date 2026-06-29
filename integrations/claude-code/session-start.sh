@@ -11,7 +11,7 @@ INPUT=$(cat)
 SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"' 2>/dev/null || echo "startup")
 CWD=$(echo "$INPUT" | jq -r '.cwd // ""' 2>/dev/null || echo "")
 
-ASAKI_BASE="${ASAKI_MEMORY_BASE_URL:-https://asaki-memory-manager.wangyao1414114wy.workers.dev}"
+ASAKI_BASE="${ASAKI_MEMORY_BASE_URL:-https://asaki-memory-manager.YOUR_SUBDOMAIN.workers.dev}"
 ASAKI_USER="${ASAKI_MEMORY_USER_ID:-asaki}"
 
 # Resolve project id from env, config file, or git root

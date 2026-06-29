@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { Type } from "typebox";
 
-const API_BASE = "https://asaki-memory-manager.wangyao1414114wy.workers.dev";
+const API_BASE = "https://asaki-memory-manager.YOUR_SUBDOMAIN.workers.dev";
 const DEFAULT_USER_ID = "asaki";
 const DEFAULT_SCOPE = "project";
 const DEFAULT_AUTO_MIN_SCORE = 0.7;

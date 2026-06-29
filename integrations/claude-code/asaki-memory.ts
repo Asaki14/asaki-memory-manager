@@ -42,7 +42,7 @@ import { join, basename, dirname, resolve } from "node:path";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const API_BASE = "https://asaki-memory-manager.wangyao1414114wy.workers.dev";
+const API_BASE = "https://asaki-memory-manager.YOUR_SUBDOMAIN.workers.dev";
 const DEFAULT_USER_ID = "asaki";
 const DEFAULT_SCOPE = "project" as const;
 const SOURCE_TAG = "claude-code";
