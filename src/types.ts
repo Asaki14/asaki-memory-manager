@@ -2,6 +2,7 @@ export type MemoryScope = 'global' | 'project' | 'session';
 export type MemoryKind = 'preference' | 'rule' | 'fact' | 'decision' | 'task_learning' | 'bug_fix' | 'workflow';
 export type MemoryStatus = 'active' | 'archived' | 'deleted';
 export type IndexStatus = 'indexed' | 'pending' | 'failed';
+export type MemoryReviewStatus = 'pending' | 'resolved';
 
 export interface Env {
   DB: D1Database;
@@ -86,4 +87,24 @@ export interface MemoryRow {
 export interface SearchResult extends MemoryRow {
   similarity: number;
   score: number;
+}
+
+export interface MemoryReviewRecord {
+  id: string;
+  user_id: string;
+  status: MemoryReviewStatus;
+  candidate_json: string;
+  resolved_action: 'add' | 'merge' | 'ignore' | null;
+  memory_id: string | null;
+  project_id: string | null;
+  session_id: string | null;
+  source: string | null;
+  reason: string | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+}
+
+export interface MemoryReviewRow extends Omit<MemoryReviewRecord, 'candidate_json'> {
+  candidate: import('./services/candidateDecision').ProcessMemoryCandidateInput;
 }

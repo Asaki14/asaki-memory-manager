@@ -216,6 +216,43 @@ curl -X POST http://127.0.0.1:8787/v1/memories/candidates \
 
 Agents should extract durable memories from their own conversation context and submit concise candidates to `/v1/memories/candidates`. The Worker does not accept full conversation transcripts for extraction.
 
+### Review queue
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/memories/reviews \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -d '{
+    "user_id": "alice",
+    "project_id": "demo-app",
+    "candidates": [
+      {
+        "content": "Use review queue for high-risk global rules.",
+        "scope": "project",
+        "kind": "workflow",
+        "importance": 0.6,
+        "confidence": 0.8
+      }
+    ]
+  }'
+```
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/memories/reviews/list \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -d '{"user_id":"alice","project_id":"demo-app","status":"pending"}'
+```
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/memories/reviews/<review-id>/resolve \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -d '{"user_id":"alice","action":"add","reason":"approved"}'
+```
+
+Resolve actions: `add`, `merge`, `ignore`. `merge` requires `memory_id`.
+
 ## Pi integration
 
 A Pi extension is included at:
@@ -274,6 +311,7 @@ Core tables:
 
 - `memories`: memory body, scope, project/session metadata, kind, importance, confidence, status, index state.
 - `memory_events`: append-only operational events.
+- `memory_reviews`: pending and resolved candidate review queue.
 - `memory_sources`: optional source references.
 - `projects`: project metadata.
 - `api_keys`: reserved for table-driven auth.
@@ -305,7 +343,6 @@ npm run dev
 
 ## Roadmap
 
-- Candidate review queue and review API.
 - Pending embedding retry cron.
 - Expiring session memory cleanup.
 - Import/export and lightweight management UI.
