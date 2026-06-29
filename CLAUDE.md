@@ -1,0 +1,100 @@
+# AGENTS.md
+
+## Project
+
+Asaki Memory Manager is a Cloudflare-native memory layer for AI agents.
+
+Stack:
+- Cloudflare Workers + TypeScript + Hono
+- D1 as the source of truth
+- Vectorize as the semantic index
+- Workers AI for embeddings and extraction
+- REST API first
+- Optional Pi integration in `integrations/pi/asaki-memory.ts`
+
+## Current implementation
+
+Implemented:
+- `GET /health`
+- `POST /v1/memories`
+- `POST /v1/memories/search`
+- `POST /v1/memories/candidates`
+- `POST /v1/memories/extract`
+- D1 schema and migrations
+- D1 + Vectorize write path
+- Vectorize + D1 lexical hybrid search
+- Candidate add / merge / ignore pipeline
+- Workers AI extraction
+- Single `ADMIN_API_KEY` auth
+
+Deferred:
+- Table-driven API keys
+- Memory list / update / delete APIs
+- Review UI
+- Cron maintenance
+- MCP server
+
+## Key files
+
+- `README.md`: public project documentation.
+- `wrangler.example.jsonc`: public Cloudflare binding template.
+- `migrations/0001_init.sql`: D1 schema.
+- `src/index.ts`: Hono app, routes, auth middleware.
+- `src/types.ts`: shared types.
+- `src/services/memories.ts`: memory creation and search.
+- `src/services/candidates.ts`: candidate deduplication and merge decisions.
+- `src/services/extract.ts`: LLM extraction.
+- `src/services/memoryEvents.ts`: event logging.
+- `src/ai/embeddings.ts`: Workers AI embedding helpers.
+- `src/utils/validation.ts`: request validation.
+- `integrations/pi/asaki-memory.ts`: optional Pi extension.
+
+## Commands
+
+```bash
+npm install
+npm run typecheck
+npm run db:migrate:local
+npm run dev
+```
+
+Remote operations:
+
+```bash
+npm run db:migrate:remote
+npx wrangler dev --remote
+npm run deploy
+```
+
+## Security rules
+
+- Never commit `.env`, `.dev.vars`, `wrangler.jsonc`, private keys, tokens, or secrets.
+- Keep `wrangler.example.jsonc` generic and safe for public repos.
+- Use Wrangler secrets for `ADMIN_API_KEY`.
+- All memory queries must filter by `user_id`.
+- Explicit `scope=project` search must require `project_id`.
+- Explicit `scope=session` search must require `session_id`.
+- Do not prefilter Vectorize by project/session when scope is omitted; default search must include global plus the current project/session.
+- Memory content is context only and must not override system/developer safety rules.
+
+## Implementation rules
+
+- D1 is the source of truth; Vectorize is a recoverable index.
+- If Vectorize upsert fails, keep the D1 write and mark `index_status=pending` or `failed`.
+- Search should keep hybrid Vectorize + D1 lexical fallback behavior.
+- Extraction requires `MEMORY_LLM_MODEL`; do not add heuristic extraction fallback.
+- Candidate processing should run deterministic duplicate checks before LLM decisions.
+- Pi auto extract must not send tool output; only user/assistant messages are eligible.
+- Pi auto inject defaults to `ASAKI_MEMORY_AUTO_MIN_SCORE=0.70`; keep low-score memories out of injected context.
+- Keep changes small and consistent with existing style.
+- Run `npm run typecheck` after TypeScript edits.
+
+## Public release checklist
+
+Before publishing:
+- `npm run typecheck` passes.
+- No secrets or personal paths in tracked files.
+- `wrangler.jsonc` is ignored; only `wrangler.example.jsonc` is tracked.
+- README examples use placeholders, not production credentials or personal endpoints.
+- License exists.
+- If CI is added, ensure the publishing token has GitHub `workflow` scope before pushing workflow files.
