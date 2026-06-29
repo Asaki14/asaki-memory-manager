@@ -27,8 +27,4 @@ jobs:
           test -z "$(git ls-files wrangler.jsonc PLAN.md .dev.vars .env 2>/dev/null)"
       - name: Scan for local/private deployment markers
         run: |
-          ! grep -RInE '/Users/' \
-            --exclude-dir=.git \
-            --exclude-dir=node_modules \
-            --exclude=package-lock.json \
-            .
+          ! git grep -nE '/Users/' -- ':!package-lock.json' ':!.github/workflows/ci.yml'
