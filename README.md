@@ -215,7 +215,24 @@ The extension exposes:
 
 - `asaki_memory_search`
 - `asaki_memory_add`
-- `asaki_memory_extract`
+- `asaki_memory_list`
+- `asaki_memory_update`
+- `asaki_memory_delete`
+
+## MCP integration
+
+A shared MCP server is included at:
+
+```text
+integrations/mcp/asaki-memory.ts
+```
+
+Provider setup notes live in:
+
+```text
+integrations/claude-code/README.md
+integrations/codex/README.md
+```
 
 ## Configuration
 

@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { Type } from "typebox";
@@ -8,8 +8,6 @@ const API_BASE = "https://asaki-memory-manager.YOUR_SUBDOMAIN.workers.dev";
 const DEFAULT_USER_ID = "asaki";
 const DEFAULT_SCOPE = "project";
 const DEFAULT_AUTO_MIN_SCORE = 0.7;
-const DEFAULT_COOLDOWN_MS = 10 * 60 * 1000;
-const MEMORY_COOLDOWN_ENABLED = false;
 const AUTO_INJECT_TOP_K = 6;
 const AUTO_EXTRACT_MAX_CHARS = 12_000;
 const AUTO_EXTRACT_MIN_CHARS = 80;
@@ -34,22 +32,9 @@ const KINDS = ["preference", "rule", "fact", "decision", "task_learning", "bug_f
 type MemoryScope = (typeof SCOPES)[number];
 type MemoryKind = (typeof KINDS)[number];
 
-type MemoryCooldown = {
-  until: string;
-  reason: string;
-};
-
 type AutoExtractMessage = {
   role: "user" | "assistant";
   text: string;
-};
-
-type AutoMemoryCandidate = {
-  content: string;
-  kind: MemoryKind;
-  scope: MemoryScope;
-  importance: number;
-  confidence: number;
 };
 
 type MemoryConfigFile = Record<string, unknown>;
@@ -86,10 +71,6 @@ function agentDir() {
   return process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
 }
 
-function cooldownPath() {
-  return join(agentDir(), "extensions", ".asaki-memory-cooldown.json");
-}
-
 function memoryConfigPath() {
   return join(agentDir(), "asaki-memory.json");
 }
@@ -116,44 +97,6 @@ function stringConfig(config: MemoryConfigFile, ...keys: string[]): string {
 function numberConfig(value: unknown, fallback: number): number {
   const number = typeof value === "number" ? value : typeof value === "string" && value ? Number(value) : NaN;
   return Number.isFinite(number) ? number : fallback;
-}
-
-function loadCooldown(): MemoryCooldown | null {
-  if (!MEMORY_COOLDOWN_ENABLED) return null;
-
-  try {
-    const path = cooldownPath();
-    if (!existsSync(path)) return null;
-    const parsed = JSON.parse(readFileSync(path, "utf-8")) as Partial<MemoryCooldown>;
-    if (typeof parsed.until !== "string" || typeof parsed.reason !== "string") return null;
-    if (Date.parse(parsed.until) <= Date.now()) return null;
-    return { until: parsed.until, reason: parsed.reason };
-  } catch {
-    return null;
-  }
-}
-
-function saveCooldown(cooldown: MemoryCooldown): void {
-  if (!MEMORY_COOLDOWN_ENABLED) return;
-
-  const path = cooldownPath();
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(cooldown, null, 2)}\n`, "utf-8");
-}
-
-function parseCooldown(error: unknown): MemoryCooldown | null {
-  if (!MEMORY_COOLDOWN_ENABLED) return null;
-  if (!(error instanceof MemoryApiError)) return null;
-  if (error.status !== 429 && error.status < 500) return null;
-
-  return {
-    until: new Date(Date.now() + DEFAULT_COOLDOWN_MS).toISOString(),
-    reason: error.message,
-  };
-}
-
-function cooldownMessage(cooldown: MemoryCooldown): string {
-  return `Asaki memory skipped: API cooldown active until ${cooldown.until}. Last error: ${cooldown.reason}`;
 }
 
 function normalizeScope(value: unknown): MemoryScope | undefined {
@@ -258,12 +201,12 @@ function formatMemoryLine(item: any, index?: number): string {
   return `${prefix}${item.content || item.memory || item.text || JSON.stringify(item)}${id}${scope}${kind}${status}${importance}${confidence}${updatedAt}`;
 }
 
-async function autoInjectMemory(prompt: string, ctx: unknown, cooldown: MemoryCooldown | null, signal?: AbortSignal): Promise<string | null> {
+async function autoInjectMemory(prompt: string, ctx: unknown, signal?: AbortSignal): Promise<string | null> {
   if (!envFlagEnabled("ASAKI_MEMORY_AUTO_INJECT", true)) return null;
   if (!prompt || prompt.length < 12 || containsSensitiveText(prompt)) return null;
 
   const config = memoryConfig();
-  if (!config.apiKey || cooldown) return null;
+  if (!config.apiKey) return null;
 
   try {
     const data = await memoryRequest(
@@ -279,18 +222,12 @@ async function autoInjectMemory(prompt: string, ctx: unknown, cooldown: MemoryCo
     );
     const results = Array.isArray(data?.results) ? (data.results as Record<string, unknown>[]) : [];
     return formatAutoMemoryContext(results, config.autoMinScore);
-  } catch (error) {
-    const cooldown = parseCooldown(error);
-    if (cooldown) saveCooldown(cooldown);
+  } catch {
     return null;
   }
 }
 
-function memoryPrecheckInstruction(prompt: string, cooldown: MemoryCooldown | null) {
-  if (cooldown) {
-    return `Asaki memory precheck: API cooldown is active until ${cooldown.until}. Do not call asaki_memory_search or asaki_memory_add this turn; proceed without durable memory unless the user explicitly asks to retry memory. Last error: ${cooldown.reason}`;
-  }
-
+function memoryPrecheckInstruction(prompt: string) {
   const likelyNeeded = MEMORY_NEEDED_RE.test(prompt);
   const decision = likelyNeeded
     ? "This turn may need durable memory. Call asaki_memory_search only if the answer or next action depends on remembered preferences, prior decisions, conventions, or past project facts."
@@ -363,148 +300,36 @@ function clipAutoExtractMessages(messages: AutoExtractMessage[]): AutoExtractMes
   return clipped;
 }
 
-function durableLines(messages: AutoExtractMessage[]): string[] {
-  const lines = messages
-    .flatMap((message) => message.text.split("\n"))
-    .map((line) => cleanMemoryText(line.replace(/^[-*•>\d.)\s]+/, "")))
-    .filter((line) => line.length >= 12 && line.length <= 260)
-    .filter((line) => AUTO_EXTRACT_SIGNAL_RE.test(line))
-    .filter((line) => !containsSensitiveText(line));
-
-  return Array.from(new Set(lines)).slice(0, 6);
-}
-
-function classifyAutoCandidate(text: string): { kind: MemoryKind; scope: MemoryScope } {
-  if (/(偏好|习惯|称呼|叫我|我喜欢|我希望|prefer|preference)/i.test(text)) {
-    return { kind: "preference", scope: /项目|repo|仓库|代码|扩展|extension|project/i.test(text) ? "project" : "global" };
-  }
-  if (/(规则|规范|不要|别|always|never|rule)/i.test(text)) return { kind: "rule", scope: "project" };
-  if (/(bug|修复|fixed|fix)/i.test(text)) return { kind: "bug_fix", scope: "project" };
-  if (/(工作流|流程|workflow)/i.test(text)) return { kind: "workflow", scope: "project" };
-  if (/(决定|决策|约定|采用|改成|替换|接入|decision|convention)/i.test(text)) return { kind: "decision", scope: "project" };
-  return { kind: "task_learning", scope: "project" };
-}
-
-function buildFallbackAutoCandidates(messages: AutoExtractMessage[]): AutoMemoryCandidate[] {
-  const lines = durableLines(messages);
-  if (lines.length === 0) return [];
-
-  const content = lines.join("；");
-  const { kind, scope } = classifyAutoCandidate(content);
-  return [
-    {
-      content,
-      kind,
-      scope,
-      importance: kind === "preference" || kind === "rule" || kind === "decision" ? 0.65 : 0.55,
-      confidence: 0.72,
-    },
-  ];
-}
-
-function autoCooldown(error: unknown): MemoryCooldown | null {
-  if (!(error instanceof MemoryApiError)) return null;
-  return {
-    until: new Date(Date.now() + DEFAULT_COOLDOWN_MS).toISOString(),
-    reason: error.message,
-  };
-}
-
-function normalizeWorkerCandidate(candidate: AutoMemoryCandidate, config: ReturnType<typeof memoryConfig>, projectId: string | undefined, sessionId: string | undefined) {
-  const item: Record<string, unknown> = {
-    content: candidate.content,
-    user_id: config.userId,
-    scope: candidate.scope,
-    kind: candidate.kind,
-    importance: candidate.importance,
-    confidence: candidate.confidence,
-    source: "pi:auto_extract",
-  };
-  if (candidate.scope === "project") item.project_id = projectId;
-  if (candidate.scope === "session") item.session_id = sessionId;
-  return item;
-}
-
-async function submitAutoCandidates(candidates: AutoMemoryCandidate[], ctx: unknown, signal?: AbortSignal) {
-  if (candidates.length === 0) return null;
-
-  const config = memoryConfig();
-  const projectId = resolveProjectId(ctx);
-  const sessionId = config.sessionId || undefined;
-  const requestBody: Record<string, unknown> = {
-    user_id: config.userId,
-    source: "pi:auto_extract",
-    candidates: candidates.map((candidate) => normalizeWorkerCandidate(candidate, config, projectId, sessionId)),
-  };
-  if (projectId) requestBody.project_id = projectId;
-  if (sessionId) requestBody.session_id = sessionId;
-
-  return memoryRequest("/v1/memories/candidates", requestBody, signal);
-}
-
 async function runAutoExtract(rawMessages: unknown[], ctx: unknown, signal?: AbortSignal) {
   if (!envFlagEnabled("ASAKI_MEMORY_AUTO_EXTRACT", true)) return;
 
   const config = memoryConfig();
   if (!config.apiKey) return;
 
-  const cooldown = loadCooldown();
-  if (cooldown) return;
-
   const messages = autoExtractMessages(rawMessages);
   if (!shouldAutoExtract(messages)) return;
 
-  const clippedMessages = clipAutoExtractMessages(messages);
-  const projectId = resolveProjectId(ctx);
-  const sessionId = config.sessionId || undefined;
-  const endpoint = process.env.ASAKI_MEMORY_AUTO_EXTRACT_ENDPOINT || "/v1/memories/extract";
-
   try {
-    if (endpoint !== "candidates") {
-      await memoryRequest(
-        endpoint,
-        {
-          user_id: config.userId,
-          project_id: projectId,
-          session_id: sessionId,
-          source: "pi:auto_extract",
-          messages: clippedMessages.map((message) => ({ role: message.role, content: message.text })),
-          policy: {
-            conservative: true,
-            reject_noise: true,
-            reject_sensitive: true,
-            keep: ["preference", "rule", "decision", "task_learning", "bug_fix", "workflow"],
-            drop: ["temporary command", "ordinary query", "pure tool output", "secret", "api key", "token", "password"],
-          },
-        },
-        signal,
-      );
-      return;
-    }
-
-    await submitAutoCandidates(buildFallbackAutoCandidates(clippedMessages), ctx, signal);
-  } catch (error) {
-    if (error instanceof MemoryApiError && (error.status === 404 || error.status === 405) && endpoint !== "candidates") {
-      try {
-        await submitAutoCandidates(buildFallbackAutoCandidates(clippedMessages), ctx, signal);
-        return;
-      } catch (fallbackError) {
-        const cooldown = autoCooldown(fallbackError);
-        if (cooldown) saveCooldown(cooldown);
-        return;
-      }
-    }
-
-    const cooldown = autoCooldown(error);
-    if (cooldown) saveCooldown(cooldown);
+    await memoryRequest(
+      "/v1/memories/extract",
+      {
+        user_id: config.userId,
+        project_id: resolveProjectId(ctx),
+        session_id: config.sessionId || undefined,
+        source: "pi:auto_extract",
+        messages: clipAutoExtractMessages(messages).map((message) => ({ role: message.role, content: message.text })),
+      },
+      signal,
+    );
+  } catch {
+    // best-effort background extraction
   }
 }
 
 export default function (pi: ExtensionAPI) {
   pi.on("before_agent_start", async (event, ctx) => {
-    const cooldown = loadCooldown();
-    const systemPrompt = `${event.systemPrompt}\n\n${memoryPrecheckInstruction(event.prompt, cooldown)}`;
-    const memoryContext = await autoInjectMemory(event.prompt, ctx, cooldown, ctx.signal);
+    const systemPrompt = `${event.systemPrompt}\n\n${memoryPrecheckInstruction(event.prompt)}`;
+    const memoryContext = await autoInjectMemory(event.prompt, ctx, ctx.signal);
     if (!memoryContext) return { systemPrompt };
 
     return {
@@ -592,15 +417,8 @@ Safety:
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const config = memoryConfig();
       const topK = params.top_k ?? 10;
-      const cooldown = loadCooldown();
       const projectId = resolveProjectId(ctx, params.project_id);
       const sessionId = params.session_id || config.sessionId || undefined;
-      if (cooldown) {
-        return {
-          content: [{ type: "text", text: cooldownMessage(cooldown) }],
-          details: { query: params.query, skipped: true, cooldown_until: cooldown.until, user_id: config.userId, project_id: projectId },
-        };
-      }
 
       onUpdate?.({
         content: [{ type: "text", text: `Searching Asaki memory for: "${params.query}"` }],
@@ -639,14 +457,6 @@ Safety:
           details: { query: params.query, count: results.length, user_id: config.userId, project_id: projectId, scope: params.scope },
         };
       } catch (error) {
-        const cooldown = parseCooldown(error);
-        if (cooldown) {
-          saveCooldown(cooldown);
-          return {
-            content: [{ type: "text", text: cooldownMessage(cooldown) }],
-            details: { query: params.query, skipped: true, cooldown_until: cooldown.until, user_id: config.userId, project_id: projectId },
-          };
-        }
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`Asaki memory search failed: ${message}`);
       }
@@ -704,16 +514,9 @@ Safety:
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const config = memoryConfig();
-      const cooldown = loadCooldown();
       const scope = params.scope || config.defaultScope;
       const projectId = resolveProjectId(ctx, params.project_id);
       const sessionId = params.session_id || config.sessionId || undefined;
-      if (cooldown) {
-        return {
-          content: [{ type: "text", text: cooldownMessage(cooldown) }],
-          details: { skipped: true, cooldown_until: cooldown.until, user_id: config.userId, project_id: projectId, scope },
-        };
-      }
 
       onUpdate?.({
         content: [{ type: "text", text: "Adding memory to Asaki memory..." }],
@@ -753,14 +556,6 @@ Safety:
           details: { action, memory_id: memoryId, user_id: config.userId, project_id: projectId, scope },
         };
       } catch (error) {
-        const cooldown = parseCooldown(error);
-        if (cooldown) {
-          saveCooldown(cooldown);
-          return {
-            content: [{ type: "text", text: cooldownMessage(cooldown) }],
-            details: { skipped: true, cooldown_until: cooldown.until, user_id: config.userId, project_id: projectId, scope },
-          };
-        }
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`Asaki memory add failed: ${message}`);
       }
