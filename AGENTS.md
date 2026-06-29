@@ -95,4 +95,4 @@ Before publishing:
 - `wrangler.jsonc` is ignored; only `wrangler.example.jsonc` is tracked.
 - README examples use placeholders, not production credentials or personal endpoints.
 - License exists.
-- CI workflow exists.
+- If CI is added, ensure the publishing token has GitHub `workflow` scope before pushing workflow files.
