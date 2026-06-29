@@ -2,7 +2,8 @@ import { Hono, type Context } from 'hono';
 import type { Env } from './types';
 import { processMemoryCandidates } from './services/candidates';
 import { createMemory, deleteMemory, getMemory, listMemories, searchMemories, updateMemory } from './services/memories';
-import { validateCreateMemory, validateListMemories, validateMemoryIdInput, validateProcessCandidates, validateSearchMemories, validateUpdateMemory } from './utils/validation';
+import { createMemoryReviews, listMemoryReviews, resolveMemoryReview } from './services/reviews';
+import { validateCreateMemory, validateCreateMemoryReviews, validateListMemories, validateListMemoryReviews, validateMemoryIdInput, validateProcessCandidates, validateResolveMemoryReview, validateSearchMemories, validateUpdateMemory } from './utils/validation';
 
 type Bindings = Env;
 
@@ -76,6 +77,44 @@ app.post('/v1/memories/list', async (c) => {
 
   const memories = await listMemories(c.env, validation.data);
   return c.json({ memories });
+});
+
+app.post('/v1/memories/reviews', async (c) => {
+  const body = await readJson(c);
+  if (!body.ok) return body.response;
+
+  const validation = validateCreateMemoryReviews(body.body);
+  if (!validation.ok) return c.json({ error: validation.error }, 400);
+
+  const reviews = await createMemoryReviews(c.env, validation.data);
+  return c.json({ reviews }, 201);
+});
+
+app.post('/v1/memories/reviews/list', async (c) => {
+  const body = await readJson(c);
+  if (!body.ok) return body.response;
+
+  const validation = validateListMemoryReviews(body.body);
+  if (!validation.ok) return c.json({ error: validation.error }, 400);
+
+  const reviews = await listMemoryReviews(c.env, validation.data);
+  return c.json({ reviews });
+});
+
+app.post('/v1/memories/reviews/:id/resolve', async (c) => {
+  const body = await readJson(c);
+  if (!body.ok) return body.response;
+
+  const validation = validateResolveMemoryReview(body.body);
+  if (!validation.ok) return c.json({ error: validation.error }, 400);
+
+  try {
+    const result = await resolveMemoryReview(c.env, c.req.param('id'), validation.data);
+    return c.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return c.json({ error: message }, message.includes('not found') ? 404 : 400);
+  }
 });
 
 app.get('/v1/memories/:id', async (c) => {

@@ -23,6 +23,9 @@ Implemented:
 - `GET /v1/memories/:id`
 - `PATCH /v1/memories/:id`
 - `DELETE /v1/memories/:id`
+- `POST /v1/memories/reviews`
+- `POST /v1/memories/reviews/list`
+- `POST /v1/memories/reviews/:id/resolve`
 - D1 schema and migrations
 - D1 + Vectorize write path
 - Vectorize + D1 lexical hybrid search
@@ -31,7 +34,6 @@ Implemented:
 - Pi and MCP search/add/list/update/delete integrations
 
 Deferred:
-- Candidate review queue and review API
 - Review UI
 - Cron maintenance
 - Table-driven API keys
@@ -40,11 +42,14 @@ Deferred:
 
 - `README.md`: public project documentation.
 - `wrangler.example.jsonc`: public Cloudflare binding template.
-- `migrations/0001_init.sql`: D1 schema.
+- `migrations/0001_init.sql`: base D1 schema.
+- `migrations/0002_memory_reviews.sql`: memory review queue schema.
 - `src/index.ts`: Hono app, routes, auth middleware.
 - `src/types.ts`: shared types.
 - `src/services/memories.ts`: memory creation and search.
 - `src/services/candidates.ts`: candidate deduplication and merge decisions.
+- `src/services/candidateDecision.ts`: pure candidate decision heuristics and eval target.
+- `src/services/reviews.ts`: memory review queue creation, listing, and resolution.
 - `src/services/memoryEvents.ts`: event logging.
 - `src/ai/embeddings.ts`: Workers AI embedding helpers.
 - `src/utils/validation.ts`: request validation.

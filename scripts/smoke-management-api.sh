@@ -68,4 +68,19 @@ DELETE_RESPONSE=$(curl_api -X DELETE "$BASE_URL/v1/memories/${MEMORY_ID}" \
   -d "{\"user_id\":\"${USER_ID}\"}")
 printf '%s' "$DELETE_RESPONSE" | assert_json 'j.memory.id === id && j.memory.status === "deleted"'
 
-echo "management API smoke passed: ${MEMORY_ID}"
+REVIEW_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/reviews" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_id\":\"${USER_ID}\",\"project_id\":\"${PROJECT_ID}\",\"source\":\"smoke-review\",\"candidates\":[{\"content\":\"review candidate ${CONTENT}\",\"scope\":\"project\",\"kind\":\"task_learning\",\"importance\":0.1,\"confidence\":0.9}]}")
+REVIEW_ID=$(printf '%s' "$REVIEW_RESPONSE" | json_value 'reviews.0.id')
+
+REVIEW_LIST_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/reviews/list" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_id\":\"${USER_ID}\",\"project_id\":\"${PROJECT_ID}\",\"status\":\"pending\"}")
+printf '%s' "$REVIEW_LIST_RESPONSE" | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); if (!j.reviews?.some((review) => review.id === process.argv[1] && review.status === "pending")) process.exit(1); });' "$REVIEW_ID"
+
+RESOLVE_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/reviews/${REVIEW_ID}/resolve" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_id\":\"${USER_ID}\",\"action\":\"ignore\",\"reason\":\"smoke test\"}")
+printf '%s' "$RESOLVE_RESPONSE" | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); if (j.review?.status !== "resolved" || j.review?.resolved_action !== "ignore") process.exit(1); });'
+
+echo "management API smoke passed: ${MEMORY_ID}; review smoke passed: ${REVIEW_ID}"
