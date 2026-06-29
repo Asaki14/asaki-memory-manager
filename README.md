@@ -145,6 +145,54 @@ curl -X POST http://127.0.0.1:8787/v1/memories/search \
 
 Search defaults to `global + current project + current session` when `project_id` / `session_id` are provided. Explicit `scope=project` requires `project_id`; explicit `scope=session` requires `session_id`.
 
+### List memories
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/memories/list \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -d '{
+    "user_id": "alice",
+    "project_id": "demo-app",
+    "status": "active",
+    "limit": 50,
+    "offset": 0
+  }'
+```
+
+Omit `scope` to list `global + current project + current session`. Use `status=all` to include archived and deleted memories.
+
+### Get memory
+
+```bash
+curl "http://127.0.0.1:8787/v1/memories/<memory-id>?user_id=alice" \
+  -H "Authorization: Bearer $ADMIN_API_KEY"
+```
+
+### Update memory
+
+```bash
+curl -X PATCH http://127.0.0.1:8787/v1/memories/<memory-id> \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -d '{
+    "user_id": "alice",
+    "content": "Use Cloudflare Workers, D1, Vectorize, and Workers AI for this project.",
+    "importance": 0.85
+  }'
+```
+
+### Delete memory
+
+```bash
+curl -X DELETE http://127.0.0.1:8787/v1/memories/<memory-id> \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -d '{"user_id":"alice"}'
+```
+
+Delete is soft delete: the row is marked `status=deleted`.
+
 ### Process candidates
 
 ```bash
@@ -271,18 +319,18 @@ preference | rule | fact | decision | task_learning | bug_fix | workflow
 
 ```bash
 npm run typecheck
+npm run smoke:management
 npm run db:migrate:local
 npm run dev
 ```
 
 ## Roadmap
 
-- Table-driven API keys.
-- Memory list / update / delete / review APIs.
+- Candidate review queue and review API.
 - Pending embedding retry cron.
 - Expiring session memory cleanup.
-- Optional MCP server for cross-client integrations.
 - Import/export and lightweight management UI.
+- Table-driven API keys.
 
 ## License
 
