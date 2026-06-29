@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check ignored private files are not tracked
+        run: |
+          test -z "$(git ls-files wrangler.jsonc PLAN.md .dev.vars .env 2>/dev/null)"
+      - name: Scan for local/private deployment markers
+        run: |
+          ! grep -RInE 'wangyao|zz-b236|/Users/|636eb468|gho_|ghp_|github_pat_|sk-[A-Za-z0-9]|Bearer [A-Za-z0-9._~+/=-]{16,}' \
+            --exclude-dir=.git \
+            --exclude-dir=node_modules \
+            --exclude=package-lock.json \
+            .
