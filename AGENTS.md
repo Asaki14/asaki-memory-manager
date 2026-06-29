@@ -84,6 +84,8 @@ npm run deploy
 - Search should keep hybrid Vectorize + D1 lexical fallback behavior.
 - Extraction requires `MEMORY_LLM_MODEL`; do not add heuristic extraction fallback.
 - Candidate processing should run deterministic duplicate checks before LLM decisions.
+- Pi auto extract must not send tool output; only user/assistant messages are eligible.
+- Pi auto inject defaults to `ASAKI_MEMORY_AUTO_MIN_SCORE=0.70`; keep low-score memories out of injected context.
 - Keep changes small and consistent with existing style.
 - Run `npm run typecheck` after TypeScript edits.
 
