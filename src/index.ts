@@ -1,9 +1,8 @@
 import { Hono, type Context } from 'hono';
 import type { Env } from './types';
 import { processMemoryCandidates } from './services/candidates';
-import { extractMemories } from './services/extract';
 import { createMemory, deleteMemory, getMemory, listMemories, searchMemories, updateMemory } from './services/memories';
-import { validateCreateMemory, validateExtractMemories, validateListMemories, validateMemoryIdInput, validateProcessCandidates, validateSearchMemories, validateUpdateMemory } from './utils/validation';
+import { validateCreateMemory, validateListMemories, validateMemoryIdInput, validateProcessCandidates, validateSearchMemories, validateUpdateMemory } from './utils/validation';
 
 type Bindings = Env;
 
@@ -66,21 +65,6 @@ app.post('/v1/memories/candidates', async (c) => {
 
   const decisions = await processMemoryCandidates(c.env, validation.data);
   return c.json({ decisions });
-});
-
-app.post('/v1/memories/extract', async (c) => {
-  const body = await readJson(c);
-  if (!body.ok) return body.response;
-
-  const validation = validateExtractMemories(body.body);
-  if (!validation.ok) return c.json({ error: validation.error }, 400);
-  if (!c.env.MEMORY_LLM_MODEL) {
-    return c.json({ error: 'MEMORY_LLM_MODEL is not configured. Set a Workers AI chat model before using memory extraction.' }, 501);
-  }
-  if (!c.env.AI) return c.json({ error: 'Workers AI binding is not available.' }, 503);
-
-  const result = await extractMemories(c.env, validation.data);
-  return c.json(result);
 });
 
 app.post('/v1/memories/list', async (c) => {

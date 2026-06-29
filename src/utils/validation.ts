@@ -1,4 +1,4 @@
-import type { CreateMemoryInput, ExtractMemoriesInput, ListMemoriesInput, MemoryIdInput, MemoryKind, MemoryScope, MemoryStatus, SearchMemoriesInput, UpdateMemoryInput } from '../types';
+import type { CreateMemoryInput, ListMemoriesInput, MemoryIdInput, MemoryKind, MemoryScope, MemoryStatus, SearchMemoriesInput, UpdateMemoryInput } from '../types';
 
 const scopes = new Set<MemoryScope>(['global', 'project', 'session']);
 const kinds = new Set<MemoryKind>(['preference', 'rule', 'fact', 'decision', 'task_learning', 'bug_fix', 'workflow']);
@@ -185,35 +185,4 @@ export function validateProcessCandidates(value: unknown): { ok: true; data: Arr
     data.push(validation.data);
   }
   return { ok: true, data };
-}
-
-export function validateExtractMemories(value: unknown): { ok: true; data: ExtractMemoriesInput } | { ok: false; error: string } {
-  if (!value || typeof value !== 'object') return { ok: false, error: 'Body must be a JSON object.' };
-  const input = value as ExtractMemoriesInput;
-  if (!Array.isArray(input.messages) || input.messages.length === 0) return { ok: false, error: 'messages is required.' };
-  if (input.messages.length > 100) return { ok: false, error: 'messages must contain <= 100 items.' };
-  if (typeof input.user_id !== 'string' || input.user_id.trim().length === 0) return { ok: false, error: 'user_id is required.' };
-  if (input.project_id != null && (typeof input.project_id !== 'string' || input.project_id.trim().length === 0)) return { ok: false, error: 'project_id must be a non-empty string when provided.' };
-  if (input.session_id != null && (typeof input.session_id !== 'string' || input.session_id.trim().length === 0)) return { ok: false, error: 'session_id must be a non-empty string when provided.' };
-  if (input.source != null && (typeof input.source !== 'string' || input.source.trim().length === 0)) return { ok: false, error: 'source must be a non-empty string when provided.' };
-
-  const messages = [];
-  for (const message of input.messages) {
-    if (!message || typeof message !== 'object') return { ok: false, error: 'each message must be an object.' };
-    if (!['system', 'user', 'assistant', 'tool'].includes(message.role)) return { ok: false, error: 'message.role is invalid.' };
-    if (typeof message.content !== 'string' || message.content.trim().length === 0) return { ok: false, error: 'message.content is required.' };
-    if (message.content.length > 12000) return { ok: false, error: 'message.content must be <= 12000 characters.' };
-    messages.push({ role: message.role, content: message.content.trim() });
-  }
-
-  return {
-    ok: true,
-    data: {
-      messages,
-      user_id: input.user_id.trim(),
-      project_id: input.project_id?.trim() ?? null,
-      session_id: input.session_id?.trim() ?? null,
-      source: input.source?.trim() ?? 'extract',
-    },
-  };
 }

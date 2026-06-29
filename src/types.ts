@@ -64,17 +64,6 @@ export interface MemoryIdInput {
   user_id: string;
 }
 
-export interface ExtractMemoriesInput {
-  messages: Array<{
-    role: 'system' | 'user' | 'assistant' | 'tool';
-    content: string;
-  }>;
-  user_id: string;
-  project_id?: string | null;
-  session_id?: string | null;
-  source?: string | null;
-}
-
 export interface MemoryRow {
   id: string;
   user_id: string;
