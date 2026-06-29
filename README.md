@@ -281,6 +281,9 @@ The extension exposes:
 - `asaki_memory_list`
 - `asaki_memory_update`
 - `asaki_memory_delete`
+- `asaki_memory_review_create`
+- `asaki_memory_review_list`
+- `asaki_memory_review_resolve`
 
 ## MCP integration
 

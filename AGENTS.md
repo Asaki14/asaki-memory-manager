@@ -31,7 +31,7 @@ Implemented:
 - Vectorize + D1 lexical hybrid search
 - Candidate add / merge / ignore pipeline
 - Single `ADMIN_API_KEY` auth
-- Pi and MCP search/add/list/update/delete integrations
+- Pi and MCP search/add/list/update/delete/review integrations
 
 Deferred:
 - Review UI

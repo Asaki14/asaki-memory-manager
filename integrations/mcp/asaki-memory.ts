@@ -1,7 +1,7 @@
 /**
  * Asaki Memory MCP Server
  *
- * Exposes asaki_memory_search / add / list / update / delete via MCP stdio.
+ * Exposes Asaki memory search/add/list/update/delete and review queue tools via MCP stdio.
  *
  * Config precedence:
  *   env vars > ASAKI_MEMORY_CONFIG_FILE > ~/.asaki-memory.json
@@ -137,6 +137,20 @@ function formatLine(item: Record<string, unknown>, index?: number): string {
   return `${prefix}${typeof content === "string" ? content : JSON.stringify(item)}${id}${scope}${kind}${status}${importance}${updatedAt}`;
 }
 
+function formatReviewLine(item: Record<string, unknown>, index?: number): string {
+  const prefix = index == null ? "" : `${index + 1}. `;
+  const id = item.id ? ` id=${item.id}` : "";
+  const status = item.status ? ` status=${item.status}` : "";
+  const action = item.resolved_action ? ` action=${item.resolved_action}` : "";
+  const memoryId = item.memory_id ? ` memory_id=${item.memory_id}` : "";
+  const updatedAt = item.updated_at ? ` updated_at=${item.updated_at}` : "";
+  const candidate = item.candidate && typeof item.candidate === "object" ? (item.candidate as Record<string, unknown>) : {};
+  const scope = candidate.scope ? ` scope=${candidate.scope}` : "";
+  const kind = candidate.kind ? ` kind=${candidate.kind}` : "";
+  const content = candidate.content;
+  return `${prefix}${typeof content === "string" ? content : JSON.stringify(candidate || item)}${id}${status}${action}${memoryId}${scope}${kind}${updatedAt}`;
+}
+
 const server = new McpServer({ name: "asaki-memory", version: "0.1.0" });
 
 server.tool(
@@ -239,6 +253,92 @@ server.tool(
     const memories = Array.isArray(data.memories) ? (data.memories as Record<string, unknown>[]) : [];
     if (memories.length === 0) return { content: [{ type: "text" as const, text: "No Asaki memories found." }] };
     return { content: [{ type: "text" as const, text: memories.map((item, index) => formatLine(item, index)).join("\n") }] };
+  },
+);
+
+
+server.tool(
+  "asaki_memory_review_create",
+  "Create a pending review item for a high-risk or uncertain memory candidate instead of directly storing it.",
+  {
+    text: z.string(),
+    type: z.string().optional(),
+    scope: z.enum(["global", "project", "session"]).optional(),
+    project_id: z.string().optional(),
+    session_id: z.string().optional(),
+    importance: z.number().min(0).max(1).optional(),
+    confidence: z.number().min(0).max(1).optional(),
+  },
+  async ({ text, type, scope, project_id, session_id, importance, confidence }) => {
+    const cfg = memoryConfig();
+    const resolvedScope = scope || cfg.defaultScope;
+    const projectId = resolveProjectId(project_id);
+    const sessionId = session_id || cfg.sessionId || undefined;
+    const candidate: Record<string, unknown> = {
+      content: text,
+      user_id: cfg.userId,
+      scope: resolvedScope,
+      kind: normalizeKind(type),
+      importance: importance ?? 0.6,
+      confidence: confidence ?? 0.8,
+      source: `${SOURCE_TAG}:review`,
+    };
+    if (resolvedScope === "project") candidate.project_id = projectId;
+    if (resolvedScope === "session") candidate.session_id = sessionId;
+
+    const body: Record<string, unknown> = { user_id: cfg.userId, source: `${SOURCE_TAG}:review`, candidates: [candidate] };
+    if (resolvedScope === "project") body.project_id = projectId;
+    if (resolvedScope === "session") body.session_id = sessionId;
+    const data = await apiRequest("/v1/memories/reviews", body);
+    const review = Array.isArray(data.reviews) ? (data.reviews[0] as Record<string, unknown> | undefined) : undefined;
+    return { content: [{ type: "text" as const, text: review ? `Created review: ${formatReviewLine(review)}` : "Created Asaki memory review." }] };
+  },
+);
+
+server.tool(
+  "asaki_memory_review_list",
+  "List pending or resolved Asaki memory review items. Use during explicit memory audit.",
+  {
+    status: z.string().optional(),
+    project_id: z.string().optional(),
+    session_id: z.string().optional(),
+    source: z.string().optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).optional(),
+  },
+  async ({ status, project_id, session_id, source, limit, offset }) => {
+    const cfg = memoryConfig();
+    const body: Record<string, unknown> = { user_id: cfg.userId, project_id: resolveProjectId(project_id) };
+    if (session_id || cfg.sessionId) body.session_id = session_id || cfg.sessionId;
+    if (status) body.status = status;
+    if (source) body.source = source;
+    if (limit != null) body.limit = limit;
+    if (offset != null) body.offset = offset;
+    const data = await apiRequest("/v1/memories/reviews/list", body);
+    const reviews = Array.isArray(data.reviews) ? (data.reviews as Record<string, unknown>[]) : [];
+    if (reviews.length === 0) return { content: [{ type: "text" as const, text: "No Asaki memory reviews found." }] };
+    return { content: [{ type: "text" as const, text: reviews.map((item, index) => formatReviewLine(item, index)).join("\n") }] };
+  },
+);
+
+server.tool(
+  "asaki_memory_review_resolve",
+  "Resolve a pending Asaki memory review as add, merge, or ignore. Only call after explicit user approval.",
+  {
+    id: z.string(),
+    action: z.enum(["add", "merge", "ignore"]),
+    memory_id: z.string().optional(),
+    reason: z.string().optional(),
+  },
+  async ({ id, action, memory_id, reason }) => {
+    const cfg = memoryConfig();
+    const body: Record<string, unknown> = { user_id: cfg.userId, action };
+    if (memory_id) body.memory_id = memory_id;
+    if (reason) body.reason = reason;
+    const data = await apiRequest(`/v1/memories/reviews/${id}/resolve`, body);
+    const review = data.review as Record<string, unknown> | undefined;
+    const memory = data.memory as Record<string, unknown> | undefined;
+    return { content: [{ type: "text" as const, text: `${review ? `Resolved review: ${formatReviewLine(review)}` : `Review ${id} resolved.`}${memory ? `\nMemory: ${formatLine(memory)}` : ""}` }] };
   },
 );
 

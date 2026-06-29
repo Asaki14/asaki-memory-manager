@@ -190,6 +190,20 @@ function formatMemoryLine(item: any, index?: number): string {
   return `${prefix}${item.content || item.memory || item.text || JSON.stringify(item)}${id}${scope}${kind}${status}${importance}${confidence}${updatedAt}`;
 }
 
+function formatReviewLine(item: any, index?: number): string {
+  const prefix = index == null ? "" : `${index + 1}. `;
+  const id = item.id ? ` id=${item.id}` : "";
+  const status = item.status ? ` status=${item.status}` : "";
+  const action = item.resolved_action ? ` action=${item.resolved_action}` : "";
+  const memoryId = item.memory_id ? ` memory_id=${item.memory_id}` : "";
+  const updatedAt = item.updated_at ? ` updated_at=${item.updated_at}` : "";
+  const candidate = item.candidate || {};
+  const scope = candidate.scope ? ` scope=${candidate.scope}` : "";
+  const kind = candidate.kind ? ` kind=${candidate.kind}` : "";
+  const content = candidate.content || JSON.stringify(candidate);
+  return `${prefix}${content}${id}${status}${action}${memoryId}${scope}${kind}${updatedAt}`;
+}
+
 async function autoInjectMemory(prompt: string, ctx: unknown, signal?: AbortSignal): Promise<string | null> {
   if (!envFlagEnabled("ASAKI_MEMORY_AUTO_INJECT", true)) return null;
   if (!prompt || prompt.length < 12 || containsSensitiveText(prompt)) return null;
@@ -270,12 +284,14 @@ Scope:
 - current project memories
 ${args.trim() ? `User focus: ${args.trim()}\n` : ""}
 Workflow:
-1. Use asaki_memory_list to list global memories and current project memories.
-2. Analyze duplicates, stale items, noisy items, wrong scope/kind, low-value items, and missing durable memories.
-3. Propose DELETE/UPDATE/MERGE/ADD/KEEP changes with reasons and affected memory ids.
-4. Use questionnaire before any write. Offer options like apply all high-confidence changes, approve selected changes, only deletes, only updates/additions, or skip.
-5. Only execute approved changes using asaki_memory_update, asaki_memory_delete, and asaki_memory_add.
-6. Report final changes and remaining recommendations.
+1. Use asaki_memory_review_list to inspect pending reviews.
+2. Use asaki_memory_list to list global memories and current project memories.
+3. Analyze duplicates, stale items, noisy items, wrong scope/kind, low-value items, pending reviews, and missing durable memories.
+4. Propose REVIEW_RESOLVE/DELETE/UPDATE/MERGE/ADD/KEEP changes with reasons and affected ids.
+5. Use questionnaire before any write. Offer options like apply all high-confidence changes, resolve selected reviews, only deletes, only updates/additions, or skip.
+6. Execute approved changes using asaki_memory_review_resolve, asaki_memory_update, asaki_memory_delete, and asaki_memory_add.
+7. Use asaki_memory_review_create instead of asaki_memory_add for high-risk uncertain memories.
+8. Report final changes and remaining recommendations.
 
 Safety:
 - Never expose or store secrets.
@@ -531,6 +547,134 @@ Safety:
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`Asaki memory list failed: ${message}`);
+      }
+    },
+  });
+
+
+  pi.registerTool({
+    name: "asaki_memory_review_create",
+    label: "Asaki Memory Review Create",
+    description: "Create a pending review item for a memory candidate instead of directly storing it.",
+    promptSnippet: "Create a review item for high-risk or uncertain memory candidates that need approval.",
+    promptGuidelines: [
+      "Use asaki_memory_review_create instead of asaki_memory_add for high-risk memories, global rules/preferences, low confidence candidates, or uncertain merges.",
+      "Do not store secrets, raw credentials, private tokens, or sensitive transient data.",
+    ],
+    parameters: Type.Object({
+      text: Type.String({ description: "Concise, self-contained memory candidate text." }),
+      type: Type.Optional(Type.String({ description: "Memory kind: preference, rule, fact, decision, task_learning, bug_fix, workflow." })),
+      scope: Type.Optional(
+        Type.Union([Type.Literal("global"), Type.Literal("project"), Type.Literal("session")], {
+          description: "Memory scope. Defaults to project.",
+        }),
+      ),
+      project_id: Type.Optional(Type.String({ description: "Optional project id override." })),
+      session_id: Type.Optional(Type.String({ description: "Optional session id override." })),
+      importance: Type.Optional(Type.Number({ description: "Importance score between 0 and 1. Defaults to 0.6.", minimum: 0, maximum: 1 })),
+      confidence: Type.Optional(Type.Number({ description: "Confidence score between 0 and 1. Defaults to 0.8.", minimum: 0, maximum: 1 })),
+    }),
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const config = memoryConfig();
+      const scope = params.scope || config.defaultScope;
+      const projectId = resolveProjectId(ctx, params.project_id);
+      const sessionId = params.session_id || config.sessionId || undefined;
+      const candidate: Record<string, unknown> = {
+        content: params.text,
+        user_id: config.userId,
+        scope,
+        kind: normalizeKind(params.type),
+        importance: params.importance ?? 0.6,
+        confidence: params.confidence ?? 0.8,
+        source: "pi:review",
+      };
+      if (scope === "project") candidate.project_id = projectId;
+      if (scope === "session") candidate.session_id = sessionId;
+
+      try {
+        const body: Record<string, unknown> = { user_id: config.userId, source: "pi:review", candidates: [candidate] };
+        if (scope === "project") body.project_id = projectId;
+        if (scope === "session") body.session_id = sessionId;
+        const data = await memoryRequest("/v1/memories/reviews", body, signal);
+        const review = Array.isArray(data?.reviews) ? data.reviews[0] : null;
+        return {
+          content: [{ type: "text", text: review ? `Created review: ${formatReviewLine(review)}` : "Created Asaki memory review." }],
+          details: { review_id: review?.id, user_id: config.userId, project_id: projectId, scope },
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Asaki memory review create failed: ${message}`);
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "asaki_memory_review_list",
+    label: "Asaki Memory Review List",
+    description: "List pending or resolved Asaki memory review items.",
+    promptSnippet: "List pending Asaki memory reviews during memory audit or review workflow.",
+    promptGuidelines: ["Use asaki_memory_review_list during /memory audits before modifying memories."],
+    parameters: Type.Object({
+      status: Type.Optional(Type.String({ description: "Filter by status: pending (default), resolved, all." })),
+      project_id: Type.Optional(Type.String({ description: "Project id override." })),
+      session_id: Type.Optional(Type.String({ description: "Session id override." })),
+      source: Type.Optional(Type.String({ description: "Source filter." })),
+      limit: Type.Optional(Type.Integer({ description: "Max reviews to return (1-100, default 50).", minimum: 1, maximum: 100 })),
+      offset: Type.Optional(Type.Integer({ description: "Pagination offset (default 0).", minimum: 0 })),
+    }),
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const config = memoryConfig();
+      const projectId = resolveProjectId(ctx, params.project_id);
+      const sessionId = params.session_id || config.sessionId || undefined;
+      try {
+        const body: Record<string, unknown> = { user_id: config.userId, project_id: projectId };
+        if (sessionId) body.session_id = sessionId;
+        if (params.status) body.status = params.status;
+        if (params.source) body.source = params.source;
+        if (params.limit != null) body.limit = params.limit;
+        if (params.offset != null) body.offset = params.offset;
+        const data = await memoryRequest("/v1/memories/reviews/list", body, signal);
+        const reviews = Array.isArray(data?.reviews) ? data.reviews : [];
+        if (reviews.length === 0) return { content: [{ type: "text", text: "No Asaki memory reviews found." }], details: { count: 0 } };
+        return { content: [{ type: "text", text: reviews.map((item: any, index: number) => formatReviewLine(item, index)).join("\n") }], details: { count: reviews.length } };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Asaki memory review list failed: ${message}`);
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "asaki_memory_review_resolve",
+    label: "Asaki Memory Review Resolve",
+    description: "Resolve a pending Asaki memory review as add, merge, or ignore.",
+    promptSnippet: "Resolve a specific Asaki memory review after explicit user approval.",
+    promptGuidelines: [
+      "Only call asaki_memory_review_resolve after the user has explicitly approved the action.",
+      "Use action=merge only with a target memory_id.",
+    ],
+    parameters: Type.Object({
+      id: Type.String({ description: "Review id to resolve." }),
+      action: Type.Union([Type.Literal("add"), Type.Literal("merge"), Type.Literal("ignore")], { description: "Resolution action." }),
+      memory_id: Type.Optional(Type.String({ description: "Target memory id when action=merge." })),
+      reason: Type.Optional(Type.String({ description: "Short resolution reason." })),
+    }),
+    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+      const config = memoryConfig();
+      try {
+        const body: Record<string, unknown> = { user_id: config.userId, action: params.action };
+        if (params.memory_id) body.memory_id = params.memory_id;
+        if (params.reason) body.reason = params.reason;
+        const data = await memoryRequest(`/v1/memories/reviews/${params.id}/resolve`, body, signal);
+        const review = data?.review;
+        const memory = data?.memory;
+        return {
+          content: [{ type: "text", text: `${review ? `Resolved review: ${formatReviewLine(review)}` : `Review ${params.id} resolved.`}${memory ? `\nMemory: ${formatMemoryLine(memory)}` : ""}` }],
+          details: { id: params.id, action: params.action, memory_id: memory?.id || params.memory_id },
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Asaki memory review resolve failed: ${message}`);
       }
     },
   });
