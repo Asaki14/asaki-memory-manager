@@ -8,7 +8,7 @@ Stack:
 - Cloudflare Workers + TypeScript + Hono
 - D1 as the source of truth
 - Vectorize as the semantic index
-- Workers AI for embeddings and extraction
+- Workers AI for embeddings and candidate decisions
 - REST API first
 - Optional Pi integration in `integrations/pi/asaki-memory.ts`
 
@@ -19,7 +19,6 @@ Implemented:
 - `POST /v1/memories`
 - `POST /v1/memories/search`
 - `POST /v1/memories/candidates`
-- `POST /v1/memories/extract`
 - `POST /v1/memories/list`
 - `GET /v1/memories/:id`
 - `PATCH /v1/memories/:id`
@@ -28,7 +27,6 @@ Implemented:
 - D1 + Vectorize write path
 - Vectorize + D1 lexical hybrid search
 - Candidate add / merge / ignore pipeline
-- Workers AI extraction
 - Single `ADMIN_API_KEY` auth
 - Pi and MCP search/add/list/update/delete integrations
 
@@ -47,7 +45,6 @@ Deferred:
 - `src/types.ts`: shared types.
 - `src/services/memories.ts`: memory creation and search.
 - `src/services/candidates.ts`: candidate deduplication and merge decisions.
-- `src/services/extract.ts`: LLM extraction.
 - `src/services/memoryEvents.ts`: event logging.
 - `src/ai/embeddings.ts`: Workers AI embedding helpers.
 - `src/utils/validation.ts`: request validation.
@@ -87,9 +84,9 @@ npm run deploy
 - D1 is the source of truth; Vectorize is a recoverable index.
 - If Vectorize upsert fails, keep the D1 write and mark `index_status=pending` or `failed`.
 - Search should keep hybrid Vectorize + D1 lexical fallback behavior.
-- Extraction requires `MEMORY_LLM_MODEL`; do not add heuristic extraction fallback.
+- The active conversation agent extracts durable memory and calls `asaki_memory_add`; Cloudflare organizes, dedupes, merges, indexes, and stores candidates.
+- Do not add a server-side conversation extraction endpoint; the Worker should not receive full conversation transcripts for extraction.
 - Candidate processing should run deterministic duplicate checks before LLM decisions.
-- Pi auto extract must not send tool output; only user/assistant messages are eligible.
 - Pi auto inject defaults to `ASAKI_MEMORY_AUTO_MIN_SCORE=0.70`; keep low-score memories out of injected context.
 - Keep changes small and consistent with existing style.
 - Run `npm run typecheck` after TypeScript edits.

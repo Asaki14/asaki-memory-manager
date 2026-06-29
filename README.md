@@ -4,7 +4,7 @@
 
 **A Cloudflare-native memory layer for AI agents.**
 
-Self-host long-term memory with Workers, D1, Vectorize, Workers AI, REST APIs, and optional Pi agent integration.
+Self-host long-term memory with Workers, D1, Vectorize, REST APIs, Workers AI assistance, and optional Pi agent integration.
 
 [![CI](https://img.shields.io/badge/CI-typecheck-blue)](#development)
 [![Runtime](https://img.shields.io/badge/runtime-Cloudflare%20Workers-f38020)](https://workers.cloudflare.com/)
@@ -20,12 +20,12 @@ AI coding agents are better when they remember durable facts: user preferences, 
 ## Features
 
 - **Cloudflare-native**: Workers + D1 + Vectorize + Workers AI.
-- **REST-first API**: simple endpoints for write, search, candidate processing, and extraction.
+- **REST-first API**: simple endpoints for write, search, candidate processing, and management.
 - **Scoped memory**: `global`, `project`, and `session` memories with project/session isolation.
 - **Hybrid retrieval**: Vectorize semantic search fused with D1 lexical fallback.
-- **mem0-like pipeline**: extract durable memories from messages, then add / merge / ignore candidates.
+- **Agent-side extraction**: the active agent decides what is worth remembering, then submits concise candidates.
+- **Cloudflare-side organization**: validate, dedupe, add / merge / ignore, and index memories.
 - **Deterministic duplicate guards**: exact, subset, and technical-token paraphrase checks before LLM decisions.
-- **Safe extraction defaults**: ignores temporary chat, command output, reload/self-test markers, diagnostics, and secrets.
 - **Graceful local fallback**: when AI or Vectorize are unavailable locally, D1 write/search still works.
 - **Optional Pi integration**: a global Pi extension is included under `integrations/pi/asaki-memory.ts`.
 
@@ -38,7 +38,7 @@ Agent / App / Pi Extension
 Cloudflare Worker (Hono + REST)
         |
         +--> Workers AI embedding: @cf/baai/bge-m3
-        +--> Workers AI chat model: extraction / candidate decisions
+        +--> Workers AI chat model: candidate decisions
         +--> D1: source of truth for memories, events, projects, API keys
         +--> Vectorize: semantic index with metadata filters
 ```
@@ -214,28 +214,7 @@ curl -X POST http://127.0.0.1:8787/v1/memories/candidates \
   }'
 ```
 
-### Extract memories from messages
-
-```bash
-curl -X POST http://127.0.0.1:8787/v1/memories/extract \
-  -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $ADMIN_API_KEY" \
-  -d '{
-    "user_id": "alice",
-    "project_id": "demo-app",
-    "source": "chat",
-    "messages": [
-      {
-        "role": "user",
-        "content": "For this project, always use Cloudflare Workers + D1 + Vectorize. Do not introduce Postgres."
-      },
-      {
-        "role": "assistant",
-        "content": "Understood."
-      }
-    ]
-  }'
-```
+Agents should extract durable memories from their own conversation context and submit concise candidates to `/v1/memories/candidates`. The Worker does not accept full conversation transcripts for extraction.
 
 ## Pi integration
 
@@ -255,7 +234,6 @@ export ASAKI_MEMORY_API_KEY="your-admin-api-key"
 export ASAKI_MEMORY_USER_ID="alice"
 export ASAKI_MEMORY_PROJECT_ID="demo-app"
 export ASAKI_MEMORY_AUTO_INJECT="1"
-export ASAKI_MEMORY_AUTO_EXTRACT="1"
 export ASAKI_MEMORY_AUTO_MIN_SCORE="0.70"
 ```
 
@@ -287,7 +265,7 @@ integrations/codex/README.md
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `EMBEDDING_MODEL` | `@cf/baai/bge-m3` | Workers AI embedding model |
-| `MEMORY_LLM_MODEL` | `@cf/meta/llama-3.1-8b-instruct-fp8` | Workers AI chat model for extraction and candidate decisions |
+| `MEMORY_LLM_MODEL` | `@cf/meta/llama-3.1-8b-instruct-fp8` | Workers AI chat model for candidate merge/ignore decisions |
 | `ADMIN_API_KEY` | unset | Optional bearer-token auth for `/v1/*`; set as Wrangler secret |
 
 ## Data model

@@ -9,14 +9,8 @@ const DEFAULT_USER_ID = "asaki";
 const DEFAULT_SCOPE = "project";
 const DEFAULT_AUTO_MIN_SCORE = 0.7;
 const AUTO_INJECT_TOP_K = 6;
-const AUTO_EXTRACT_MAX_CHARS = 12_000;
-const AUTO_EXTRACT_MIN_CHARS = 80;
-
 const MEMORY_NEEDED_RE =
   /(记忆|记得|回忆|想起|以前|之前|上次|过往|历史|偏好|习惯|约定|惯例|决策|背景|上下文|继续|延续|remember|recall|memory|previous|before|last time|preference|convention|decision|context|continue)/i;
-const AUTO_EXTRACT_SIGNAL_RE =
-  /(以后|今后|每次|默认|偏好|习惯|称呼|叫我|不要|别|规则|规范|约定|惯例|决定|决策|采用|改成|替换|接入|架构|方案|实现|修复|bug|测试通过|验证通过|工作流|流程|经验|教训|preference|prefer|always|never|rule|convention|decision|workflow|bug fix|fixed|lesson)/i;
-const AUTO_EXTRACT_SKIP_RE = /(不要保存|别保存|不要记|别记|do not remember|don't remember|do not save|don't save)/i;
 const SENSITIVE_RE_LIST = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/i,
   /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b/i,
@@ -31,11 +25,6 @@ const KINDS = ["preference", "rule", "fact", "decision", "task_learning", "bug_f
 
 type MemoryScope = (typeof SCOPES)[number];
 type MemoryKind = (typeof KINDS)[number];
-
-type AutoExtractMessage = {
-  role: "user" | "assistant";
-  text: string;
-};
 
 type MemoryConfigFile = Record<string, unknown>;
 
@@ -242,88 +231,12 @@ function envFlagEnabled(name: string, fallback = true): boolean {
   return !["0", "false", "off", "no"].includes(value.toLowerCase());
 }
 
-function textFromContent(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-
-  return content
-    .map((block) => {
-      const maybe = block as { type?: unknown; text?: unknown };
-      return maybe.type === "text" && typeof maybe.text === "string" ? maybe.text : "";
-    })
-    .filter(Boolean)
-    .join("\n");
-}
-
 function cleanMemoryText(text: string): string {
   return text.replace(/\r/g, "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-function autoExtractMessages(messages: unknown[]): AutoExtractMessage[] {
-  return messages
-    .map((message) => {
-      const maybe = message as { role?: unknown; content?: unknown };
-      if (maybe.role !== "user" && maybe.role !== "assistant") return null;
-      const text = cleanMemoryText(textFromContent(maybe.content));
-      if (!text) return null;
-      return { role: maybe.role, text } as AutoExtractMessage;
-    })
-    .filter((message): message is AutoExtractMessage => Boolean(message));
-}
-
 function containsSensitiveText(text: string): boolean {
   return SENSITIVE_RE_LIST.some((pattern) => pattern.test(text));
-}
-
-function shouldAutoExtract(messages: AutoExtractMessage[]): boolean {
-  if (!envFlagEnabled("ASAKI_MEMORY_AUTO_EXTRACT", true)) return false;
-  if (!messages.some((message) => message.role === "user")) return false;
-
-  const combined = messages.map((message) => `${message.role}: ${message.text}`).join("\n\n");
-  if (combined.length < AUTO_EXTRACT_MIN_CHARS) return false;
-  if (AUTO_EXTRACT_SKIP_RE.test(combined)) return false;
-  if (containsSensitiveText(combined)) return false;
-  return AUTO_EXTRACT_SIGNAL_RE.test(combined);
-}
-
-function clipAutoExtractMessages(messages: AutoExtractMessage[]): AutoExtractMessage[] {
-  const clipped: AutoExtractMessage[] = [];
-  let remaining = AUTO_EXTRACT_MAX_CHARS;
-
-  for (const message of messages.slice(-8)) {
-    if (remaining <= 0) break;
-    const text = message.text.slice(0, remaining);
-    clipped.push({ role: message.role, text });
-    remaining -= text.length;
-  }
-
-  return clipped;
-}
-
-async function runAutoExtract(rawMessages: unknown[], ctx: unknown, signal?: AbortSignal) {
-  if (!envFlagEnabled("ASAKI_MEMORY_AUTO_EXTRACT", true)) return;
-
-  const config = memoryConfig();
-  if (!config.apiKey) return;
-
-  const messages = autoExtractMessages(rawMessages);
-  if (!shouldAutoExtract(messages)) return;
-
-  try {
-    await memoryRequest(
-      "/v1/memories/extract",
-      {
-        user_id: config.userId,
-        project_id: resolveProjectId(ctx),
-        session_id: config.sessionId || undefined,
-        source: "pi:auto_extract",
-        messages: clipAutoExtractMessages(messages).map((message) => ({ role: message.role, content: message.text })),
-      },
-      signal,
-    );
-  } catch {
-    // best-effort background extraction
-  }
 }
 
 export default function (pi: ExtensionAPI) {
@@ -340,10 +253,6 @@ export default function (pi: ExtensionAPI) {
         display: false,
       },
     };
-  });
-
-  pi.on("agent_end", async (event, ctx) => {
-    await runAutoExtract(event.messages, ctx, ctx.signal);
   });
 
   pi.registerCommand("memory", {
@@ -469,6 +378,7 @@ Safety:
     description: "Store a durable memory in Asaki personal memory via the Cloudflare Worker backend.",
     promptSnippet: "Save durable task outcomes and decisions to Asaki personal memory after significant work.",
     promptGuidelines: [
+      "The current conversation agent decides what is worth remembering; do not send full conversation transcripts to the Worker for extraction.",
       "Use asaki_memory_add after completing meaningful work, recording decisions, bug fixes, conventions, or user preferences.",
       "Do not store secrets, raw credentials, private tokens, or sensitive transient data with asaki_memory_add.",
       "For asaki_memory_add, use scope=global only for user-wide preferences/rules; use scope=project for project conventions, decisions, workflows, task learnings, and bug fixes.",
