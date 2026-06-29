@@ -6,6 +6,7 @@
     "dev": "wrangler dev --local",
     "start": "wrangler dev --local",
     "typecheck": "tsc --noEmit",
+    "eval:candidates": "node --experimental-strip-types scripts/eval-candidates.ts",
     "smoke:management": "bash scripts/smoke-management-api.sh",
     "deploy": "wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply asaki-memory-manager --local",

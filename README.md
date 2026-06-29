@@ -297,6 +297,7 @@ preference | rule | fact | decision | task_learning | bug_fix | workflow
 
 ```bash
 npm run typecheck
+npm run eval:candidates
 npm run smoke:management
 npm run db:migrate:local
 npm run dev
