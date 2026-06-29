@@ -1,0 +1,11 @@
+{
+  "name": "asaki-memory-codex-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Asaki Memory MCP server for Codex",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.13.1",
+    "zod": "^3.25.63"
+  }
+}

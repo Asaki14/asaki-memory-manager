@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PLUGIN_ROOT}/session-start.sh",
+            "statusMessage": "Loading Asaki memory..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${PLUGIN_ROOT}/user-prompt.sh",
+            "statusMessage": "Checking memory relevance...",
+            "timeout": 8
+          }
+        ]
+      }
+    ]
+  }
+}
