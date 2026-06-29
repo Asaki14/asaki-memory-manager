@@ -4,8 +4,8 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { Type } from "typebox";
 
-const API_BASE = "http://127.0.0.1:8787";
-const DEFAULT_USER_ID = "default-user";
+const API_BASE = "https://asaki-memory-manager.wangyao1414114wy.workers.dev";
+const DEFAULT_USER_ID = "asaki";
 const DEFAULT_SCOPE = "project";
 const DEFAULT_AUTO_MIN_SCORE = 0.7;
 const DEFAULT_COOLDOWN_MS = 10 * 60 * 1000;
@@ -763,6 +763,154 @@ Safety:
         }
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`Asaki memory add failed: ${message}`);
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "asaki_memory_list",
+    label: "Asaki Memory List",
+    description: "List memories from Asaki personal memory with optional filters.",
+    promptSnippet: "List Asaki memories during memory audit to review, deduplicate, and manage stored memories.",
+    promptGuidelines: [
+      "Use asaki_memory_list only during explicit memory audit or management tasks (e.g., /memory command).",
+      "Omit scope to list global plus current project memories.",
+    ],
+    parameters: Type.Object({
+      scope: Type.Optional(
+        Type.Union([Type.Literal("global"), Type.Literal("project"), Type.Literal("session")], {
+          description: "Optional scope filter.",
+        }),
+      ),
+      project_id: Type.Optional(Type.String({ description: "Project id override." })),
+      session_id: Type.Optional(Type.String({ description: "Session id override." })),
+      kind: Type.Optional(Type.String({ description: "Filter by kind: preference, rule, fact, decision, task_learning, bug_fix, workflow." })),
+      status: Type.Optional(Type.String({ description: "Filter by status: active (default), archived, deleted, all." })),
+      limit: Type.Optional(Type.Integer({ description: "Max memories to return (1-100, default 50).", minimum: 1, maximum: 100 })),
+      offset: Type.Optional(Type.Integer({ description: "Pagination offset (default 0).", minimum: 0 })),
+    }),
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      const config = memoryConfig();
+      const projectId = resolveProjectId(ctx, params.project_id);
+      const sessionId = params.session_id || config.sessionId || undefined;
+
+      onUpdate?.({
+        content: [{ type: "text", text: "Listing Asaki memories..." }],
+        details: {},
+      });
+
+      try {
+        const body: Record<string, unknown> = { user_id: config.userId };
+        if (params.scope) body.scope = params.scope;
+        if (projectId) body.project_id = projectId;
+        if (sessionId) body.session_id = sessionId;
+        if (params.kind) body.kind = params.kind;
+        if (params.status) body.status = params.status;
+        if (params.limit != null) body.limit = params.limit;
+        if (params.offset != null) body.offset = params.offset;
+
+        const data = await memoryRequest("/v1/memories/list", body, signal);
+        const memories = Array.isArray(data?.memories) ? data.memories : [];
+        if (memories.length === 0) {
+          return {
+            content: [{ type: "text", text: "No Asaki memories found." }],
+            details: { count: 0, user_id: config.userId },
+          };
+        }
+
+        const text = memories.map((item: any, index: number) => formatMemoryLine(item, index)).join("\n");
+        return {
+          content: [{ type: "text", text }],
+          details: { count: memories.length, user_id: config.userId },
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Asaki memory list failed: ${message}`);
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "asaki_memory_update",
+    label: "Asaki Memory Update",
+    description: "Update an existing memory in Asaki personal memory by id.",
+    promptSnippet: "Update a specific Asaki memory by id during memory audit with explicit user approval.",
+    promptGuidelines: [
+      "Only call asaki_memory_update after the user has explicitly approved the change.",
+      "Supply only the fields that need to change; omit unchanged fields.",
+    ],
+    parameters: Type.Object({
+      id: Type.String({ description: "Memory id to update." }),
+      content: Type.Optional(Type.String({ description: "New memory content." })),
+      scope: Type.Optional(
+        Type.Union([Type.Literal("global"), Type.Literal("project"), Type.Literal("session")], {
+          description: "New scope.",
+        }),
+      ),
+      project_id: Type.Optional(Type.String({ description: "New project id (required when changing scope to project)." })),
+      session_id: Type.Optional(Type.String({ description: "New session id (required when changing scope to session)." })),
+      kind: Type.Optional(Type.String({ description: "New kind." })),
+      importance: Type.Optional(Type.Number({ description: "New importance (0-1).", minimum: 0, maximum: 1 })),
+      confidence: Type.Optional(Type.Number({ description: "New confidence (0-1).", minimum: 0, maximum: 1 })),
+      status: Type.Optional(
+        Type.Union([Type.Literal("active"), Type.Literal("archived"), Type.Literal("deleted")], {
+          description: "New status.",
+        }),
+      ),
+    }),
+    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+      const config = memoryConfig();
+      const { id, ...fields } = params;
+
+      try {
+        const body: Record<string, unknown> = { user_id: config.userId };
+        if (fields.content !== undefined) body.content = fields.content;
+        if (fields.scope !== undefined) body.scope = fields.scope;
+        if (fields.project_id !== undefined) body.project_id = fields.project_id;
+        if (fields.session_id !== undefined) body.session_id = fields.session_id;
+        if (fields.kind !== undefined) body.kind = fields.kind;
+        if (fields.importance !== undefined) body.importance = fields.importance;
+        if (fields.confidence !== undefined) body.confidence = fields.confidence;
+        if (fields.status !== undefined) body.status = fields.status;
+
+        const data = await memoryRequest(`/v1/memories/${id}`, body, signal, "PATCH");
+        const memory = data?.memory;
+        return {
+          content: [{ type: "text", text: memory ? `Updated: ${formatMemoryLine(memory)}` : `Memory ${id} updated.` }],
+          details: { id, user_id: config.userId },
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Asaki memory update failed: ${message}`);
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "asaki_memory_delete",
+    label: "Asaki Memory Delete",
+    description: "Soft-delete a memory from Asaki personal memory by id.",
+    promptSnippet: "Delete a specific Asaki memory by id during memory audit with explicit user approval.",
+    promptGuidelines: [
+      "Only call asaki_memory_delete after the user has explicitly approved the deletion.",
+      "Deletion is a soft delete (status set to deleted); data is not permanently removed immediately.",
+    ],
+    parameters: Type.Object({
+      id: Type.String({ description: "Memory id to delete." }),
+    }),
+    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+      const config = memoryConfig();
+
+      try {
+        const data = await memoryRequest(`/v1/memories/${params.id}`, { user_id: config.userId }, signal, "DELETE");
+        const memory = data?.memory;
+        return {
+          content: [{ type: "text", text: memory ? `Deleted: ${formatMemoryLine(memory)}` : `Memory ${params.id} deleted.` }],
+          details: { id: params.id, user_id: config.userId },
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Asaki memory delete failed: ${message}`);
       }
     },
   });
