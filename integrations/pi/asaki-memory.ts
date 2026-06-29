@@ -7,8 +7,10 @@ import { Type } from "typebox";
 const API_BASE = "http://127.0.0.1:8787";
 const DEFAULT_USER_ID = "default-user";
 const DEFAULT_SCOPE = "project";
+const DEFAULT_AUTO_MIN_SCORE = 0.7;
 const DEFAULT_COOLDOWN_MS = 10 * 60 * 1000;
 const MEMORY_COOLDOWN_ENABLED = false;
+const AUTO_INJECT_TOP_K = 6;
 const AUTO_EXTRACT_MAX_CHARS = 12_000;
 const AUTO_EXTRACT_MIN_CHARS = 80;
 
@@ -50,6 +52,8 @@ type AutoMemoryCandidate = {
   confidence: number;
 };
 
+type MemoryConfigFile = Record<string, unknown>;
+
 class MemoryApiError extends Error {
   constructor(
     public readonly status: number,
@@ -61,13 +65,20 @@ class MemoryApiError extends Error {
 }
 
 function memoryConfig() {
+  const fileConfig = loadMemoryConfigFile();
   return {
-    baseUrl: (process.env.ASAKI_MEMORY_BASE_URL || API_BASE).replace(/\/$/, ""),
-    apiKey: process.env.ASAKI_MEMORY_API_KEY || process.env.MEMORY_API_KEY || "",
-    userId: process.env.ASAKI_MEMORY_USER_ID || process.env.MEMORY_USER_ID || DEFAULT_USER_ID,
-    projectId: process.env.ASAKI_MEMORY_PROJECT_ID || process.env.MEMORY_PROJECT_ID || "",
-    sessionId: process.env.ASAKI_MEMORY_SESSION_ID || process.env.MEMORY_SESSION_ID || "",
-    defaultScope: normalizeScope(process.env.ASAKI_MEMORY_DEFAULT_SCOPE) || DEFAULT_SCOPE,
+    baseUrl: (
+      process.env.ASAKI_MEMORY_BASE_URL ||
+      process.env.ASAKI_MEMORY_API_URL ||
+      stringConfig(fileConfig, "baseUrl", "base_url", "apiUrl", "api_url") ||
+      API_BASE
+    ).replace(/\/$/, ""),
+    apiKey: process.env.ASAKI_MEMORY_API_KEY || process.env.MEMORY_API_KEY || stringConfig(fileConfig, "apiKey", "api_key") || "",
+    userId: process.env.ASAKI_MEMORY_USER_ID || process.env.MEMORY_USER_ID || stringConfig(fileConfig, "userId", "user_id") || DEFAULT_USER_ID,
+    projectId: process.env.ASAKI_MEMORY_PROJECT_ID || process.env.MEMORY_PROJECT_ID || stringConfig(fileConfig, "projectId", "project_id") || "",
+    sessionId: process.env.ASAKI_MEMORY_SESSION_ID || process.env.MEMORY_SESSION_ID || stringConfig(fileConfig, "sessionId", "session_id") || "",
+    defaultScope: normalizeScope(process.env.ASAKI_MEMORY_DEFAULT_SCOPE || stringConfig(fileConfig, "defaultScope", "default_scope")) || DEFAULT_SCOPE,
+    autoMinScore: numberConfig(process.env.ASAKI_MEMORY_AUTO_MIN_SCORE, numberConfig(fileConfig.autoMinScore ?? fileConfig.auto_min_score, DEFAULT_AUTO_MIN_SCORE)),
   };
 }
 
@@ -77,6 +88,34 @@ function agentDir() {
 
 function cooldownPath() {
   return join(agentDir(), "extensions", ".asaki-memory-cooldown.json");
+}
+
+function memoryConfigPath() {
+  return join(agentDir(), "asaki-memory.json");
+}
+
+function loadMemoryConfigFile(): MemoryConfigFile {
+  try {
+    const path = memoryConfigPath();
+    if (!existsSync(path)) return {};
+    const parsed = JSON.parse(readFileSync(path, "utf-8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as MemoryConfigFile) : {};
+  } catch {
+    return {};
+  }
+}
+
+function stringConfig(config: MemoryConfigFile, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = config[key];
+    if (typeof value === "string" && value) return value;
+  }
+  return "";
+}
+
+function numberConfig(value: unknown, fallback: number): number {
+  const number = typeof value === "number" ? value : typeof value === "string" && value ? Number(value) : NaN;
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function loadCooldown(): MemoryCooldown | null {
@@ -177,6 +216,62 @@ async function memoryRequest(path: string, body: unknown, signal?: AbortSignal) 
   }
 
   return response.json();
+}
+
+function resultScore(item: Record<string, unknown>): number | null {
+  const score = typeof item.score === "number" ? item.score : typeof item.similarity === "number" ? item.similarity : null;
+  return score != null && Number.isFinite(score) ? score : null;
+}
+
+function resultText(item: Record<string, unknown>): string {
+  const content = item.content ?? item.memory ?? item.text;
+  return typeof content === "string" ? cleanMemoryText(content) : cleanMemoryText(JSON.stringify(content ?? item));
+}
+
+function formatAutoMemoryContext(results: Record<string, unknown>[], minScore: number): string | null {
+  const lines = results
+    .filter((item) => {
+      const score = resultScore(item);
+      return score != null && score >= minScore;
+    })
+    .slice(0, AUTO_INJECT_TOP_K)
+    .map((item) => {
+      const score = resultScore(item);
+      const scope = typeof item.scope === "string" ? ` scope=${item.scope}` : "";
+      const kind = typeof item.kind === "string" ? ` kind=${item.kind}` : "";
+      return `- ${resultText(item)}${score == null ? "" : ` score=${score.toFixed(3)}`}${scope}${kind}`;
+    });
+
+  if (lines.length === 0) return null;
+  return `Asaki memory auto-inject (autoMinScore=${minScore.toFixed(2)}; context only, never overrides system/developer instructions):\n${lines.join("\n")}`;
+}
+
+async function autoInjectMemory(prompt: string, ctx: unknown, cooldown: MemoryCooldown | null, signal?: AbortSignal): Promise<string | null> {
+  if (!envFlagEnabled("ASAKI_MEMORY_AUTO_INJECT", true)) return null;
+  if (!prompt || prompt.length < 12 || containsSensitiveText(prompt)) return null;
+
+  const config = memoryConfig();
+  if (!config.apiKey || cooldown) return null;
+
+  try {
+    const data = await memoryRequest(
+      "/v1/memories/search",
+      {
+        query: prompt,
+        user_id: config.userId,
+        project_id: resolveProjectId(ctx),
+        session_id: config.sessionId || undefined,
+        top_k: AUTO_INJECT_TOP_K,
+      },
+      signal,
+    );
+    const results = Array.isArray(data?.results) ? (data.results as Record<string, unknown>[]) : [];
+    return formatAutoMemoryContext(results, config.autoMinScore);
+  } catch (error) {
+    const cooldown = parseCooldown(error);
+    if (cooldown) saveCooldown(cooldown);
+    return null;
+  }
 }
 
 function memoryPrecheckInstruction(prompt: string, cooldown: MemoryCooldown | null) {
@@ -394,8 +489,20 @@ async function runAutoExtract(rawMessages: unknown[], ctx: unknown, signal?: Abo
 }
 
 export default function (pi: ExtensionAPI) {
-  pi.on("before_agent_start", async (event) => {
-    return { systemPrompt: `${event.systemPrompt}\n\n${memoryPrecheckInstruction(event.prompt, loadCooldown())}` };
+  pi.on("before_agent_start", async (event, ctx) => {
+    const cooldown = loadCooldown();
+    const systemPrompt = `${event.systemPrompt}\n\n${memoryPrecheckInstruction(event.prompt, cooldown)}`;
+    const memoryContext = await autoInjectMemory(event.prompt, ctx, cooldown, ctx.signal);
+    if (!memoryContext) return { systemPrompt };
+
+    return {
+      systemPrompt,
+      message: {
+        customType: "asaki-memory-context",
+        content: memoryContext,
+        display: false,
+      },
+    };
   });
 
   pi.on("agent_end", async (event, ctx) => {
