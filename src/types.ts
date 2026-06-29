@@ -34,6 +34,36 @@ export interface SearchMemoriesInput {
   top_k?: number;
 }
 
+export interface ListMemoriesInput {
+  user_id: string;
+  scope?: MemoryScope;
+  project_id?: string | null;
+  session_id?: string | null;
+  kind?: MemoryKind;
+  status?: MemoryStatus | 'all';
+  source?: string | null;
+  limit?: number;
+  offset?: number;
+}
+
+export interface UpdateMemoryInput {
+  user_id: string;
+  content?: string;
+  scope?: MemoryScope;
+  project_id?: string | null;
+  session_id?: string | null;
+  kind?: MemoryKind;
+  importance?: number;
+  confidence?: number;
+  status?: MemoryStatus;
+  source?: string | null;
+  expires_at?: string | null;
+}
+
+export interface MemoryIdInput {
+  user_id: string;
+}
+
 export interface ExtractMemoriesInput {
   messages: Array<{
     role: 'system' | 'user' | 'assistant' | 'tool';
