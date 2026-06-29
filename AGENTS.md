@@ -55,6 +55,7 @@ Deferred:
 ```bash
 npm install
 npm run typecheck
+npm run eval:candidates
 npm run smoke:management
 npm run db:migrate:local
 npm run dev
@@ -87,6 +88,7 @@ npm run deploy
 - The active conversation agent extracts durable memory and calls `asaki_memory_add`; Cloudflare organizes, dedupes, merges, indexes, and stores candidates.
 - Do not add a server-side conversation extraction endpoint; the Worker should not receive full conversation transcripts for extraction.
 - Candidate processing should run deterministic duplicate checks before LLM decisions.
+- Run `npm run eval:candidates` after changing candidate dedupe thresholds or prompts.
 - Pi auto inject defaults to `ASAKI_MEMORY_AUTO_MIN_SCORE=0.70`; keep low-score memories out of injected context.
 - Keep changes small and consistent with existing style.
 - Run `npm run typecheck` after TypeScript edits.

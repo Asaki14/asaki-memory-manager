@@ -1,0 +1,207 @@
+[
+  {
+    "name": "add when no existing memory",
+    "expected": "add",
+    "candidate": {
+      "content": "The project now uses agent-side memory extraction.",
+      "scope": "project",
+      "kind": "decision"
+    }
+  },
+  {
+    "name": "ignore exact duplicate",
+    "expected": "ignore",
+    "candidate": {
+      "content": "Pi should not send full conversation transcripts to the Worker.",
+      "scope": "project",
+      "kind": "rule"
+    },
+    "existing": {
+      "content": "Pi should not send full conversation transcripts to the Worker.",
+      "scope": "project",
+      "kind": "rule"
+    }
+  },
+  {
+    "name": "ignore punctuation-only duplicate",
+    "expected": "ignore",
+    "candidate": {
+      "content": "Use Cloudflare Workers, D1, and Vectorize.",
+      "scope": "project",
+      "kind": "decision"
+    },
+    "existing": {
+      "content": "Use Cloudflare Workers D1 and Vectorize",
+      "scope": "project",
+      "kind": "decision"
+    }
+  },
+  {
+    "name": "ignore candidate subset",
+    "expected": "ignore",
+    "candidate": {
+      "content": "Use D1 as source of truth.",
+      "scope": "project",
+      "kind": "decision"
+    },
+    "existing": {
+      "content": "Use D1 as source of truth and Vectorize as a recoverable index.",
+      "scope": "project",
+      "kind": "decision"
+    }
+  },
+  {
+    "name": "ignore ascii token subset",
+    "expected": "ignore",
+    "candidate": {
+      "content": "Use ADMIN_API_KEY auth.",
+      "scope": "project",
+      "kind": "rule"
+    },
+    "existing": {
+      "content": "Use ADMIN_API_KEY auth for all /v1 routes.",
+      "scope": "project",
+      "kind": "rule"
+    }
+  },
+  {
+    "name": "ignore Chinese subset",
+    "expected": "ignore",
+    "candidate": {
+      "content": "主公喜欢简洁直接的回答。",
+      "scope": "global",
+      "kind": "preference"
+    },
+    "existing": {
+      "content": "主公喜欢简洁直接的回答，少废话，直接给结果。",
+      "scope": "global",
+      "kind": "preference"
+    }
+  },
+  {
+    "name": "merge candidate extends sentence",
+    "expected": "merge",
+    "candidate": {
+      "content": "Use D1 as source of truth and Vectorize as a recoverable semantic index.",
+      "scope": "project",
+      "kind": "decision"
+    },
+    "existing": {
+      "content": "Use D1 as source of truth.",
+      "scope": "project",
+      "kind": "decision"
+    }
+  },
+  {
+    "name": "merge ascii candidate adds tokens",
+    "expected": "merge",
+    "candidate": {
+      "content": "Run npm run typecheck and npm run smoke:management after API changes.",
+      "scope": "project",
+      "kind": "workflow"
+    },
+    "existing": {
+      "content": "Run npm run typecheck after API changes.",
+      "scope": "project",
+      "kind": "workflow"
+    }
+  },
+  {
+    "name": "merge bug fix gains root cause",
+    "expected": "merge",
+    "candidate": {
+      "content": "Fixed Vectorize delete failures by keeping D1 soft delete and logging vectorize_delete_failed events.",
+      "scope": "project",
+      "kind": "bug_fix"
+    },
+    "existing": {
+      "content": "Fixed Vectorize delete failures by keeping D1 soft delete.",
+      "scope": "project",
+      "kind": "bug_fix"
+    }
+  },
+  {
+    "name": "merge workflow adds one step",
+    "expected": "merge",
+    "candidate": {
+      "content": "Before deploying, run typecheck, smoke management, then wrangler deploy.",
+      "scope": "project",
+      "kind": "workflow"
+    },
+    "existing": {
+      "content": "Before deploying, run typecheck then wrangler deploy.",
+      "scope": "project",
+      "kind": "workflow"
+    }
+  },
+  {
+    "name": "add different project fact same stack words",
+    "expected": "add",
+    "candidate": {
+      "content": "The README examples must use placeholder Worker URLs.",
+      "scope": "project",
+      "kind": "rule"
+    },
+    "existing": {
+      "content": "The Worker uses Cloudflare D1 and Vectorize bindings.",
+      "scope": "project",
+      "kind": "decision"
+    }
+  },
+  {
+    "name": "add same keyword different endpoint",
+    "expected": "add",
+    "candidate": {
+      "content": "POST /v1/memories/list lists global plus current project memories.",
+      "scope": "project",
+      "kind": "fact"
+    },
+    "existing": {
+      "content": "POST /v1/memories/candidates processes add merge ignore decisions.",
+      "scope": "project",
+      "kind": "fact"
+    }
+  },
+  {
+    "name": "add same user different preference",
+    "expected": "add",
+    "candidate": {
+      "content": "主公希望用中文称呼。",
+      "scope": "global",
+      "kind": "preference"
+    },
+    "existing": {
+      "content": "主公偏好最小改动，不做额外抽象。",
+      "scope": "global",
+      "kind": "preference"
+    }
+  },
+  {
+    "name": "add same technology different decision",
+    "expected": "add",
+    "candidate": {
+      "content": "Use Wrangler secrets for ADMIN_API_KEY.",
+      "scope": "project",
+      "kind": "rule"
+    },
+    "existing": {
+      "content": "Use Wrangler deploy to publish the Worker.",
+      "scope": "project",
+      "kind": "workflow"
+    }
+  },
+  {
+    "name": "add no semantic match despite shared word",
+    "expected": "add",
+    "candidate": {
+      "content": "Do not commit wrangler.jsonc because it contains Cloudflare resource ids.",
+      "scope": "project",
+      "kind": "rule"
+    },
+    "existing": {
+      "content": "Cloudflare Worker health endpoint returns service status.",
+      "scope": "project",
+      "kind": "fact"
+    }
+  }
+]
