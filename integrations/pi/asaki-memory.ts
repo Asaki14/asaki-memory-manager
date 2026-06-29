@@ -630,10 +630,7 @@ Safety:
           .map((item: any, index: number) => {
             const score = typeof item.score === "number" ? ` score=${item.score.toFixed(3)}` : "";
             const similarity = typeof item.similarity === "number" ? ` similarity=${item.similarity.toFixed(3)}` : "";
-            const id = item.id ? ` id=${item.id}` : "";
-            const scope = item.scope ? ` scope=${item.scope}` : "";
-            const kind = item.kind ? ` kind=${item.kind}` : "";
-            return `${index + 1}. ${item.content || item.memory || item.text || JSON.stringify(item)}${id}${score}${similarity}${scope}${kind}`;
+            return `${formatMemoryLine(item, index)}${score}${similarity}`;
           })
           .join("\n");
 
