@@ -27,8 +27,4 @@ jobs:
           test -z "$(git ls-files wrangler.jsonc PLAN.md .dev.vars .env 2>/dev/null)"
       - name: Scan for local/private deployment markers
         run: |
-          ! grep -RInE 'wangyao|zz-b236|/Users/|636eb468' \
-            --exclude-dir=.git \
-            --exclude-dir=node_modules \
-            --exclude=package-lock.json \
-            .
+          ! git grep -nE 'wangyao|zz-b236|/Users/|636eb468' -- ':!package-lock.json' ':!.github/workflows/ci.yml'
