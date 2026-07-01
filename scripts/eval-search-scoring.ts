@@ -80,6 +80,36 @@ function score(item: SearchCase): ScoredMemory[] {
 const failures: string[] = [];
 const failedCases = new Set<string>();
 const caseNames = new Set<string>();
+const expectedScores: number[] = [];
+const badScores: number[] = [];
+const margins: number[] = [];
+
+function quantile(values: number[], p: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = (sorted.length - 1) * p;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
+}
+
+function fmt(value: number): string {
+  return value.toFixed(3);
+}
+
+function printDistribution(label: string, values: number[]): void {
+  console.log(
+    `${label}: n=${values.length} min=${fmt(quantile(values, 0))} p10=${fmt(quantile(values, 0.1))} p50=${fmt(quantile(values, 0.5))} p90=${fmt(quantile(values, 0.9))} max=${fmt(quantile(values, 1))}`
+  );
+}
+
+function thresholdBelow(value: number): number {
+  return Math.max(0, Math.floor((value - 0.001) * 100) / 100);
+}
+
+function thresholdAbove(value: number): number {
+  return Math.min(1, Math.ceil((value + 0.001) * 100) / 100);
+}
 
 function fail(item: SearchCase, message: string): void {
   failedCases.add(item.name);
@@ -107,14 +137,28 @@ for (const item of cases) {
   const ranked = score(item);
   const topK = ranked.slice(0, item.top_k ?? 5);
   const rankById = new Map(ranked.map((result, index) => [result.id, index]));
+  const resultById = new Map(ranked.map((result) => [result.id, result]));
+
+  const itemExpectedScores: number[] = [];
+  const itemBadScores: number[] = [];
 
   for (const id of item.expected_top_ids) {
-    if (!topK.some((result) => result.id === id)) {
+    const result = resultById.get(id);
+    if (result) {
+      expectedScores.push(result.score);
+      itemExpectedScores.push(result.score);
+    }
+    if (!topK.some((candidate) => candidate.id === id)) {
       fail(item, `expected ${id} in top ${(item.top_k ?? 5)}, got ${topK.map((result) => result.id).join(', ')}`);
     }
   }
 
   for (const badId of item.bad_result_ids ?? []) {
+    const result = resultById.get(badId);
+    if (result) {
+      badScores.push(result.score);
+      itemBadScores.push(result.score);
+    }
     const badRank = rankById.get(badId);
     if (badRank === undefined) continue;
     for (const goodId of item.expected_top_ids) {
@@ -124,9 +168,24 @@ for (const item of cases) {
       }
     }
   }
+
+  if (itemExpectedScores.length > 0 && itemBadScores.length > 0) {
+    margins.push(Math.min(...itemExpectedScores) - Math.max(...itemBadScores));
+  }
 }
 
 console.log(`search eval: ${cases.length - failedCases.size}/${cases.length} passed`);
+printDistribution('expected scores', expectedScores);
+printDistribution('bad scores', badScores);
+printDistribution('expected-bad margins', margins);
+const searchMinScore = thresholdBelow(quantile(expectedScores, 0));
+const autoInjectCandidate = thresholdAbove(quantile(badScores, 0.9));
+const autoInjectMinScore = autoInjectCandidate <= quantile(expectedScores, 0.1) ? autoInjectCandidate : 0.5;
+console.log(`recommended search_min_score=${searchMinScore.toFixed(2)}`);
+console.log(`recommended auto_inject_min_score=${autoInjectMinScore.toFixed(2)}`);
+if (autoInjectMinScore === 0.5 && autoInjectCandidate > quantile(expectedScores, 0.1)) {
+  console.log('note: expected/bad absolute scores overlap; keep auto-inject conservative and rely on cue gating plus ranking.');
+}
 
 if (failures.length > 0) {
   console.log('fail:');
