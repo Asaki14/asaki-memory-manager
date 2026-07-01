@@ -1,6 +1,7 @@
 import { generateEmbedding } from '../ai/embeddings';
 import type { CreateMemoryInput, Env, ListMemoriesInput, MemoryRow, SearchMemoriesInput, SearchResult, UpdateMemoryInput } from '../types';
 import { writeMemoryEvent } from './memoryEvents';
+import { scoreMemoryForSearch } from './searchScoring';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -110,24 +111,6 @@ export async function createMemory(env: Env, input: Required<Pick<CreateMemoryIn
   return baseMemory;
 }
 
-function scopeWeight(memory: MemoryRow, input: SearchMemoriesInput): number {
-  if (memory.scope === 'project' && input.project_id && memory.project_id === input.project_id) return 0.08;
-  if (memory.scope === 'global') return 0.04;
-  if (memory.scope === 'session' && input.session_id && memory.session_id === input.session_id) return 0.03;
-  return 0;
-}
-
-function recencyWeight(memory: MemoryRow): number {
-  const created = Date.parse(memory.updated_at || memory.created_at);
-  if (Number.isNaN(created)) return 0;
-  const ageDays = Math.max(0, (Date.now() - created) / 86_400_000);
-  return Math.max(0, 0.04 - ageDays * 0.001);
-}
-
-function fuseScore(memory: MemoryRow, similarity: number, input: SearchMemoriesInput): number {
-  return Math.min(1, similarity * 0.82 + memory.importance * 0.05 + memory.confidence * 0.05 + scopeWeight(memory, input) + recencyWeight(memory));
-}
-
 function isVisibleInScope(memory: MemoryRow, input: SearchMemoriesInput): boolean {
   if (memory.user_id !== input.user_id || memory.status !== 'active') return false;
   if (input.scope) {
@@ -178,23 +161,11 @@ async function vectorSearch(env: Env, input: Required<Pick<SearchMemoriesInput, 
     results.push({
       ...row,
       similarity,
-      score: fuseScore(row, similarity, input),
+      ...scoreMemoryForSearch(row, input, similarity, 'vector'),
     });
   }
 
   return results.sort((a, b) => b.score - a.score).slice(0, input.top_k);
-}
-
-function lexicalSimilarityForSearch(query: string, content: string): number {
-  const normalize = (value: string) => value.toLowerCase().replace(/[\s，。,.!！?？:：;；"'“”‘’（）()【】\[\]{}]/g, '');
-  const left = new Set(normalize(query));
-  const right = new Set(normalize(content));
-  if (left.size === 0 || right.size === 0) return 0;
-  let intersection = 0;
-  for (const char of left) {
-    if (right.has(char)) intersection += 1;
-  }
-  return intersection / Math.max(left.size, right.size);
 }
 
 async function fallbackSearch(env: Env, input: Required<Pick<SearchMemoriesInput, 'query' | 'user_id' | 'top_k'>> & Omit<SearchMemoriesInput, 'query' | 'user_id' | 'top_k'>): Promise<SearchResult[]> {
@@ -209,11 +180,8 @@ async function fallbackSearch(env: Env, input: Required<Pick<SearchMemoriesInput
 
   return (result.results ?? [])
     .filter((row) => isVisibleInScope(row, input))
-    .map((row) => {
-      const similarity = lexicalSimilarityForSearch(input.query, row.content);
-      return { ...row, similarity, score: fuseScore(row, similarity, input) };
-    })
-    .filter((row) => row.similarity > 0)
+    .map((row) => ({ ...row, similarity: 0, ...scoreMemoryForSearch(row, input, 0, 'keyword') }))
+    .filter((row) => row.score_details.keyword > 0 || row.score_details.entity > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, input.top_k);
 }

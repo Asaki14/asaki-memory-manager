@@ -7,7 +7,7 @@ import { Type } from "typebox";
 const API_BASE = "https://asaki-memory-manager.YOUR_SUBDOMAIN.workers.dev";
 const DEFAULT_USER_ID = "asaki";
 const DEFAULT_SCOPE = "project";
-const DEFAULT_AUTO_MIN_SCORE = 0.7;
+const DEFAULT_AUTO_MIN_SCORE = 0.5;
 const AUTO_INJECT_TOP_K = 6;
 const MEMORY_NEEDED_RE =
   /(记忆|记得|回忆|想起|以前|之前|上次|过往|历史|偏好|习惯|约定|惯例|决策|背景|上下文|继续|延续|remember|recall|memory|previous|before|last time|preference|convention|decision|context|continue)/i;

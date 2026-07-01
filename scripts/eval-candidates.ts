@@ -56,6 +56,7 @@ function existing(input: MemoryFixture, index: number): SearchResult {
     expires_at: null,
     similarity: input.similarity ?? 0,
     score: input.similarity ?? 0,
+    score_details: { semantic: input.similarity ?? 0, keyword: 0, entity: 0, metadata: 0, source: 'vector' },
   };
 }
 

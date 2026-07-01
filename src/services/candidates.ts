@@ -60,7 +60,7 @@ async function findLexicalMatch(env: Env, candidate: ProcessMemoryCandidateInput
     if (row.scope === 'session' && candidate.session_id && row.session_id !== candidate.session_id) continue;
     const similarity = lexicalSimilarity(candidate.content, row.content);
     if (!best || similarity > best.similarity) {
-      best = { ...row, similarity, score: similarity };
+      best = { ...row, similarity, score: similarity, score_details: { semantic: 0, keyword: similarity, entity: 0, metadata: 0, source: 'keyword' } };
     }
   }
   return best && best.similarity >= 0.5 ? best : undefined;

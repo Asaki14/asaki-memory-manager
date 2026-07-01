@@ -271,7 +271,7 @@ export ASAKI_MEMORY_API_KEY="your-admin-api-key"
 export ASAKI_MEMORY_USER_ID="alice"
 export ASAKI_MEMORY_PROJECT_ID="demo-app"
 export ASAKI_MEMORY_AUTO_INJECT="1"
-export ASAKI_MEMORY_AUTO_MIN_SCORE="0.70"
+export ASAKI_MEMORY_AUTO_MIN_SCORE="0.50"
 ```
 
 The extension exposes:
