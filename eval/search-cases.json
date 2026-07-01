@@ -4,8 +4,12 @@
     "query": "Asaki memory Pi extension agent-decided memory retrieval auto inject disabled default ASAKI_MEMORY_AUTO_INJECT",
     "project_id": ".pi",
     "top_k": 3,
-    "expected_top_ids": ["asaki-auto-inject"],
-    "bad_result_ids": ["atomic-commit"],
+    "expected_top_ids": [
+      "asaki-auto-inject"
+    ],
+    "bad_result_ids": [
+      "atomic-commit"
+    ],
     "memories": [
       {
         "id": "atomic-commit",
@@ -32,8 +36,12 @@
     "query": "POST /v1/memories/search returns score_details and search results",
     "project_id": "asaki-memory-manager",
     "top_k": 3,
-    "expected_top_ids": ["search-endpoint"],
-    "bad_result_ids": ["candidate-endpoint"],
+    "expected_top_ids": [
+      "search-endpoint"
+    ],
+    "bad_result_ids": [
+      "candidate-endpoint"
+    ],
     "memories": [
       {
         "id": "search-endpoint",
@@ -56,8 +64,12 @@
     "query": "how should ADMIN_API_KEY be stored for Cloudflare deploy",
     "project_id": "asaki-memory-manager",
     "top_k": 3,
-    "expected_top_ids": ["wrangler-secret"],
-    "bad_result_ids": ["wrangler-jsonc"],
+    "expected_top_ids": [
+      "wrangler-secret"
+    ],
+    "bad_result_ids": [
+      "wrangler-jsonc"
+    ],
     "memories": [
       {
         "id": "wrangler-secret",
@@ -81,8 +93,12 @@
     "query": "D1 source of truth Vectorize recoverable index",
     "project_id": "asaki-memory-manager",
     "top_k": 3,
-    "expected_top_ids": ["d1-source-truth"],
-    "bad_result_ids": ["cloudflare-stack"],
+    "expected_top_ids": [
+      "d1-source-truth"
+    ],
+    "bad_result_ids": [
+      "cloudflare-stack"
+    ],
     "memories": [
       {
         "id": "d1-source-truth",
@@ -105,8 +121,12 @@
     "query": "run npm run typecheck after TypeScript edits",
     "project_id": "asaki-memory-manager",
     "top_k": 3,
-    "expected_top_ids": ["typecheck-workflow"],
-    "bad_result_ids": ["global-style"],
+    "expected_top_ids": [
+      "typecheck-workflow"
+    ],
+    "bad_result_ids": [
+      "global-style"
+    ],
     "memories": [
       {
         "id": "typecheck-workflow",
@@ -131,8 +151,12 @@
     "query": "src/services/memories.ts search fallback Vectorize lexical behavior",
     "project_id": "asaki-memory-manager",
     "top_k": 3,
-    "expected_top_ids": ["memories-service"],
-    "bad_result_ids": ["reviews-service"],
+    "expected_top_ids": [
+      "memories-service"
+    ],
+    "bad_result_ids": [
+      "reviews-service"
+    ],
     "memories": [
       {
         "id": "memories-service",
@@ -155,8 +179,12 @@
     "query": "after changing candidate dedupe thresholds prompts run eval candidates",
     "project_id": "asaki-memory-manager",
     "top_k": 3,
-    "expected_top_ids": ["candidate-eval"],
-    "bad_result_ids": ["search-eval"],
+    "expected_top_ids": [
+      "candidate-eval"
+    ],
+    "bad_result_ids": [
+      "search-eval"
+    ],
     "memories": [
       {
         "id": "candidate-eval",
@@ -179,8 +207,12 @@
     "query": "do not send full conversation transcripts Worker extraction endpoint",
     "project_id": "asaki-memory-manager",
     "top_k": 3,
-    "expected_top_ids": ["agent-side-extraction"],
-    "bad_result_ids": ["structured-extraction"],
+    "expected_top_ids": [
+      "agent-side-extraction"
+    ],
+    "bad_result_ids": [
+      "structured-extraction"
+    ],
     "memories": [
       {
         "id": "agent-side-extraction",
@@ -196,6 +228,291 @@
         "project_id": "asaki-memory-manager",
         "kind": "decision",
         "semantic": 0.81
+      }
+    ]
+  },
+  {
+    "name": "auto inject threshold query prefers min score env var",
+    "query": "ASAKI_MEMORY_AUTO_MIN_SCORE auto inject threshold 0.50",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "auto-min-score"
+    ],
+    "bad_result_ids": [
+      "generic-thresholds"
+    ],
+    "memories": [
+      {
+        "id": "auto-min-score",
+        "content": "Pi auto inject defaults to ASAKI_MEMORY_AUTO_MIN_SCORE=0.50; keep low-score memories out of injected context.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.72
+      },
+      {
+        "id": "generic-thresholds",
+        "content": "Use eval cases to tune search score thresholds before changing ranking weights.",
+        "project_id": "asaki-memory-manager",
+        "kind": "workflow",
+        "semantic": 0.83
+      }
+    ]
+  },
+  {
+    "name": "project scope query requires project id",
+    "query": "explicit scope project search must require project_id",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "project-scope-requires-project-id"
+    ],
+    "bad_result_ids": [
+      "default-scope-search"
+    ],
+    "memories": [
+      {
+        "id": "project-scope-requires-project-id",
+        "content": "Explicit scope=project search must require project_id.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "importance": 0.8,
+        "semantic": 0.74
+      },
+      {
+        "id": "default-scope-search",
+        "content": "Default search includes global memories plus the current project and session memories.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.84
+      }
+    ]
+  },
+  {
+    "name": "session scope query requires session id",
+    "query": "explicit scope session search must require session_id",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "session-scope-requires-session-id"
+    ],
+    "bad_result_ids": [
+      "project-scope-requires-project-id"
+    ],
+    "memories": [
+      {
+        "id": "session-scope-requires-session-id",
+        "content": "Explicit scope=session search must require session_id.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "importance": 0.8,
+        "semantic": 0.74
+      },
+      {
+        "id": "project-scope-requires-project-id",
+        "content": "Explicit scope=project search must require project_id.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.84
+      }
+    ]
+  },
+  {
+    "name": "vectorize upsert failure keeps d1 write",
+    "query": "Vectorize upsert fails keep D1 write index_status pending failed",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "vectorize-upsert-failure"
+    ],
+    "bad_result_ids": [
+      "vector-search-failure"
+    ],
+    "memories": [
+      {
+        "id": "vectorize-upsert-failure",
+        "content": "If Vectorize upsert fails, keep the D1 write and mark index_status=pending or failed.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "importance": 0.85,
+        "semantic": 0.73
+      },
+      {
+        "id": "vector-search-failure",
+        "content": "Vector search failures are logged as vector_search_failed events before lexical fallback runs.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.83
+      }
+    ]
+  },
+  {
+    "name": "review resolve query prefers review queue memory",
+    "query": "memory review resolve pending add merge ignore",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "review-resolve"
+    ],
+    "bad_result_ids": [
+      "candidate-decisions"
+    ],
+    "memories": [
+      {
+        "id": "review-resolve",
+        "content": "Memory review queue supports pending review items and resolving them as add, merge, or ignore.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.8
+      },
+      {
+        "id": "candidate-decisions",
+        "content": "Candidate dedupe chooses add, merge, or ignore decisions for incoming memory candidates.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.78
+      }
+    ]
+  },
+  {
+    "name": "public docs query prefers placeholder credentials rule",
+    "query": "README examples placeholders not production credentials personal endpoints",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "readme-placeholders"
+    ],
+    "bad_result_ids": [
+      "wrangler-example"
+    ],
+    "memories": [
+      {
+        "id": "readme-placeholders",
+        "content": "README examples must use placeholders, not production credentials or personal endpoints.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "importance": 0.85,
+        "semantic": 0.72
+      },
+      {
+        "id": "wrangler-example",
+        "content": "wrangler.example.jsonc should stay generic and safe for public repos.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "debug display query prefers score details integration",
+    "query": "Pi MCP search results debug show score_details",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "score-details-debug"
+    ],
+    "bad_result_ids": [
+      "search-eval"
+    ],
+    "memories": [
+      {
+        "id": "score-details-debug",
+        "content": "Pi and MCP search results should optionally display score_details in debug mode while keeping default output concise.",
+        "project_id": "asaki-memory-manager",
+        "kind": "decision",
+        "semantic": 0.72
+      },
+      {
+        "id": "search-eval",
+        "content": "Use search eval cases to tune retrieval score thresholds and ranking behavior.",
+        "project_id": "asaki-memory-manager",
+        "kind": "workflow",
+        "semantic": 0.81
+      }
+    ]
+  },
+  {
+    "name": "omitted scope query prefers no vectorize prefilter rule",
+    "query": "scope omitted do not prefilter Vectorize project session default search global current project session",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "no-prefilter-omitted-scope"
+    ],
+    "bad_result_ids": [
+      "explicit-scope-filter"
+    ],
+    "memories": [
+      {
+        "id": "no-prefilter-omitted-scope",
+        "content": "Do not prefilter Vectorize by project or session when scope is omitted; default search must include global plus the current project and session.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "importance": 0.9,
+        "semantic": 0.73
+      },
+      {
+        "id": "explicit-scope-filter",
+        "content": "When explicit scope=project is provided, filter search results by the requested project_id.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.84
+      }
+    ]
+  },
+  {
+    "name": "hybrid fallback query prefers memories service search behavior",
+    "query": "search uses Vectorize D1 lexical fallback current token entity fallback",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "hybrid-search"
+    ],
+    "bad_result_ids": [
+      "future-fts"
+    ],
+    "memories": [
+      {
+        "id": "hybrid-search",
+        "content": "Search should keep hybrid Vectorize plus D1 lexical fallback behavior with current token and entity scoring.",
+        "project_id": "asaki-memory-manager",
+        "kind": "decision",
+        "semantic": 0.73
+      },
+      {
+        "id": "future-fts",
+        "content": "Future work may add D1 FTS5 BM25 recall alongside Vectorize before final rerank.",
+        "project_id": "asaki-memory-manager",
+        "kind": "decision",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "lifecycle query prefers stale archived policy",
+    "query": "stale archived low confidence long unused memories lowered weight",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "lifecycle-policy"
+    ],
+    "bad_result_ids": [
+      "memory-statuses"
+    ],
+    "memories": [
+      {
+        "id": "lifecycle-policy",
+        "content": "Lifecycle policy should suggest stale or archived memories and lower weight for low confidence or long-unused memories.",
+        "project_id": "asaki-memory-manager",
+        "kind": "decision",
+        "semantic": 0.72
+      },
+      {
+        "id": "memory-statuses",
+        "content": "Memory status can be active, archived, or deleted.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.83
       }
     ]
   }
