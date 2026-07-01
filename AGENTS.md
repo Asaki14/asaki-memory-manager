@@ -94,7 +94,7 @@ npm run deploy
 - Do not add a server-side conversation extraction endpoint; the Worker should not receive full conversation transcripts for extraction.
 - Candidate processing should run deterministic duplicate checks before LLM decisions.
 - Run `npm run eval:candidates` after changing candidate dedupe thresholds or prompts.
-- Pi auto inject defaults to `ASAKI_MEMORY_AUTO_MIN_SCORE=0.70`; keep low-score memories out of injected context.
+- Pi auto inject defaults to `ASAKI_MEMORY_AUTO_MIN_SCORE=0.50`; keep low-score memories out of injected context.
 - Keep changes small and consistent with existing style.
 - Run `npm run typecheck` after TypeScript edits.
 

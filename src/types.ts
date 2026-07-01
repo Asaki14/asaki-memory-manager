@@ -84,9 +84,18 @@ export interface MemoryRow {
   expires_at: string | null;
 }
 
+export interface SearchScoreDetails {
+  semantic: number;
+  keyword: number;
+  entity: number;
+  metadata: number;
+  source: 'vector' | 'keyword';
+}
+
 export interface SearchResult extends MemoryRow {
   similarity: number;
   score: number;
+  score_details: SearchScoreDetails;
 }
 
 export interface MemoryReviewRecord {
