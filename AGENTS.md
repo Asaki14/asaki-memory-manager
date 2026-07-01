@@ -12,35 +12,16 @@ Stack:
 - REST API first
 - Optional Pi integration in `integrations/pi/asaki-memory.ts`
 
-## Current implementation
+## Documentation roles
 
-Implemented:
-- `GET /health`
-- `POST /v1/memories`
-- `POST /v1/memories/search`
-- `POST /v1/memories/candidates`
-- `POST /v1/memories/list`
-- `GET /v1/memories/:id`
-- `PATCH /v1/memories/:id`
-- `DELETE /v1/memories/:id`
-- `POST /v1/memories/reviews`
-- `POST /v1/memories/reviews/list`
-- `POST /v1/memories/reviews/:id/resolve`
-- D1 schema and migrations
-- D1 + Vectorize write path
-- Vectorize + D1 lexical hybrid search
-- Candidate add / merge / ignore pipeline
-- Single `ADMIN_API_KEY` auth
-- Pi and MCP search/add/list/update/delete/review integrations
-
-Deferred:
-- Review UI
-- Cron maintenance
-- Table-driven API keys
+- `README.md`: public overview, setup, API, integration docs.
+- `ROADMAP.md`: planning source of truth, priorities, deferred work.
+- `AGENTS.md`: agent-only project context, commands, rules, workflows.
+- Do not recreate `PLAN.md`; keep docs concise and non-overlapping.
 
 ## Key files
 
-- `README.md`: public project documentation.
+- `ROADMAP.md`: project priorities and future work.
 - `wrangler.example.jsonc`: public Cloudflare binding template.
 - `migrations/0001_init.sql`: base D1 schema.
 - `migrations/0002_memory_reviews.sql`: memory review queue schema.
