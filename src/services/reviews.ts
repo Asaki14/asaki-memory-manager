@@ -76,7 +76,7 @@ export async function listMemoryReviews(env: Env, input: { user_id: string; stat
     bindings.push(input.status);
   }
   if (input.project_id) {
-    clauses.push('project_id = ?');
+    clauses.push('(project_id IS NULL OR project_id = ?)');
     bindings.push(input.project_id);
   }
   if (input.session_id) {
