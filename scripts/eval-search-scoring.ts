@@ -79,7 +79,21 @@ function score(item: SearchCase): ScoredMemory[] {
 
 const failures: string[] = [];
 
+function validateCase(item: SearchCase): void {
+  const ids = new Set(item.memories.map((fixture) => fixture.id));
+  if (ids.size !== item.memories.length) failures.push(`${item.name}: duplicate memory ids`);
+
+  for (const id of item.expected_top_ids) {
+    if (!ids.has(id)) failures.push(`${item.name}: expected id ${id} is missing from memories`);
+  }
+  for (const id of item.bad_result_ids ?? []) {
+    if (!ids.has(id)) failures.push(`${item.name}: bad result id ${id} is missing from memories`);
+    if (item.expected_top_ids.includes(id)) failures.push(`${item.name}: ${id} is both expected and bad`);
+  }
+}
+
 for (const item of cases) {
+  validateCase(item);
   const ranked = score(item);
   const topK = ranked.slice(0, item.top_k ?? 5);
   const rankById = new Map(ranked.map((result, index) => [result.id, index]));
