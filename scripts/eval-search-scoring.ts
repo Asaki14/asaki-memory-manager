@@ -78,17 +78,27 @@ function score(item: SearchCase): ScoredMemory[] {
 }
 
 const failures: string[] = [];
+const failedCases = new Set<string>();
+const caseNames = new Set<string>();
+
+function fail(item: SearchCase, message: string): void {
+  failedCases.add(item.name);
+  failures.push(`${item.name}: ${message}`);
+}
 
 function validateCase(item: SearchCase): void {
+  if (caseNames.has(item.name)) fail(item, 'duplicate case name');
+  caseNames.add(item.name);
+
   const ids = new Set(item.memories.map((fixture) => fixture.id));
-  if (ids.size !== item.memories.length) failures.push(`${item.name}: duplicate memory ids`);
+  if (ids.size !== item.memories.length) fail(item, 'duplicate memory ids');
 
   for (const id of item.expected_top_ids) {
-    if (!ids.has(id)) failures.push(`${item.name}: expected id ${id} is missing from memories`);
+    if (!ids.has(id)) fail(item, `expected id ${id} is missing from memories`);
   }
   for (const id of item.bad_result_ids ?? []) {
-    if (!ids.has(id)) failures.push(`${item.name}: bad result id ${id} is missing from memories`);
-    if (item.expected_top_ids.includes(id)) failures.push(`${item.name}: ${id} is both expected and bad`);
+    if (!ids.has(id)) fail(item, `bad result id ${id} is missing from memories`);
+    if (item.expected_top_ids.includes(id)) fail(item, `${id} is both expected and bad`);
   }
 }
 
@@ -100,7 +110,7 @@ for (const item of cases) {
 
   for (const id of item.expected_top_ids) {
     if (!topK.some((result) => result.id === id)) {
-      failures.push(`${item.name}: expected ${id} in top ${(item.top_k ?? 5)}, got ${topK.map((result) => result.id).join(', ')}`);
+      fail(item, `expected ${id} in top ${(item.top_k ?? 5)}, got ${topK.map((result) => result.id).join(', ')}`);
     }
   }
 
@@ -110,13 +120,13 @@ for (const item of cases) {
     for (const goodId of item.expected_top_ids) {
       const goodRank = rankById.get(goodId);
       if (goodRank !== undefined && badRank < goodRank) {
-        failures.push(`${item.name}: bad result ${badId} outranked ${goodId}`);
+        fail(item, `bad result ${badId} outranked ${goodId}`);
       }
     }
   }
 }
 
-console.log(`search eval: ${cases.length - failures.length}/${cases.length} passed`);
+console.log(`search eval: ${cases.length - failedCases.size}/${cases.length} passed`);
 
 if (failures.length > 0) {
   console.log('fail:');

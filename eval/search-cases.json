@@ -515,5 +515,911 @@
         "semantic": 0.83
       }
     ]
+  },
+  {
+    "name": "create memory query prefers add route behavior",
+    "query": "POST /v1/memories add creates memory and indexes embedding",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "create-memory-route"
+    ],
+    "bad_result_ids": [
+      "list-memory-route"
+    ],
+    "memories": [
+      {
+        "id": "create-memory-route",
+        "content": "POST /v1/memories creates a memory, writes it to D1, and attempts embedding upsert into Vectorize.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.79
+      },
+      {
+        "id": "list-memory-route",
+        "content": "POST /v1/memories/list returns stored memories with optional scope, kind, status, source, limit, and offset filters.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "list memory query prefers management list route",
+    "query": "POST /v1/memories/list limit offset status kind source filters",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "list-memory-route"
+    ],
+    "bad_result_ids": [
+      "search-endpoint"
+    ],
+    "memories": [
+      {
+        "id": "list-memory-route",
+        "content": "POST /v1/memories/list returns stored memories with optional scope, kind, status, source, limit, and offset filters.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.79
+      },
+      {
+        "id": "search-endpoint",
+        "content": "POST /v1/memories/search searches active memories and returns score_details for each result.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "update content query prefers reindex behavior",
+    "query": "update memory content importance confidence reindex Vectorize",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "update-reindex"
+    ],
+    "bad_result_ids": [
+      "create-memory-route"
+    ],
+    "memories": [
+      {
+        "id": "update-reindex",
+        "content": "Updating memory content updates importance and confidence, regenerates the embedding, and refreshes index_status.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.79
+      },
+      {
+        "id": "create-memory-route",
+        "content": "POST /v1/memories creates a memory, writes it to D1, and attempts embedding upsert into Vectorize.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "delete query prefers soft delete behavior",
+    "query": "delete memory soft delete status deleted Vectorize failure logged",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "soft-delete"
+    ],
+    "bad_result_ids": [
+      "vectorize-upsert-failure"
+    ],
+    "memories": [
+      {
+        "id": "soft-delete",
+        "content": "Deleting a memory is a D1 soft delete that sets status=deleted; Vectorize delete failures should be logged without losing the D1 state.",
+        "project_id": "asaki-memory-manager",
+        "kind": "bug_fix",
+        "semantic": 0.79,
+        "importance": 0.8
+      },
+      {
+        "id": "vectorize-upsert-failure",
+        "content": "If Vectorize upsert fails, keep the D1 write and mark index_status=pending or failed.",
+        "project_id": "asaki-memory-manager",
+        "kind": "bug_fix",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "memory events query prefers event logging service",
+    "query": "memory_events add merge ignore search vectorize_failed audit log",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "memory-events"
+    ],
+    "bad_result_ids": [
+      "review-resolve"
+    ],
+    "memories": [
+      {
+        "id": "memory-events",
+        "content": "src/services/memoryEvents.ts records add, merge, ignore, search, vectorize_failed, and related audit events.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.79
+      },
+      {
+        "id": "review-resolve",
+        "content": "Memory review queue supports pending review items and resolving them as add, merge, or ignore.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "auth query prefers admin key v1 protection",
+    "query": "all /v1 routes require ADMIN_API_KEY authorization header",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "admin-auth"
+    ],
+    "bad_result_ids": [
+      "wrangler-secret"
+    ],
+    "memories": [
+      {
+        "id": "admin-auth",
+        "content": "All /v1 routes require ADMIN_API_KEY authentication through the configured authorization header.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.79,
+        "importance": 0.85
+      },
+      {
+        "id": "wrangler-secret",
+        "content": "Use Wrangler secrets for ADMIN_API_KEY and never commit raw credentials.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "local smoke query prefers management smoke script",
+    "query": "smoke management local Wrangler create list get update delete",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "smoke-management"
+    ],
+    "bad_result_ids": [
+      "typecheck-workflow"
+    ],
+    "memories": [
+      {
+        "id": "smoke-management",
+        "content": "npm run smoke:management verifies create, list, get, update, and delete against a local Wrangler/D1 server.",
+        "project_id": "asaki-memory-manager",
+        "kind": "workflow",
+        "semantic": 0.79
+      },
+      {
+        "id": "typecheck-workflow",
+        "content": "Run npm run typecheck after TypeScript edits.",
+        "project_id": "asaki-memory-manager",
+        "kind": "workflow",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "migration query prefers local d1 migration command",
+    "query": "run D1 migrations local wrangler d1 migrations apply",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "local-migrate"
+    ],
+    "bad_result_ids": [
+      "remote-migrate"
+    ],
+    "memories": [
+      {
+        "id": "local-migrate",
+        "content": "npm run db:migrate:local applies D1 migrations to the local asaki-memory-manager database.",
+        "project_id": "asaki-memory-manager",
+        "kind": "workflow",
+        "semantic": 0.79
+      },
+      {
+        "id": "remote-migrate",
+        "content": "npm run db:migrate:remote applies D1 migrations to the remote Cloudflare database.",
+        "project_id": "asaki-memory-manager",
+        "kind": "workflow",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "remote migrate query prefers remote d1 command",
+    "query": "remote Cloudflare D1 migrations apply production database",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "remote-migrate"
+    ],
+    "bad_result_ids": [
+      "local-migrate"
+    ],
+    "memories": [
+      {
+        "id": "remote-migrate",
+        "content": "npm run db:migrate:remote applies D1 migrations to the remote Cloudflare database.",
+        "project_id": "asaki-memory-manager",
+        "kind": "workflow",
+        "semantic": 0.79
+      },
+      {
+        "id": "local-migrate",
+        "content": "npm run db:migrate:local applies D1 migrations to the local asaki-memory-manager database.",
+        "project_id": "asaki-memory-manager",
+        "kind": "workflow",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "candidate deterministic query prefers duplicate checks before llm",
+    "query": "candidate processing deterministic duplicate checks before LLM decisions",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "deterministic-before-llm"
+    ],
+    "bad_result_ids": [
+      "structured-extraction"
+    ],
+    "memories": [
+      {
+        "id": "deterministic-before-llm",
+        "content": "Candidate processing should run deterministic duplicate checks before LLM decisions.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.79
+      },
+      {
+        "id": "structured-extraction",
+        "content": "Structured memory extraction can normalize subject, predicate, object, scope, kind, and entities before storage.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "same keyword different fact query prefers add decision",
+    "query": "same keyword different facts must add not merge",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "same-keyword-add"
+    ],
+    "bad_result_ids": [
+      "merge-extends"
+    ],
+    "memories": [
+      {
+        "id": "same-keyword-add",
+        "content": "For candidate dedupe, same keywords with different facts must choose add, not merge.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.79
+      },
+      {
+        "id": "merge-extends",
+        "content": "Candidate dedupe should merge when a candidate extends the same durable memory with useful new detail.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "merge audit query prefers matched memory reason logging",
+    "query": "merge before audit matched_memory reason record",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "merge-audit"
+    ],
+    "bad_result_ids": [
+      "review-resolve"
+    ],
+    "memories": [
+      {
+        "id": "merge-audit",
+        "content": "Before merging a memory candidate, record matched_memory and reason so the decision can be audited.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.79
+      },
+      {
+        "id": "review-resolve",
+        "content": "Memory review queue supports pending review items and resolving them as add, merge, or ignore.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "compression query prefers summary consolidation",
+    "query": "compress old memories same topic into summary",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "memory-compression"
+    ],
+    "bad_result_ids": [
+      "lifecycle-policy"
+    ],
+    "memories": [
+      {
+        "id": "memory-compression",
+        "content": "Old memories about the same topic may be consolidated into a summary memory.",
+        "project_id": "asaki-memory-manager",
+        "kind": "decision",
+        "semantic": 0.79
+      },
+      {
+        "id": "lifecycle-policy",
+        "content": "Lifecycle policy should suggest stale or archived memories and lower weight for low confidence or long-unused memories.",
+        "project_id": "asaki-memory-manager",
+        "kind": "decision",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "conflict query prefers conflict governance",
+    "query": "conflicting memories do not overwrite mark conflict",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "conflict-governance"
+    ],
+    "bad_result_ids": [
+      "memory-compression"
+    ],
+    "memories": [
+      {
+        "id": "conflict-governance",
+        "content": "Conflicting memories should not directly overwrite each other; mark the conflict for review.",
+        "project_id": "asaki-memory-manager",
+        "kind": "decision",
+        "semantic": 0.79
+      },
+      {
+        "id": "memory-compression",
+        "content": "Old memories about the same topic may be consolidated into a summary memory.",
+        "project_id": "asaki-memory-manager",
+        "kind": "decision",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "fts query prefers bm25 roadmap item",
+    "query": "D1 FTS5 BM25 full text index recall",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "future-fts"
+    ],
+    "bad_result_ids": [
+      "hybrid-search"
+    ],
+    "memories": [
+      {
+        "id": "future-fts",
+        "content": "Future work may add D1 FTS5 BM25 recall alongside Vectorize before final rerank.",
+        "project_id": "asaki-memory-manager",
+        "kind": "decision",
+        "semantic": 0.79
+      },
+      {
+        "id": "hybrid-search",
+        "content": "Search should keep hybrid Vectorize plus D1 lexical fallback behavior with current token and entity scoring.",
+        "project_id": "asaki-memory-manager",
+        "kind": "decision",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "rank fusion query prefers reciprocal rank fusion",
+    "query": "reciprocal rank fusion normalized rank fusion semantic keyword entity metadata",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "rank-fusion"
+    ],
+    "bad_result_ids": [
+      "score-details-debug"
+    ],
+    "memories": [
+      {
+        "id": "rank-fusion",
+        "content": "Rank fusion may move from hand-written weighted scoring to reciprocal rank fusion or normalized rank fusion while preserving semantic, keyword, entity, and metadata details.",
+        "project_id": "asaki-memory-manager",
+        "kind": "decision",
+        "semantic": 0.79
+      },
+      {
+        "id": "score-details-debug",
+        "content": "Pi and MCP search results should optionally display score_details in debug mode while keeping default output concise.",
+        "project_id": "asaki-memory-manager",
+        "kind": "decision",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "entity extraction query prefers path env endpoint handling",
+    "query": "entity extraction paths env vars endpoints package repo file names",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "entity-extraction"
+    ],
+    "bad_result_ids": [
+      "rank-fusion"
+    ],
+    "memories": [
+      {
+        "id": "entity-extraction",
+        "content": "Entity extraction should better recognize paths, env vars, endpoints, packages, repos, and file names such as ASAKI_MEMORY_AUTO_INJECT and src/services/memories.ts.",
+        "project_id": "asaki-memory-manager",
+        "kind": "decision",
+        "semantic": 0.79
+      },
+      {
+        "id": "rank-fusion",
+        "content": "Rank fusion may move from hand-written weighted scoring to reciprocal rank fusion or normalized rank fusion while preserving semantic, keyword, entity, and metadata details.",
+        "project_id": "asaki-memory-manager",
+        "kind": "decision",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "observability query prefers replay logging",
+    "query": "record search query returned ids score_details injected offline replay",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "observability-replay"
+    ],
+    "bad_result_ids": [
+      "memory-events"
+    ],
+    "memories": [
+      {
+        "id": "observability-replay",
+        "content": "Observability should record search query, returned IDs, score_details, and whether the result was injected, then support offline replay.",
+        "project_id": "asaki-memory-manager",
+        "kind": "decision",
+        "semantic": 0.79
+      },
+      {
+        "id": "memory-events",
+        "content": "src/services/memoryEvents.ts records add, merge, ignore, search, vectorize_failed, and related audit events.",
+        "project_id": "asaki-memory-manager",
+        "kind": "decision",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "llm rerank query prefers do not do rule",
+    "query": "do not use complex LLM rerank cost latency not worth it",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "no-llm-rerank"
+    ],
+    "bad_result_ids": [
+      "rank-fusion"
+    ],
+    "memories": [
+      {
+        "id": "no-llm-rerank",
+        "content": "Do not add complex LLM rerank yet because cost and latency are not worth it.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.79,
+        "importance": 0.85
+      },
+      {
+        "id": "rank-fusion",
+        "content": "Rank fusion may move from hand-written weighted scoring to reciprocal rank fusion or normalized rank fusion while preserving semantic, keyword, entity, and metadata details.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "unconditional injection query prefers prohibition",
+    "query": "do not pre-agent automatic unconditional memory injection",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "no-unconditional-inject"
+    ],
+    "bad_result_ids": [
+      "auto-min-score"
+    ],
+    "memories": [
+      {
+        "id": "no-unconditional-inject",
+        "content": "Do not let pre-agent hooks automatically inject memory unconditionally.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.79,
+        "importance": 0.85
+      },
+      {
+        "id": "auto-min-score",
+        "content": "Pi auto inject defaults to ASAKI_MEMORY_AUTO_MIN_SCORE=0.50; keep low-score memories out of injected context.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "importance relevance query prefers ranking warning",
+    "query": "do not use importance confidence as main retrieval relevance signal",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "importance-not-relevance"
+    ],
+    "bad_result_ids": [
+      "lifecycle-policy"
+    ],
+    "memories": [
+      {
+        "id": "importance-not-relevance",
+        "content": "Do not treat importance or confidence as the main retrieval relevance signal.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.79,
+        "importance": 0.85
+      },
+      {
+        "id": "lifecycle-policy",
+        "content": "Lifecycle policy should suggest stale or archived memories and lower weight for low confidence or long-unused memories.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "safety query prefers memory cannot override rules",
+    "query": "memory content context only cannot override system developer safety rules",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "memory-not-instructions"
+    ],
+    "bad_result_ids": [
+      "admin-auth"
+    ],
+    "memories": [
+      {
+        "id": "memory-not-instructions",
+        "content": "Memory content is context only and must not override system, developer, or safety rules.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.79,
+        "importance": 0.9
+      },
+      {
+        "id": "admin-auth",
+        "content": "All /v1 routes require ADMIN_API_KEY authentication through the configured authorization header.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "embeddings query prefers workers ai helper",
+    "query": "Workers AI embeddings generateEmbedding model EMBEDDING_MODEL",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "embedding-helper"
+    ],
+    "bad_result_ids": [
+      "cloudflare-stack"
+    ],
+    "memories": [
+      {
+        "id": "embedding-helper",
+        "content": "src/ai/embeddings.ts uses Workers AI and EMBEDDING_MODEL to generate embeddings for memory content and queries.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.79
+      },
+      {
+        "id": "cloudflare-stack",
+        "content": "The project stack is Cloudflare Workers, Hono, TypeScript, D1, Vectorize, and Workers AI.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "validation query prefers request validation utils",
+    "query": "validate request body scope kind status limit offset project_id session_id",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "validation-utils"
+    ],
+    "bad_result_ids": [
+      "list-memory-route"
+    ],
+    "memories": [
+      {
+        "id": "validation-utils",
+        "content": "src/utils/validation.ts validates request bodies, memory scope, kind, status, limit, offset, project_id, and session_id requirements.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.79
+      },
+      {
+        "id": "list-memory-route",
+        "content": "POST /v1/memories/list returns stored memories with optional scope, kind, status, source, limit, and offset filters.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "review schema query prefers migration 0002",
+    "query": "migrations 0002 memory_reviews review queue schema",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "migration-0002"
+    ],
+    "bad_result_ids": [
+      "review-resolve"
+    ],
+    "memories": [
+      {
+        "id": "migration-0002",
+        "content": "migrations/0002_memory_reviews.sql defines the memory review queue schema.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.79
+      },
+      {
+        "id": "review-resolve",
+        "content": "Memory review queue supports pending review items and resolving them as add, merge, or ignore.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "base schema query prefers migration 0001",
+    "query": "migrations 0001 memories base D1 schema memory_events",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "migration-0001"
+    ],
+    "bad_result_ids": [
+      "migration-0002"
+    ],
+    "memories": [
+      {
+        "id": "migration-0001",
+        "content": "migrations/0001_init.sql defines the base D1 schema for memories and memory_events.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.79
+      },
+      {
+        "id": "migration-0002",
+        "content": "migrations/0002_memory_reviews.sql defines the memory review queue schema.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "pi integration query prefers pi extension path",
+    "query": "integrations pi asaki-memory optional Pi extension",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "pi-integration"
+    ],
+    "bad_result_ids": [
+      "mcp-integration"
+    ],
+    "memories": [
+      {
+        "id": "pi-integration",
+        "content": "integrations/pi/asaki-memory.ts is the optional Pi integration extension.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.79
+      },
+      {
+        "id": "mcp-integration",
+        "content": "integrations/mcp/asaki-memory.ts exposes Asaki Memory as an MCP integration.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "mcp integration query prefers mcp path",
+    "query": "integrations mcp asaki-memory MCP server tools",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "mcp-integration"
+    ],
+    "bad_result_ids": [
+      "pi-integration"
+    ],
+    "memories": [
+      {
+        "id": "mcp-integration",
+        "content": "integrations/mcp/asaki-memory.ts exposes Asaki Memory as an MCP integration.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.79
+      },
+      {
+        "id": "pi-integration",
+        "content": "integrations/pi/asaki-memory.ts is the optional Pi integration extension.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "deploy query prefers release checklist",
+    "query": "before publishing typecheck no secrets placeholder credentials license",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "release-checklist"
+    ],
+    "bad_result_ids": [
+      "typecheck-workflow"
+    ],
+    "memories": [
+      {
+        "id": "release-checklist",
+        "content": "Before publishing, typecheck must pass, secrets must be absent, README examples must use placeholders, and License must exist.",
+        "project_id": "asaki-memory-manager",
+        "kind": "workflow",
+        "semantic": 0.79,
+        "importance": 0.85
+      },
+      {
+        "id": "typecheck-workflow",
+        "content": "Run npm run typecheck after TypeScript edits.",
+        "project_id": "asaki-memory-manager",
+        "kind": "workflow",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "no plan query prefers docs non overlap rule",
+    "query": "do not recreate PLAN.md keep docs concise non-overlapping",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "no-plan-md"
+    ],
+    "bad_result_ids": [
+      "roadmap-role"
+    ],
+    "memories": [
+      {
+        "id": "no-plan-md",
+        "content": "Do not recreate PLAN.md; keep docs concise and non-overlapping.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.79,
+        "importance": 0.85
+      },
+      {
+        "id": "roadmap-role",
+        "content": "ROADMAP.md is the planning source of truth for priorities and deferred work.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "no secrets query prefers wrangler jsonc ignore",
+    "query": "never commit .env .dev.vars wrangler.jsonc private keys tokens secrets",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "secret-files"
+    ],
+    "bad_result_ids": [
+      "wrangler-secret"
+    ],
+    "memories": [
+      {
+        "id": "secret-files",
+        "content": "Never commit .env, .dev.vars, wrangler.jsonc, private keys, tokens, or secrets.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.79,
+        "importance": 0.95
+      },
+      {
+        "id": "wrangler-secret",
+        "content": "Use Wrangler secrets for ADMIN_API_KEY and never commit raw credentials.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "user isolation query prefers user id filtering",
+    "query": "all memory queries filter by user_id isolation",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "user-id-filter"
+    ],
+    "bad_result_ids": [
+      "admin-auth"
+    ],
+    "memories": [
+      {
+        "id": "user-id-filter",
+        "content": "All memory queries must filter by user_id to preserve user isolation.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.79,
+        "importance": 0.95
+      },
+      {
+        "id": "admin-auth",
+        "content": "All /v1 routes require ADMIN_API_KEY authentication through the configured authorization header.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.82
+      }
+    ]
   }
 ]
