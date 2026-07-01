@@ -1,0 +1,202 @@
+[
+  {
+    "name": "pi auto inject env var outranks unrelated extension memory",
+    "query": "Asaki memory Pi extension agent-decided memory retrieval auto inject disabled default ASAKI_MEMORY_AUTO_INJECT",
+    "project_id": ".pi",
+    "top_k": 3,
+    "expected_top_ids": ["asaki-auto-inject"],
+    "bad_result_ids": ["atomic-commit"],
+    "memories": [
+      {
+        "id": "atomic-commit",
+        "content": "atomic-commit extension now generates English Conventional Commit subjects from git status/worktree changes instead of extracting assistant/user conversation text; it also filters key-exit-debug.log from auto-commit summaries and temp-index commits as runtime noise.",
+        "project_id": ".pi",
+        "kind": "decision",
+        "importance": 0.7,
+        "confidence": 0.95,
+        "semantic": 0.885
+      },
+      {
+        "id": "asaki-auto-inject",
+        "content": "Asaki memory Pi extension auto-injection was optimized: automatic memory search now only runs when the prompt matches memory-needed cues unless ASAKI_MEMORY_AUTO_INJECT_ALWAYS is enabled; empty/no-injection search displays are hidden unless ASAKI_MEMORY_DEBUG is enabled.",
+        "project_id": ".pi",
+        "kind": "decision",
+        "importance": 0.65,
+        "confidence": 0.9,
+        "semantic": 0.846
+      }
+    ]
+  },
+  {
+    "name": "endpoint query prefers exact endpoint over same broad route words",
+    "query": "POST /v1/memories/search returns score_details and search results",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": ["search-endpoint"],
+    "bad_result_ids": ["candidate-endpoint"],
+    "memories": [
+      {
+        "id": "search-endpoint",
+        "content": "POST /v1/memories/search searches active memories and returns score_details for each result.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.78
+      },
+      {
+        "id": "candidate-endpoint",
+        "content": "POST /v1/memories/candidates processes add merge ignore decisions for memory candidates.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.81
+      }
+    ]
+  },
+  {
+    "name": "secret handling query prefers admin api key rule",
+    "query": "how should ADMIN_API_KEY be stored for Cloudflare deploy",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": ["wrangler-secret"],
+    "bad_result_ids": ["wrangler-jsonc"],
+    "memories": [
+      {
+        "id": "wrangler-secret",
+        "content": "Use Wrangler secrets for ADMIN_API_KEY and never commit raw credentials.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "importance": 0.8,
+        "semantic": 0.75
+      },
+      {
+        "id": "wrangler-jsonc",
+        "content": "Keep wrangler.example.jsonc generic and safe for public repos; wrangler.jsonc stays local.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "semantic": 0.82
+      }
+    ]
+  },
+  {
+    "name": "source of truth query prefers D1 Vectorize architecture decision",
+    "query": "D1 source of truth Vectorize recoverable index",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": ["d1-source-truth"],
+    "bad_result_ids": ["cloudflare-stack"],
+    "memories": [
+      {
+        "id": "d1-source-truth",
+        "content": "D1 is the source of truth; Vectorize is a recoverable semantic index.",
+        "project_id": "asaki-memory-manager",
+        "kind": "decision",
+        "semantic": 0.72
+      },
+      {
+        "id": "cloudflare-stack",
+        "content": "The project stack is Cloudflare Workers, Hono, TypeScript, D1, Vectorize, and Workers AI.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.8
+      }
+    ]
+  },
+  {
+    "name": "scope query prefers current project over global broad preference",
+    "query": "run npm run typecheck after TypeScript edits",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": ["typecheck-workflow"],
+    "bad_result_ids": ["global-style"],
+    "memories": [
+      {
+        "id": "typecheck-workflow",
+        "content": "Run npm run typecheck after TypeScript edits.",
+        "project_id": "asaki-memory-manager",
+        "kind": "workflow",
+        "importance": 0.75,
+        "semantic": 0.74
+      },
+      {
+        "id": "global-style",
+        "scope": "global",
+        "content": "主公 prefers concise answers and minimal changes when coding.",
+        "kind": "preference",
+        "importance": 0.9,
+        "semantic": 0.83
+      }
+    ]
+  },
+  {
+    "name": "path query prefers exact file path memory",
+    "query": "src/services/memories.ts search fallback Vectorize lexical behavior",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": ["memories-service"],
+    "bad_result_ids": ["reviews-service"],
+    "memories": [
+      {
+        "id": "memories-service",
+        "content": "src/services/memories.ts keeps hybrid Vectorize plus D1 lexical fallback search behavior.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.75
+      },
+      {
+        "id": "reviews-service",
+        "content": "src/services/reviews.ts manages memory review queue creation, listing, and resolution.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.79
+      }
+    ]
+  },
+  {
+    "name": "candidate dedupe eval query prefers threshold guidance",
+    "query": "after changing candidate dedupe thresholds prompts run eval candidates",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": ["candidate-eval"],
+    "bad_result_ids": ["search-eval"],
+    "memories": [
+      {
+        "id": "candidate-eval",
+        "content": "Run npm run eval:candidates after changing candidate dedupe thresholds or prompts.",
+        "project_id": "asaki-memory-manager",
+        "kind": "workflow",
+        "semantic": 0.72
+      },
+      {
+        "id": "search-eval",
+        "content": "Use search eval cases to tune retrieval score thresholds and ranking behavior.",
+        "project_id": "asaki-memory-manager",
+        "kind": "workflow",
+        "semantic": 0.8
+      }
+    ]
+  },
+  {
+    "name": "conversation extraction query prefers agent-side rule",
+    "query": "do not send full conversation transcripts Worker extraction endpoint",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": ["agent-side-extraction"],
+    "bad_result_ids": ["structured-extraction"],
+    "memories": [
+      {
+        "id": "agent-side-extraction",
+        "content": "The active conversation agent extracts durable memory and calls asaki_memory_add; do not send full conversation transcripts to the Worker.",
+        "project_id": "asaki-memory-manager",
+        "kind": "rule",
+        "importance": 0.85,
+        "semantic": 0.73
+      },
+      {
+        "id": "structured-extraction",
+        "content": "Structured memory extraction can normalize subject, predicate, object, scope, kind, and entities before storage.",
+        "project_id": "asaki-memory-manager",
+        "kind": "decision",
+        "semantic": 0.81
+      }
+    ]
+  }
+]
