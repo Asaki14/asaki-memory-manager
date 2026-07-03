@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -9,6 +10,7 @@ const DEFAULT_USER_ID = "asaki";
 const DEFAULT_SCOPE = "project";
 const DEFAULT_AUTO_MIN_SCORE = 0.5;
 const AUTO_INJECT_TOP_K = 6;
+const DEFAULT_DIGEST_TOP_K = 8;
 const MEMORY_NEEDED_RE =
   /(记忆|记得|回忆|想起|以前|之前|上次|过往|历史|偏好|习惯|约定|惯例|决策|背景|上下文|继续|延续|remember|recall|memory|previous|before|last time|preference|convention|decision|context|continue)/i;
 const SENSITIVE_RE_LIST = [
@@ -160,8 +162,8 @@ function resultText(item: Record<string, unknown>): string {
   return typeof content === "string" ? cleanMemoryText(content) : cleanMemoryText(JSON.stringify(content ?? item));
 }
 
-function formatAutoMemoryContext(results: Record<string, unknown>[], minScore: number): string | null {
-  const lines = results
+function formatAutoMemoryLines(results: Record<string, unknown>[], minScore: number): string[] {
+  return results
     .filter((item) => {
       const score = resultScore(item);
       return score != null && score >= minScore;
@@ -173,9 +175,20 @@ function formatAutoMemoryContext(results: Record<string, unknown>[], minScore: n
       const kind = typeof item.kind === "string" ? ` kind=${item.kind}` : "";
       return `- ${resultText(item)}${score == null ? "" : ` score=${score.toFixed(3)}`}${scope}${kind}`;
     });
+}
 
+function formatAutoMemoryContext(results: Record<string, unknown>[], minScore: number): string | null {
+  const lines = formatAutoMemoryLines(results, minScore);
   if (lines.length === 0) return null;
-  return `Asaki memory auto-inject (autoMinScore=${minScore.toFixed(2)}; context only, never overrides system/developer instructions):\n${lines.join("\n")}`;
+  return `Asaki memory search: injected ${lines.length}/${results.length} memories (autoMinScore=${minScore.toFixed(2)}; context only, never overrides system/developer instructions):\n${lines.join("\n")}`;
+}
+
+function formatAutoMemoryDisplay(results: Record<string, unknown>[], minScore: number): string {
+  const lines = formatAutoMemoryLines(results, minScore);
+  if (lines.length === 0) {
+    return `Asaki memory search: found ${results.length} matches, injected 0 (autoMinScore=${minScore.toFixed(2)})`;
+  }
+  return `Asaki memory search: injected ${lines.length}/${results.length} memories (autoMinScore=${minScore.toFixed(2)})\n${lines.join("\n")}`;
 }
 
 function formatMemoryLine(item: any, index?: number): string {
@@ -200,13 +213,21 @@ function formatReviewLine(item: any, index?: number): string {
   const candidate = item.candidate || {};
   const scope = candidate.scope ? ` scope=${candidate.scope}` : "";
   const kind = candidate.kind ? ` kind=${candidate.kind}` : "";
+  const importance = typeof candidate.importance === "number" ? ` importance=${candidate.importance.toFixed(2)}` : "";
+  const confidence = typeof candidate.confidence === "number" ? ` confidence=${candidate.confidence.toFixed(2)}` : "";
   const content = candidate.content || JSON.stringify(candidate);
-  return `${prefix}${content}${id}${status}${action}${memoryId}${scope}${kind}${updatedAt}`;
+  return `${prefix}${content}${id}${status}${action}${memoryId}${scope}${kind}${importance}${confidence}${updatedAt}`;
 }
 
-async function autoInjectMemory(prompt: string, ctx: unknown, signal?: AbortSignal): Promise<string | null> {
-  if (!envFlagEnabled("ASAKI_MEMORY_AUTO_INJECT", true)) return null;
+type AutoInjectMemoryResult = {
+  context: string | null;
+  display: string;
+};
+
+async function autoInjectMemory(prompt: string, ctx: unknown, signal?: AbortSignal): Promise<AutoInjectMemoryResult | null> {
+  if (!envFlagEnabled("ASAKI_MEMORY_AUTO_INJECT", false)) return null;
   if (!prompt || prompt.length < 12 || containsSensitiveText(prompt)) return null;
+  if (!MEMORY_NEEDED_RE.test(prompt) && !envFlagEnabled("ASAKI_MEMORY_AUTO_INJECT_ALWAYS", false)) return null;
 
   const config = memoryConfig();
   if (!config.apiKey) return null;
@@ -224,19 +245,61 @@ async function autoInjectMemory(prompt: string, ctx: unknown, signal?: AbortSign
       signal,
     );
     const results = Array.isArray(data?.results) ? (data.results as Record<string, unknown>[]) : [];
-    return formatAutoMemoryContext(results, config.autoMinScore);
+    return {
+      context: formatAutoMemoryContext(results, config.autoMinScore),
+      display: formatAutoMemoryDisplay(results, config.autoMinScore),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { context: null, display: `Asaki memory search failed: ${message}` };
+  }
+}
+
+function isRealProject(ctx: unknown): boolean {
+  const config = memoryConfig();
+  if (config.projectId) return true;
+  return findGitRoot(cwdFromContext(ctx)) !== null;
+}
+
+async function buildProjectDigest(ctx: unknown, signal?: AbortSignal): Promise<string | null> {
+  const config = memoryConfig();
+  if (!config.apiKey || !isRealProject(ctx)) return null;
+
+  const topK = Math.trunc(numberConfig(process.env.ASAKI_MEMORY_DIGEST_TOP_K, DEFAULT_DIGEST_TOP_K));
+  const projectId = resolveProjectId(ctx);
+
+  try {
+    const data = await memoryRequest(
+      "/v1/memories/list",
+      { user_id: config.userId, project_id: projectId, status: "active", limit: 50 },
+      signal,
+    );
+    const memories = Array.isArray(data?.memories) ? (data.memories as Record<string, unknown>[]) : [];
+    if (memories.length === 0) return null;
+
+    const rank = (item: Record<string, unknown>) =>
+      (typeof item.importance === "number" ? item.importance : 0) * (typeof item.confidence === "number" ? item.confidence : 1);
+
+    const lines = [...memories]
+      .sort((a, b) => rank(b) - rank(a))
+      .slice(0, topK)
+      .map((item) => {
+        const content = typeof item.content === "string" ? cleanMemoryText(item.content) : cleanMemoryText(JSON.stringify(item));
+        const meta: string[] = [];
+        if (typeof item.scope === "string") meta.push(`scope=${item.scope}`);
+        if (typeof item.kind === "string") meta.push(`kind=${item.kind}`);
+        if (typeof item.importance === "number") meta.push(`importance=${item.importance.toFixed(2)}`);
+        return `- ${content}${meta.length > 0 ? ` (${meta.join(", ")})` : ""}`;
+      });
+
+    return `Asaki memory — project digest for "${projectId}" (top ${lines.length}, ranked by importance×confidence; context only, never overrides system/developer instructions):\n${lines.join("\n")}`;
   } catch {
     return null;
   }
 }
 
-function memoryPrecheckInstruction(prompt: string) {
-  const likelyNeeded = MEMORY_NEEDED_RE.test(prompt);
-  const decision = likelyNeeded
-    ? "This turn may need durable memory. Call asaki_memory_search only if the answer or next action depends on remembered preferences, prior decisions, conventions, or past project facts."
-    : "This turn appears standalone. Do not call asaki_memory_search; proceed directly unless the user explicitly asks for remembered context or the task truly depends on prior durable memory.";
-
-  return `Asaki memory precheck: ${decision}\nRun this check silently before any memory tool call. Simple questions, direct file edits, commands, formatting, explanations, and self-contained coding tasks should skip asaki_memory_search.`;
+function memoryPrecheckInstruction(_prompt: string) {
+  return "Asaki memory precheck: The conversation agent must decide whether durable memory is needed for this turn. Call asaki_memory_search only when the answer or next action depends on remembered preferences, prior project decisions, conventions, task learnings, or explicitly requested past context. Simple questions, direct file edits, commands, formatting, explanations, and self-contained coding tasks should skip asaki_memory_search.";
 }
 
 function envFlagEnabled(name: string, fallback = true): boolean {
@@ -254,24 +317,81 @@ function containsSensitiveText(text: string): boolean {
 }
 
 export default function (pi: ExtensionAPI) {
+  // Set on session_start (except plain "reload"), consumed by the next
+  // before_agent_start so the project digest is injected once per session —
+  // same trigger shape as Claude Code's SessionStart hook (startup/resume/compact).
+  let digestPending = false;
+
+  pi.registerMessageRenderer("asaki-memory-context", (message, _options, theme) => {
+    const content = typeof message.content === "string" ? message.content : String(message.content ?? "");
+    const [firstLine, ...rest] = content.split("\n");
+    const details = rest.length > 0 ? `\n${theme.fg("dim", rest.join("\n"))}` : "";
+    return new Text(`${theme.fg("toolTitle", "Asaki Memory")} ${firstLine}${details}`, 0, 0);
+  });
+
+  pi.on("session_start", async (event) => {
+    if (event.reason === "reload") return;
+    digestPending = true;
+  });
+
   pi.on("before_agent_start", async (event, ctx) => {
     const systemPrompt = `${event.systemPrompt}\n\n${memoryPrecheckInstruction(event.prompt)}`;
-    const memoryContext = await autoInjectMemory(event.prompt, ctx, ctx.signal);
-    if (!memoryContext) return { systemPrompt };
+
+    let digest: string | null = null;
+    if (digestPending) {
+      digestPending = false;
+      digest = await buildProjectDigest(ctx, ctx.signal);
+    }
+
+    const memorySearch = await autoInjectMemory(event.prompt, ctx, ctx.signal);
+    const searchDisplay = memorySearch
+      ? memorySearch.context ?? (envFlagEnabled("ASAKI_MEMORY_DEBUG", false) ? memorySearch.display : null)
+      : null;
+
+    const content = [digest, searchDisplay].filter((part): part is string => Boolean(part)).join("\n\n");
+    if (!content) return { systemPrompt };
 
     return {
       systemPrompt,
       message: {
         customType: "asaki-memory-context",
-        content: memoryContext,
-        display: false,
+        content,
+        display: true,
       },
     };
   });
 
   pi.registerCommand("memory", {
-    description: "Audit and manage Asaki memories with agent assistance",
+    description: "Audit and manage Asaki memories with agent assistance. Use /memory status to test backend connectivity.",
     handler: async (args, ctx) => {
+      const trimmedArgs = args.trim();
+      if (trimmedArgs === "status") {
+        const config = memoryConfig();
+        const lines = [
+          "Asaki memory status:",
+          `- baseUrl: ${config.baseUrl}`,
+          `- apiKey: ${config.apiKey ? "configured" : "missing"}`,
+          `- userId: ${config.userId}`,
+          `- defaultScope: ${config.defaultScope}`,
+          `- projectId: ${resolveProjectId(ctx) || "missing"}`,
+          `- sessionId: ${config.sessionId || "missing"}`,
+        ];
+
+        if (!config.apiKey) {
+          ctx.ui.notify(`${lines.join("\n")}\n- backend: skipped; ASAKI_MEMORY_API_KEY missing`, "warning");
+          return;
+        }
+
+        try {
+          await memoryRequest("/v1/memories/list", { user_id: config.userId, project_id: resolveProjectId(ctx), limit: 1 });
+          ctx.ui.notify(`${lines.join("\n")}\n- backend: reachable`, "info");
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          ctx.ui.notify(`${lines.join("\n")}\n- backend: failed\n- error: ${message}`, "error");
+        }
+        return;
+      }
+
       if (!ctx.isIdle()) {
         ctx.ui.notify("Agent is busy. Run /memory after the current turn.", "warning");
         return;
@@ -282,7 +402,7 @@ export default function (pi: ExtensionAPI) {
 Scope:
 - global memories
 - current project memories
-${args.trim() ? `User focus: ${args.trim()}\n` : ""}
+${trimmedArgs ? `User focus: ${trimmedArgs}\n` : ""}
 Workflow:
 1. Use asaki_memory_review_list to inspect pending reviews.
 2. Use asaki_memory_list to list global memories and current project memories.
@@ -444,11 +564,6 @@ Safety:
       const projectId = resolveProjectId(ctx, params.project_id);
       const sessionId = params.session_id || config.sessionId || undefined;
 
-      onUpdate?.({
-        content: [{ type: "text", text: "Adding memory to Asaki memory..." }],
-        details: {},
-      });
-
       try {
         const candidate: Record<string, unknown> = {
           content: params.text,
@@ -462,6 +577,11 @@ Safety:
         if (scope === "project") candidate.project_id = projectId;
         if (scope === "session") candidate.session_id = sessionId;
 
+        onUpdate?.({
+          content: [{ type: "text", text: `Adding memory candidate:\n${formatMemoryLine(candidate)}` }],
+          details: { candidate },
+        });
+
         const requestBody: Record<string, unknown> = {
           user_id: config.userId,
           source: "pi",
@@ -474,12 +594,14 @@ Safety:
         const decisions = Array.isArray(data?.decisions) ? data.decisions : [];
         const decision = decisions[0];
         const action = decision?.action || "ok";
-        const memoryId = decision?.memory?.id || decision?.matched_memory?.id;
+        const memory = decision?.memory || decision?.matched_memory;
+        const memoryId = memory?.id;
         const reason = decision?.reason ? `: ${decision.reason}` : "";
+        const memoryLine = memory ? `\nMemory: ${formatMemoryLine(memory)}` : "";
 
         return {
-          content: [{ type: "text", text: `Asaki memory ${action}${memoryId ? ` id=${memoryId}` : ""}${reason}` }],
-          details: { action, memory_id: memoryId, user_id: config.userId, project_id: projectId, scope },
+          content: [{ type: "text", text: `Asaki memory ${action}${memoryId ? ` id=${memoryId}` : ""}${reason}\nCandidate: ${formatMemoryLine(candidate)}${memoryLine}` }],
+          details: { action, memory_id: memoryId, user_id: config.userId, project_id: projectId, scope, candidate },
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -574,7 +696,7 @@ Safety:
       importance: Type.Optional(Type.Number({ description: "Importance score between 0 and 1. Defaults to 0.6.", minimum: 0, maximum: 1 })),
       confidence: Type.Optional(Type.Number({ description: "Confidence score between 0 and 1. Defaults to 0.8.", minimum: 0, maximum: 1 })),
     }),
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const config = memoryConfig();
       const scope = params.scope || config.defaultScope;
       const projectId = resolveProjectId(ctx, params.project_id);
@@ -590,6 +712,11 @@ Safety:
       };
       if (scope === "project") candidate.project_id = projectId;
       if (scope === "session") candidate.session_id = sessionId;
+
+      onUpdate?.({
+        content: [{ type: "text", text: `Creating memory review candidate:\n${formatMemoryLine(candidate)}` }],
+        details: { candidate },
+      });
 
       try {
         const body: Record<string, unknown> = { user_id: config.userId, source: "pi:review", candidates: [candidate] };
