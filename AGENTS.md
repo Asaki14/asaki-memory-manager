@@ -35,6 +35,7 @@ Stack:
 - `src/ai/embeddings.ts`: Workers AI embedding helpers.
 - `src/utils/validation.ts`: request validation.
 - `integrations/pi/asaki-memory.ts`: optional Pi extension.
+- `commands/memory.md`: Claude Code plugin `/memory` slash command (audit workflow; mirrors the Pi extension's `registerCommand("memory", ...)`).
 
 ## Commands
 

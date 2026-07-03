@@ -50,5 +50,12 @@ committed). Set them once in `~/.claude/settings.json`:
   the actual search/add decision is the agent's judgment call.
 - `tool-visibility.sh` — PostToolUse hook, surfaces memory tool calls in the TUI
 - `../mcp/asaki-memory.ts` — MCP server exposing `asaki_memory_search`/`asaki_memory_add`/etc.
+- `../../commands/memory.md` — `/memory` slash command. `/memory status` checks
+  backend connectivity only; any other args (or none) run a full audit:
+  list pending reviews + global/project memories, propose
+  REVIEW_RESOLVE/DELETE/UPDATE/MERGE/ADD/KEEP changes, confirm with the user,
+  then execute. Same workflow as the Pi extension's `/memory` command
+  (`registerCommand("memory", ...)` in `../pi/asaki-memory.ts`).
 
-Restart Claude Code (new session) after install/update for hooks + MCP tools to load.
+Restart Claude Code (new session) after install/update for hooks + MCP tools +
+commands to load.
