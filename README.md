@@ -277,8 +277,10 @@ Set your credentials once in `~/.claude/settings.json`:
 
 What it does: injects a real project-history digest at session start (no
 "go search yourself" nudge), a memory-precheck instruction on every turn so
-the agent decides for itself whether to call `asaki_memory_search`, and a
-visible `🧠 Asaki memory ...` line whenever a memory tool actually runs.
+the agent decides for itself whether to call `asaki_memory_search`, a
+visible `🧠 Asaki memory ...` line whenever a memory tool actually runs, and a
+`/memory` slash command (`/memory status` checks backend connectivity; any
+other args run a full audit) — same audit workflow as the Pi extension.
 Full details: [`integrations/claude-code/README.md`](integrations/claude-code/README.md).
 
 ## Pi integration
