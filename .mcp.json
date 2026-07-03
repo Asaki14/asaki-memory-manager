@@ -1,0 +1,16 @@
+{
+  "asaki-memory": {
+    "type": "stdio",
+    "command": "/opt/homebrew/bin/node",
+    "args": [
+      "--experimental-strip-types",
+      "${CLAUDE_PLUGIN_ROOT}/integrations/mcp/asaki-memory.ts"
+    ],
+    "env": {
+      "ASAKI_MEMORY_SOURCE": "claude-code",
+      "ASAKI_MEMORY_BASE_URL": "${ASAKI_MEMORY_BASE_URL}",
+      "ASAKI_MEMORY_API_KEY": "${ASAKI_MEMORY_API_KEY}",
+      "ASAKI_MEMORY_USER_ID": "asaki"
+    }
+  }
+}

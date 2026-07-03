@@ -1,0 +1,40 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/integrations/claude-code/session-start.sh\"",
+            "statusMessage": "Loading Asaki memory..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/integrations/claude-code/user-prompt.sh\"",
+            "timeout": 5,
+            "statusMessage": "Checking memory relevance..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__asaki-memory__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/integrations/claude-code/tool-visibility.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
