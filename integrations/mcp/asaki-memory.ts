@@ -93,12 +93,13 @@ function resolveProjectId(explicit?: string): string {
 }
 
 class MemoryApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly body: string,
-    message: string,
-  ) {
+  status: number;
+  body: string;
+
+  constructor(status: number, body: string, message: string) {
     super(message);
+    this.status = status;
+    this.body = body;
   }
 }
 
