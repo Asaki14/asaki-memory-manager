@@ -253,6 +253,34 @@ curl -X POST http://127.0.0.1:8787/v1/memories/reviews/<review-id>/resolve \
 
 Resolve actions: `add`, `merge`, `ignore`. `merge` requires `memory_id`.
 
+## Claude Code integration
+
+Distributed as a self-contained Claude Code plugin — no manual `settings.json`
+hook/MCP editing, no absolute paths baked in (everything resolves via
+`${CLAUDE_PLUGIN_ROOT}`).
+
+```bash
+claude plugin marketplace add /path/to/asaki-memory-manager
+claude plugin install asaki-memory@asaki-memory
+```
+
+Set your credentials once in `~/.claude/settings.json`:
+
+```json
+{
+  "env": {
+    "ASAKI_MEMORY_API_KEY": "your-admin-api-key",
+    "ASAKI_MEMORY_BASE_URL": "https://your-worker.your-subdomain.workers.dev"
+  }
+}
+```
+
+What it does: injects a real project-history digest at session start (no
+"go search yourself" nudge), a memory-precheck instruction on every turn so
+the agent decides for itself whether to call `asaki_memory_search`, and a
+visible `🧠 Asaki memory ...` line whenever a memory tool actually runs.
+Full details: [`integrations/claude-code/README.md`](integrations/claude-code/README.md).
+
 ## Pi integration
 
 A Pi extension is included at:
@@ -261,7 +289,9 @@ A Pi extension is included at:
 integrations/pi/asaki-memory.ts
 ```
 
-Install it into your Pi agent extensions directory, then set environment variables or a local config file according to your Pi setup.
+Install it into your Pi agent extensions directory (`~/.pi/agent/extensions/`),
+then set environment variables or a local config file according to your Pi
+setup.
 
 Common environment variables:
 
@@ -270,9 +300,20 @@ export ASAKI_MEMORY_API_URL="https://your-worker.your-subdomain.workers.dev"
 export ASAKI_MEMORY_API_KEY="your-admin-api-key"
 export ASAKI_MEMORY_USER_ID="alice"
 export ASAKI_MEMORY_PROJECT_ID="demo-app"
+export ASAKI_MEMORY_DIGEST_TOP_K="8"
 export ASAKI_MEMORY_AUTO_INJECT="1"
 export ASAKI_MEMORY_AUTO_MIN_SCORE="0.50"
 ```
+
+On every `session_start` (new/resume/fork, not plain extension `reload`), the
+next turn's `before_agent_start` injects a real project-history digest — top
+`ASAKI_MEMORY_DIGEST_TOP_K` memories (global + current project, ranked by
+`importance × confidence`) — gated to real projects (a resolvable git root or
+explicit `ASAKI_MEMORY_PROJECT_ID`). A fixed memory-precheck instruction also
+fires every turn so the agent decides for itself whether to call
+`asaki_memory_search`/`asaki_memory_add`. `ASAKI_MEMORY_AUTO_INJECT` (default
+off) additionally does a deterministic keyword-triggered search on top of
+that judgment call.
 
 The extension exposes:
 
@@ -284,6 +325,7 @@ The extension exposes:
 - `asaki_memory_review_create`
 - `asaki_memory_review_list`
 - `asaki_memory_review_resolve`
+- `/memory` command (`/memory status` checks backend connectivity; no args runs a full audit)
 
 ## MCP integration
 
@@ -293,12 +335,11 @@ A shared MCP server is included at:
 integrations/mcp/asaki-memory.ts
 ```
 
-Provider setup notes live in:
-
-```text
-integrations/claude-code/README.md
-integrations/codex/README.md
-```
+Used directly by the Claude Code plugin above. For other MCP-capable clients,
+point them at this server manually — see
+[`integrations/claude-code/README.md`](integrations/claude-code/README.md) and
+[`integrations/codex/README.md`](integrations/codex/README.md) for
+provider-specific setup notes.
 
 ## Configuration
 
