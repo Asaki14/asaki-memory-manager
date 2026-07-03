@@ -1,21 +1,54 @@
 # Claude Code setup
 
-Use the shared MCP server at `integrations/mcp/asaki-memory.ts`.
+Distributed as a Claude Code plugin (`.claude-plugin/plugin.json` at repo root)
+bundling the MCP server + hooks together. No manual settings.json/mcpServers
+editing, no absolute paths to this repo — everything resolves via
+`${CLAUDE_PLUGIN_ROOT}`.
+
+## Install
+
+```bash
+claude plugin marketplace add /path/to/asaki-memory-manager
+claude plugin install asaki-memory@asaki-memory
+```
+
+Note: `hooks/hooks.json` and `.mcp.json` live at the plugin's default
+discovery paths (repo root) — the installed Claude Code CLI doesn't resolve
+custom `"hooks"`/`"mcpServers"` path fields in `plugin.json`, only the
+default locations. Their `command` entries still point into
+`integrations/claude-code/` and `integrations/mcp/` via `${CLAUDE_PLUGIN_ROOT}`.
+
+## Secret
+
+The bundled `.mcp.json` and `session-start.sh` read `ASAKI_MEMORY_API_KEY` (and
+`ASAKI_MEMORY_BASE_URL`) from the process environment (never hardcoded / never
+committed). Set them once in `~/.claude/settings.json`:
 
 ```json
 {
-  "mcpServers": {
-    "asaki-memory": {
-      "command": "node",
-      "args": ["--experimental-strip-types", "/absolute/path/to/integrations/mcp/asaki-memory.ts"],
-      "env": {
-        "ASAKI_MEMORY_SOURCE": "claude-code",
-        "ASAKI_MEMORY_CONFIG_FILE": "~/.claude/asaki-memory.json",
-        "ASAKI_MEMORY_API_KEY": "your-admin-api-key"
-      }
-    }
+  "env": {
+    "ASAKI_MEMORY_API_KEY": "your-admin-api-key",
+    "ASAKI_MEMORY_BASE_URL": "https://your-worker-subdomain.workers.dev"
   }
 }
 ```
 
-Optional hooks: `session-start.sh`, `user-prompt.sh`.
+## What's bundled
+
+- `session-start.sh` — SessionStart hook. Always shows the status banner; if
+  the cwd is inside a project (git repo), it also calls `/v1/memories/list`
+  itself (global + this project's scope) and injects a **real digest** of the
+  top `ASAKI_MEMORY_DIGEST_TOP_K` (default 8) memories ranked by
+  `importance * confidence` — actual project history up front, not a "go
+  search yourself" nudge.
+- `user-prompt.sh` — UserPromptSubmit hook. Unconditionally injects one fixed
+  instruction every turn (no keyword regex, no scripted API call): the agent
+  itself reads user intent and decides whether `asaki_memory_search` is
+  needed, and if so picks its own query/scope/top_k — same as the Pi
+  extension's `memoryPrecheckInstruction()` (`../pi/asaki-memory.ts`). What's
+  "stable" here is the instruction always firing, not a deterministic search;
+  the actual search/add decision is the agent's judgment call.
+- `tool-visibility.sh` — PostToolUse hook, surfaces memory tool calls in the TUI
+- `../mcp/asaki-memory.ts` — MCP server exposing `asaki_memory_search`/`asaki_memory_add`/etc.
+
+Restart Claude Code (new session) after install/update for hooks + MCP tools to load.

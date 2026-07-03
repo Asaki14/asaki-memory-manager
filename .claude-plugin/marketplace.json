@@ -1,0 +1,14 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "asaki-memory",
+  "description": "Asaki Memory plugin marketplace (single-plugin repo — installable from a local path or this GitHub URL)",
+  "owner": { "name": "wangyao" },
+  "plugins": [
+    {
+      "name": "asaki-memory",
+      "description": "Persistent cross-session memory for Claude Code via Asaki Memory.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}
