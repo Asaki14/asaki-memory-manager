@@ -11,13 +11,16 @@
     "smoke:management": "bash scripts/smoke-management-api.sh",
     "deploy": "wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply asaki-memory-manager --local",
-    "db:migrate:remote": "wrangler d1 migrations apply asaki-memory-manager --remote"
+    "db:migrate:remote": "wrangler d1 migrations apply asaki-memory-manager --remote",
+    "build:mcp": "esbuild integrations/mcp/asaki-memory.ts --bundle --platform=node --format=esm --outfile=dist/mcp-server.mjs",
+    "build:plugin": "npm run build:mcp"
   },
   "dependencies": {
     "hono": "^4.10.7"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20251224.0",
+    "esbuild": "^0.25.12",
     "typescript": "^5.9.3",
     "wrangler": "^4.105.0"
   },
