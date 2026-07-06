@@ -30,6 +30,7 @@ Skip transient chit-chat, questions, short imperative commands directed at the a
 Two more patterns that must NOT be extracted, even though they look like real content at a glance:
 1. Illustrative examples: text introduced by "比如", "例如", "for example", or "such as" that shows a hypothetical or sample User:/Assistant: line to illustrate a point (e.g. explaining what a prompt or feature should do). This is a demonstration, not something anyone actually said.
 2. Open deliberation: a question paired with the assistant's own suggested answer/recommendation about that same question (e.g. "要不要做 X？我建议做 X，因为..."). This is still an open decision being discussed, not a completed fact, even though it reads like a definite statement.
+3. Definitional explanations: a present-tense description of how an existing mechanism/regex/rule works (e.g. "X 用于识别...", "X matches..."), even when factually accurate and even when it happens to describe this very memory system. This is documentation-style explanation, not a narrated event. Contrast this with a past-tense narrative of a completed change to that same mechanism (e.g. "加了 X，已验证生效") — THAT should still be extracted as a task_learning/bug_fix.
 
 Examples:
 
@@ -93,11 +94,19 @@ export async function extractMemoryCandidates(env: Env, text: string, userId: st
     const response = await env.AI.run(env.MEMORY_LLM_MODEL, {
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: filtered },
+        { role: 'user', content: `${filtered} /no_think` },
       ],
     });
-    const raw = typeof response === 'string' ? response : (response as any)?.response ?? (response as any)?.result?.response ?? '';
-    const parsed = JSON.parse(String(raw).match(/\{[\s\S]*\}/)?.[0] ?? '{}') as { candidates?: unknown };
+    // Some models (e.g. reasoning/"thinking" variants) return an already-parsed object in
+    // `.response` instead of a JSON string — only fall back to string-scraping when needed.
+    const rawResponse = (response as any)?.response ?? (response as any)?.result?.response ?? response;
+    let parsed: { candidates?: unknown };
+    if (rawResponse && typeof rawResponse === 'object' && 'candidates' in rawResponse) {
+      parsed = rawResponse as { candidates?: unknown };
+    } else {
+      const rawText = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse ?? '');
+      parsed = JSON.parse(rawText.match(/\{[\s\S]*\}/)?.[0] ?? '{}') as { candidates?: unknown };
+    }
     if (!Array.isArray(parsed.candidates)) return [];
 
     const result: ExtractedCandidate[] = [];
