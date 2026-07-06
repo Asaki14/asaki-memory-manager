@@ -27,6 +27,10 @@ Both roles can be a source, but apply a different bar per role:
 
 Skip transient chit-chat, questions, short imperative commands directed at the assistant (e.g. "run the tests", "verify this", "refresh"), and anything without lasting future value.
 
+Two more patterns that must NOT be extracted, even though they look like real content at a glance:
+1. Illustrative examples: text introduced by "比如", "例如", "for example", or "such as" that shows a hypothetical or sample User:/Assistant: line to illustrate a point (e.g. explaining what a prompt or feature should do). This is a demonstration, not something anyone actually said.
+2. Open deliberation: a question paired with the assistant's own suggested answer/recommendation about that same question (e.g. "要不要做 X？我建议做 X，因为..."). This is still an open decision being discussed, not a completed fact, even though it reads like a definite statement.
+
 Examples:
 
 Input: User: 跑一下测试
@@ -49,6 +53,12 @@ Output: {"candidates":[{"content":"Focus-stealing bug 根因是两个 daemon 同
 
 Input: User: forget that I prefer dark mode
 Output: {"candidates":[{"content":"forget that I prefer dark mode","kind":"preference","importance":0.5,"scope":"global"}]}
+
+Input: Assistant: 现在 prompt 里加了新的 few-shot 正例，比如 User: 以后都用 pnpm，不要用 npm 这种输入应该被正确抽取成用户偏好。跑了回归测试，8/8 全过。
+Output: {"candidates":[]}
+
+Input: Assistant: 建好了，eval:extraction 脚本已经能跑。要不要现在建这个 eval 文件？我建议现在建，因为能把踩过的坑固化成回归用例。
+Output: {"candidates":[]}
 
 Each memory must be a concise, self-contained statement understandable without the surrounding context. For each candidate also classify "scope": "global" for cross-project preferences/rules/conventions about how the user generally likes to work (editor settings, communication style, recurring habits), or "project" for facts/decisions specific to the codebase/project currently being discussed. Return strict JSON: {"candidates":[{"content":"...","kind":"preference|rule|fact|decision|task_learning|bug_fix|workflow","importance":0.0-1.0,"scope":"global|project"}]}. Return {"candidates":[]} if nothing durable is found. Never invent facts not present in the text. Do not return the example inputs/outputs shown above verbatim — they are for pattern reference only.`;
 
