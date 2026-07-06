@@ -1,4 +1,4 @@
-import type { CreateMemoryInput, ListMemoriesInput, MemoryIdInput, MemoryKind, MemoryScope, MemoryStatus, SearchMemoriesInput, UpdateMemoryInput } from '../types';
+import type { CreateMemoryInput, ExtractMemoriesInput, ListMemoriesInput, MemoryIdInput, MemoryKind, MemoryScope, MemoryStatus, SearchMemoriesInput, UpdateMemoryInput } from '../types';
 
 const scopes = new Set<MemoryScope>(['global', 'project', 'session']);
 const kinds = new Set<MemoryKind>(['preference', 'rule', 'fact', 'decision', 'task_learning', 'bug_fix', 'workflow']);
@@ -166,6 +166,31 @@ export function validateUpdateMemory(value: unknown): { ok: true; data: UpdateMe
   if (Object.keys(data).length === 1) return { ok: false, error: 'At least one update field is required.' };
 
   return { ok: true, data };
+}
+
+export function validateExtractMemories(value: unknown): { ok: true; data: ExtractMemoriesInput } | { ok: false; error: string } {
+  if (!value || typeof value !== 'object') return { ok: false, error: 'Body must be a JSON object.' };
+  const input = value as ExtractMemoriesInput;
+  if (typeof input.text !== 'string' || input.text.trim().length === 0) return { ok: false, error: 'text is required.' };
+  if (input.text.length > 20000) return { ok: false, error: 'text must be <= 20000 characters.' };
+  const userId = validateUserId(input.user_id);
+  if (!userId) return { ok: false, error: 'user_id is required.' };
+  if (input.scope && !scopes.has(input.scope)) return { ok: false, error: 'scope must be global, project, or session.' };
+  const scopeError = validateScopeIds(input);
+  if (scopeError) return { ok: false, error: scopeError };
+  if (input.source != null && (typeof input.source !== 'string' || input.source.trim().length === 0)) return { ok: false, error: 'source must be a non-empty string when provided.' };
+
+  return {
+    ok: true,
+    data: {
+      text: input.text.trim(),
+      user_id: userId,
+      scope: input.scope,
+      project_id: input.project_id ?? null,
+      session_id: input.session_id ?? null,
+      source: input.source?.trim() ?? null,
+    },
+  };
 }
 
 export function validateProcessCandidates(value: unknown): { ok: true; data: Array<Required<Pick<CreateMemoryInput, 'content' | 'user_id' | 'scope' | 'kind' | 'importance' | 'confidence'>> & Omit<CreateMemoryInput, 'content' | 'user_id' | 'scope' | 'kind' | 'importance' | 'confidence'>> } | { ok: false; error: string } {

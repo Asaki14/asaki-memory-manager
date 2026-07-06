@@ -229,6 +229,40 @@ server.tool(
 );
 
 server.tool(
+  "asaki_memory_extract",
+  "Extract and store durable memories from a raw text blob (e.g. a conversation excerpt) via LLM-based extraction, instead of a single pre-distilled statement. Use when you have unstructured text rather than an already-concise memory.",
+  {
+    text: z.string().describe("Raw text to extract durable memories from."),
+    scope: z.enum(["global", "project", "session"]).optional().describe("Memory scope."),
+    project_id: z.string().optional().describe("Project id override."),
+    session_id: z.string().optional().describe("Session id override."),
+  },
+  async ({ text, scope, project_id, session_id }) => {
+    const cfg = memoryConfig();
+    const resolvedScope = scope || cfg.defaultScope;
+    const projectId = resolveProjectId(project_id);
+    const sessionId = session_id || cfg.sessionId || undefined;
+    const body: Record<string, unknown> = { text, user_id: cfg.userId, scope: resolvedScope, source: `${SOURCE_TAG}:extract` };
+    if (resolvedScope === "project") body.project_id = projectId;
+    if (resolvedScope === "session") body.session_id = sessionId;
+
+    const data = await apiRequest("/v1/memories/extract", body);
+    const decisions = Array.isArray(data.decisions) ? (data.decisions as Record<string, any>[]) : [];
+    if (decisions.length === 0) return { content: [{ type: "text" as const, text: "No durable memories extracted." }] };
+    const text_out = decisions
+      .map((decision, index) => {
+        const action = decision.action || "ok";
+        const memoryId = decision.memory?.id || decision.matched_memory?.id;
+        const reason = decision.reason ? `: ${decision.reason}` : "";
+        const content = decision.candidate?.content ?? "";
+        return `${index + 1}. [${action}]${memoryId ? ` id=${memoryId}` : ""} ${content}${reason}`;
+      })
+      .join("\n");
+    return { content: [{ type: "text" as const, text: text_out }] };
+  },
+);
+
+server.tool(
   "asaki_memory_list",
   "List memories from Asaki personal memory with optional filters. Use during explicit memory audit.",
   {
