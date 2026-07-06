@@ -302,21 +302,18 @@ export ASAKI_MEMORY_API_URL="https://your-worker.your-subdomain.workers.dev"
 export ASAKI_MEMORY_API_KEY="your-admin-api-key"
 export ASAKI_MEMORY_USER_ID="alice"
 export ASAKI_MEMORY_PROJECT_ID="demo-app"
-export ASAKI_MEMORY_DIGEST_TOP_K="8"
 export ASAKI_MEMORY_AUTO_INJECT="1"
 export ASAKI_MEMORY_AUTO_MIN_SCORE="0.50"
 export ASAKI_MEMORY_AUTO_EXTRACT="0"
 ```
 
 On every `session_start` (new/resume/fork, not plain extension `reload`), the
-next turn's `before_agent_start` injects a real project-history digest — top
-`ASAKI_MEMORY_DIGEST_TOP_K` memories (global + current project, ranked by
-`importance × confidence`) — gated to real projects (a resolvable git root or
-explicit `ASAKI_MEMORY_PROJECT_ID`). A fixed memory-precheck instruction also
-fires every turn so the agent decides for itself whether to call
-`asaki_memory_search`/`asaki_memory_add`. `ASAKI_MEMORY_AUTO_INJECT` (default
-off) additionally does a deterministic keyword-triggered search on top of
-that judgment call.
+next turn's `before_agent_start` injects a compact status banner with user,
+project, memory count, pending review count, and auto-extract state. It does
+not dump memory content up front. A fixed memory-precheck instruction also fires every turn so the
+agent decides for itself whether to call `asaki_memory_search`/`asaki_memory_add`.
+`ASAKI_MEMORY_AUTO_INJECT` (default off) additionally does a deterministic
+keyword-triggered search on top of that judgment call.
 
 `ASAKI_MEMORY_AUTO_EXTRACT` (default off) enables Pi-native background
 extraction on `agent_end`: the extension sends only text user/assistant
