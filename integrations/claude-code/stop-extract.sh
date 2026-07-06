@@ -37,19 +37,56 @@ fi
 STATE_DIR="${TMPDIR:-/tmp}/asaki-memory-stop-extract"
 mkdir -p "$STATE_DIR"
 STATE_FILE="$STATE_DIR/${SESSION_ID}.offset"
+LOG_FILE="$STATE_DIR/${SESSION_ID}.log"
+REPORTED_FILE="$STATE_DIR/${SESSION_ID}.reported"
+
+# The extraction curl runs fire-and-forget in the background (see below), so its result
+# isn't known when this invocation exits. Instead, each Stop event first checks whether the
+# *previous* invocation's response landed in LOG_FILE since it was last reported, and surfaces
+# it as a systemMessage — one turn of delay, but visible in the TUI without blocking Stop.
+report_and_exit() {
+  MSG=""
+  if [ -f "$LOG_FILE" ]; then
+    LAST_REPORTED=0
+    [ -f "$REPORTED_FILE" ] && LAST_REPORTED=$(cat "$REPORTED_FILE" 2>/dev/null || echo 0)
+    LOG_LINES=$(wc -l <"$LOG_FILE" | tr -d ' ')
+    if [ "$LOG_LINES" -gt "$LAST_REPORTED" ]; then
+      RESP_JSON="$(tail -n 1 "$LOG_FILE" | sed -E 's/^[^ ]+ //')"
+      COUNTS=$(echo "$RESP_JSON" | jq -r '
+        def verb:
+          if . == "add" then "added"
+          elif . == "merge" then "merged"
+          elif . == "ignore" then "ignored"
+          elif . == "update" then "updated"
+          elif . == "delete" then "deleted"
+          else . end;
+        (.decisions // []) as $d
+        | ($d | length) as $n
+        | if $n == 0 then empty
+          else ($d | group_by(.action) | map("\(length) " + (.[0].action | verb)) | join(", ")) as $breakdown
+          | "\($n) candidates → \($breakdown)"
+          end
+      ' 2>/dev/null)
+      [ -n "$COUNTS" ] && MSG="🧠 Asaki auto-extract (prev turn): ${COUNTS}"
+      echo "$LOG_LINES" >"$REPORTED_FILE"
+    fi
+  fi
+  [ -n "$MSG" ] && jq -cn --arg msg "$MSG" '{systemMessage: $msg}'
+  exit 0
+}
 
 # `mkdir` is an atomic, portable lock (flock isn't available on macOS). If another invocation
 # for this session is already mid-flight, skip this one — the offset hasn't advanced, so the
 # next Stop event will pick up the full accumulated delta anyway.
 LOCK_DIR="$STATE_DIR/${SESSION_ID}.lock"
-mkdir "$LOCK_DIR" 2>/dev/null || exit 0
+mkdir "$LOCK_DIR" 2>/dev/null || report_and_exit
 trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
 
 LAST=0
 [ -f "$STATE_FILE" ] && LAST=$(cat "$STATE_FILE" 2>/dev/null || echo 0)
 TOTAL=$(wc -l <"$TRANSCRIPT" | tr -d ' ')
 [ -z "$TOTAL" ] && TOTAL=0
-[ "$TOTAL" -le "$LAST" ] && exit 0
+[ "$TOTAL" -le "$LAST" ] && report_and_exit
 
 TEXT=$(sed -n "$((LAST + 1)),${TOTAL}p" "$TRANSCRIPT" | node -e '
 let s = "";
@@ -74,7 +111,7 @@ process.stdin.on("end", () => {
 echo "$TOTAL" >"$STATE_FILE"
 
 # Skip trivial/empty slices — not worth an LLM extraction call.
-[ "${#TEXT}" -lt 60 ] && exit 0
+[ "${#TEXT}" -lt 60 ] && report_and_exit
 TEXT="${TEXT:0:20000}"
 
 # No "scope" here on purpose — let the server infer global vs project per candidate.
@@ -82,7 +119,6 @@ TEXT="${TEXT:0:20000}"
 BODY=$(jq -cn --arg text "$TEXT" --arg user "$ASAKI_USER" --arg project "$ASAKI_PROJECT" \
   '{text: $text, user_id: $user, project_id: $project, source: "claude-code:auto-extract"}')
 
-LOG_FILE="$STATE_DIR/${SESSION_ID}.log"
 (
   RESP=$(curl -sf --max-time 20 -X POST "${ASAKI_BASE}/v1/memories/extract" \
     -H "Authorization: Bearer ${ASAKI_MEMORY_API_KEY}" \
@@ -92,4 +128,4 @@ LOG_FILE="$STATE_DIR/${SESSION_ID}.log"
 ) >/dev/null 2>&1 &
 disown
 
-exit 0
+report_and_exit
