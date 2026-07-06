@@ -1,6 +1,6 @@
 ---
-description: Audit and manage Asaki memories with agent assistance. Use `/memory status` to check backend connectivity.
-argument-hint: [status | focus text]
+description: Audit and manage Asaki memories with agent assistance. Use `/memory status` to check backend connectivity, `/memory report` for a read-only scheduled audit.
+argument-hint: [status | report | focus text]
 ---
 
 Arguments: `$ARGUMENTS`
@@ -9,6 +9,11 @@ If the arguments are exactly `status` (ignore surrounding whitespace), do ONLY t
 1. Report current config: `user_id` (default `asaki`), `project_id` (current git repo basename or `ASAKI_MEMORY_PROJECT_ID`), and whether `ASAKI_MEMORY_API_KEY` / `ASAKI_MEMORY_BASE_URL` look configured in the environment.
 2. Call the `asaki_memory_list` tool with `limit: 1` to confirm the backend is reachable.
 3. Report reachable/failed, including the error message on failure. Stop — do not run the audit below.
+
+If the arguments are exactly `report` (ignore surrounding whitespace) — this is the unattended/scheduled mode, no human is watching to approve writes — do ONLY this:
+1. Run Workflow steps 1-4 below (inspect pending reviews, list memories, analyze, propose changes).
+2. Output the proposed changes as your final message, clearly labeled "dry-run — no changes applied".
+3. Stop. Never call `asaki_memory_review_resolve`, `asaki_memory_update`, `asaki_memory_delete`, or `asaki_memory_add` in this mode — those require a human present to approve (see Safety below), and a scheduled run has none.
 
 Otherwise, run a full Asaki memory audit.
 
