@@ -1,6 +1,6 @@
 import type { CreateMemoryInput, SearchResult } from '../types';
 
-export type CandidateAction = 'add' | 'merge' | 'ignore';
+export type CandidateAction = 'add' | 'merge' | 'update' | 'ignore';
 
 export interface ProcessMemoryCandidateInput extends Required<Pick<CreateMemoryInput, 'content' | 'user_id' | 'scope' | 'kind' | 'importance' | 'confidence'>> {
   project_id?: string | null;
@@ -104,14 +104,26 @@ export function bestUsableMatch(candidate: ProcessMemoryCandidateInput, matches:
   return best;
 }
 
+const CONTRADICTION_SIGNALS = /\b(instead of|instead|no longer|not\s|rather than|switch(?:ed|ing)?\s+to|replace[sd]?|change[sd]?\s+to|revert(?:ed)?\s+to|versus|vs\.?)\b/i;
+
+function hasContradictionSignal(text: string): boolean {
+  return CONTRADICTION_SIGNALS.test(text);
+}
+
 export function chooseDecision(candidate: ProcessMemoryCandidateInput, match: SearchResult | undefined, llm: { action: CandidateAction; reason: string } | null): { action: CandidateAction; reason: string } {
   const heuristic = heuristicDecision(candidate, match);
   if (!match || !llm) return heuristic;
 
   const existing = normalizeText(match.content);
   const incoming = normalizeText(candidate.content);
-  const deterministic = incoming === existing || incoming.includes(existing) || existing.includes(incoming) || tokenDecision(candidate.content, match.content) !== null || matchSimilarity(candidate, match) >= 0.95;
-  if (deterministic) return heuristic;
+  if (incoming === existing) return heuristic;
 
-  return llm;
+  // Substring/token-superset/char-similarity heuristics all assume "candidate extends existing"
+  // without contradicting it. Phrasing like "X instead of Y" or "switched to X" defeats that
+  // assumption (it's a superset of characters/tokens while actually superseding the old fact) —
+  // defer those to the LLM, which can tell "update" apart from "merge", instead of auto-merging.
+  if (hasContradictionSignal(candidate.content)) return llm;
+
+  const deterministic = incoming.includes(existing) || existing.includes(incoming) || tokenDecision(candidate.content, match.content) !== null || matchSimilarity(candidate, match) >= 0.95;
+  return deterministic ? heuristic : llm;
 }

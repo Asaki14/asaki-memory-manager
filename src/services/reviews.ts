@@ -1,7 +1,7 @@
 import type { Env, MemoryReviewRecord, MemoryReviewRow } from '../types';
 import { createMemory, getMemory, updateMemoryContent } from './memories';
 import { writeMemoryEvent } from './memoryEvents';
-import { mergeContent, type CandidateAction, type ProcessMemoryCandidateInput } from './candidateDecision';
+import { mergeContent, type ProcessMemoryCandidateInput } from './candidateDecision';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -100,7 +100,7 @@ export async function listMemoryReviews(env: Env, input: { user_id: string; stat
   return (result.results ?? []).map(parseReview);
 }
 
-export async function resolveMemoryReview(env: Env, id: string, input: { user_id: string; action: CandidateAction; memory_id?: string | null; reason?: string | null }): Promise<{ review: MemoryReviewRow; memory?: Awaited<ReturnType<typeof createMemory>> }> {
+export async function resolveMemoryReview(env: Env, id: string, input: { user_id: string; action: 'add' | 'merge' | 'ignore'; memory_id?: string | null; reason?: string | null }): Promise<{ review: MemoryReviewRow; memory?: Awaited<ReturnType<typeof createMemory>> }> {
   const existing = await env.DB.prepare('SELECT * FROM memory_reviews WHERE id = ?1 AND user_id = ?2').bind(id, input.user_id).first<MemoryReviewRecord>();
   if (!existing) throw new Error('Review not found.');
   if (existing.status !== 'pending') throw new Error('Review is already resolved.');

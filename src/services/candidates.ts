@@ -21,7 +21,7 @@ async function llmDecision(env: Env, candidate: ProcessMemoryCandidateInput, mat
       messages: [
         {
           role: 'system',
-          content: 'Decide whether a memory candidate should be added, merged into an existing memory, or ignored as duplicate. Ignore when the candidate is the same durable fact/preference/rule, a paraphrase, translation, or subset of the existing memory. Merge only when the candidate adds genuinely new future-useful detail to the same memory. If they merely share project names or broad terms but describe different facts, choose add. Return strict JSON: {"action":"add|merge|ignore","reason":"short reason"}.',
+          content: 'Decide what to do with a memory candidate given an existing similar memory. Choose "ignore" when the candidate is the same durable fact/preference/rule, a paraphrase, translation, or subset of the existing memory. Choose "update" when the candidate contradicts or supersedes the existing memory — a changed decision, preference, or value for the same fact (e.g. existing says "use npm", candidate says "use pnpm instead") — the existing memory\'s content should be replaced by the candidate\'s. Choose "merge" only when the candidate adds genuinely new, non-contradictory detail to the same memory. If they merely share project names or broad terms but describe different facts, choose "add". Return strict JSON: {"action":"add|merge|update|ignore","reason":"short reason"}.',
         },
         {
           role: 'user',
@@ -31,7 +31,7 @@ async function llmDecision(env: Env, candidate: ProcessMemoryCandidateInput, mat
     });
     const raw = typeof response === 'string' ? response : (response as any)?.response ?? (response as any)?.result?.response ?? '';
     const parsed = JSON.parse(String(raw).match(/\{[\s\S]*\}/)?.[0] ?? '{}') as { action?: CandidateAction; reason?: string };
-    if (parsed.action === 'add' || parsed.action === 'merge' || parsed.action === 'ignore') {
+    if (parsed.action === 'add' || parsed.action === 'merge' || parsed.action === 'update' || parsed.action === 'ignore') {
       return { action: parsed.action, reason: parsed.reason ?? 'LLM decision.' };
     }
   } catch (error) {
@@ -101,6 +101,21 @@ export async function processMemoryCandidate(env: Env, candidate: ProcessMemoryC
       payload: { candidate, matched_memory_id: match.id, reason: decision.reason },
     });
     return { action: 'merge', candidate, memory, matched_memory: match, reason: decision.reason };
+  }
+
+  if (decision.action === 'update' && match) {
+    const memory = await updateMemoryContent(env, match, {
+      content: candidate.content,
+      importance: candidate.importance,
+      confidence: candidate.confidence,
+    });
+    await writeMemoryEvent(env, {
+      memoryId: memory.id,
+      userId: candidate.user_id,
+      eventType: 'supersede',
+      payload: { candidate, matched_memory_id: match.id, previous_content: match.content, reason: decision.reason },
+    });
+    return { action: 'update', candidate, memory, matched_memory: match, reason: decision.reason };
   }
 
   const memory = await createMemory(env, candidate);
