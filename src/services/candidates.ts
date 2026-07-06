@@ -1,5 +1,5 @@
 import type { Env, MemoryRow, SearchResult } from '../types';
-import { createMemory, searchMemories, updateMemoryContent } from './memories';
+import { createMemory, deleteMemory, searchMemories, updateMemoryContent } from './memories';
 import { writeMemoryEvent } from './memoryEvents';
 
 import { bestUsableMatch, chooseDecision, heuristicDecision, lexicalSimilarity, mergeContent, type CandidateAction, type ProcessMemoryCandidateInput } from './candidateDecision';
@@ -21,7 +21,7 @@ async function llmDecision(env: Env, candidate: ProcessMemoryCandidateInput, mat
       messages: [
         {
           role: 'system',
-          content: 'Decide what to do with a memory candidate given an existing similar memory. Choose "ignore" when the candidate is the same durable fact/preference/rule, a paraphrase, translation, or subset of the existing memory. Choose "update" when the candidate contradicts or supersedes the existing memory — a changed decision, preference, or value for the same fact (e.g. existing says "use npm", candidate says "use pnpm instead") — the existing memory\'s content should be replaced by the candidate\'s. Choose "merge" only when the candidate adds genuinely new, non-contradictory detail to the same memory. If they merely share project names or broad terms but describe different facts, choose "add". Return strict JSON: {"action":"add|merge|update|ignore","reason":"short reason"}.',
+          content: 'Decide what to do with a memory candidate given an existing similar memory. Choose "ignore" when the candidate is the same durable fact/preference/rule, a paraphrase, translation, or subset of the existing memory. Choose "update" when the candidate contradicts or supersedes the existing memory — a changed decision, preference, or value for the same fact (e.g. existing says "use npm", candidate says "use pnpm instead") — the existing memory\'s content should be replaced by the candidate\'s. Choose "delete" when the candidate explicitly asks to forget, retract, or invalidate the existing memory itself, rather than replace it with a new value (e.g. "forget that I prefer dark mode", "that decision is no longer valid"). Choose "merge" only when the candidate adds genuinely new, non-contradictory detail to the same memory. If they merely share project names or broad terms but describe different facts, choose "add". Return strict JSON: {"action":"add|merge|update|delete|ignore","reason":"short reason"}.',
         },
         {
           role: 'user',
@@ -31,7 +31,7 @@ async function llmDecision(env: Env, candidate: ProcessMemoryCandidateInput, mat
     });
     const raw = typeof response === 'string' ? response : (response as any)?.response ?? (response as any)?.result?.response ?? '';
     const parsed = JSON.parse(String(raw).match(/\{[\s\S]*\}/)?.[0] ?? '{}') as { action?: CandidateAction; reason?: string };
-    if (parsed.action === 'add' || parsed.action === 'merge' || parsed.action === 'update' || parsed.action === 'ignore') {
+    if (parsed.action === 'add' || parsed.action === 'merge' || parsed.action === 'update' || parsed.action === 'delete' || parsed.action === 'ignore') {
       return { action: parsed.action, reason: parsed.reason ?? 'LLM decision.' };
     }
   } catch (error) {
@@ -116,6 +116,13 @@ export async function processMemoryCandidate(env: Env, candidate: ProcessMemoryC
       payload: { candidate, matched_memory_id: match.id, previous_content: match.content, reason: decision.reason },
     });
     return { action: 'update', candidate, memory, matched_memory: match, reason: decision.reason };
+  }
+
+  if (decision.action === 'delete' && match) {
+    const memory = await deleteMemory(env, match.id, candidate.user_id);
+    if (memory) {
+      return { action: 'delete', candidate, memory, matched_memory: match, reason: decision.reason };
+    }
   }
 
   const memory = await createMemory(env, candidate);

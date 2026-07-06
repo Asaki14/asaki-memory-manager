@@ -10,7 +10,7 @@ export interface ExtractedCandidate {
 }
 
 const SYSTEM_PROMPT =
-  'Extract durable memories from raw text. Only extract: explicit user preferences, decisions made, completed task learnings, bug fixes, established rules/conventions, or workflow changes. Skip transient chit-chat, questions, and anything without lasting future value. Each memory must be a concise, self-contained statement understandable without the surrounding context. Return strict JSON: {"candidates":[{"content":"...","kind":"preference|rule|fact|decision|task_learning|bug_fix|workflow","importance":0.0-1.0}]}. Return {"candidates":[]} if nothing durable is found. Never invent facts not present in the text.';
+  'Extract durable memories from raw text. Only extract: explicit user preferences, decisions made, completed task learnings, bug fixes, established rules/conventions, or workflow changes. Also extract explicit requests to forget, retract, or invalidate a previous preference/decision/fact — keep the forget/retract wording intact in the candidate text (e.g. "forget that I prefer dark mode") so a downstream step can act on it. Skip transient chit-chat, questions, and anything without lasting future value. Each memory must be a concise, self-contained statement understandable without the surrounding context. Return strict JSON: {"candidates":[{"content":"...","kind":"preference|rule|fact|decision|task_learning|bug_fix|workflow","importance":0.0-1.0}]}. Return {"candidates":[]} if nothing durable is found. Never invent facts not present in the text.';
 
 export async function extractMemoryCandidates(env: Env, text: string, userId: string): Promise<ExtractedCandidate[]> {
   if (!env.AI || !env.MEMORY_LLM_MODEL) return [];
