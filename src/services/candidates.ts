@@ -14,33 +14,48 @@ export interface CandidateDecision {
   reason: string;
 }
 
+const DEDUP_SYSTEM_PROMPT =
+  'Decide what to do with a memory candidate given an existing similar memory. Choose "ignore" when the candidate is the same durable fact/preference/rule, a paraphrase, translation, or subset of the existing memory. Choose "update" when the candidate contradicts or supersedes the existing memory — a changed decision, preference, or value for the same fact (e.g. existing says "use npm", candidate says "use pnpm instead") — the existing memory\'s content should be replaced by the candidate\'s. Choose "delete" when the candidate explicitly asks to forget, retract, or invalidate the existing memory itself, rather than replace it with a new value (e.g. "forget that I prefer dark mode", "that decision is no longer valid"). Choose "merge" only when the candidate adds genuinely new, non-contradictory detail to the same memory. If they merely share project names or broad terms but describe different facts, choose "add". Return strict JSON: {"action":"add|merge|update|delete|ignore","reason":"short reason"}.';
+
+async function requestDedupDecision(env: Env, candidate: ProcessMemoryCandidateInput, match: SearchResult): Promise<{ action: CandidateAction; reason: string } | { invalidRaw: string }> {
+  const response = await env.AI!.run(env.MEMORY_LLM_MODEL!, {
+    messages: [
+      { role: 'system', content: DEDUP_SYSTEM_PROMPT },
+      { role: 'user', content: JSON.stringify({ candidate: candidate.content, existing_memory: match.content }) },
+    ],
+  });
+  const raw = typeof response === 'string' ? response : (response as any)?.response ?? (response as any)?.result?.response ?? '';
+  const parsed = JSON.parse(String(raw).match(/\{[\s\S]*\}/)?.[0] ?? '{}') as { action?: CandidateAction; reason?: string };
+  if (parsed.action === 'add' || parsed.action === 'merge' || parsed.action === 'update' || parsed.action === 'delete' || parsed.action === 'ignore') {
+    return { action: parsed.action, reason: parsed.reason ?? 'LLM decision.' };
+  }
+  return { invalidRaw: String(raw) };
+}
+
+// The small model occasionally returns a response with no parseable/valid "action" — silently
+// falling back to heuristics on the first miss would defeat the update/delete detection these
+// exist for, so retry once before giving up, and log either way for visibility.
 async function llmDecision(env: Env, candidate: ProcessMemoryCandidateInput, match?: SearchResult): Promise<{ action: CandidateAction; reason: string } | null> {
   if (!env.AI || !env.MEMORY_LLM_MODEL || !match) return null;
-  try {
-    const response = await env.AI.run(env.MEMORY_LLM_MODEL, {
-      messages: [
-        {
-          role: 'system',
-          content: 'Decide what to do with a memory candidate given an existing similar memory. Choose "ignore" when the candidate is the same durable fact/preference/rule, a paraphrase, translation, or subset of the existing memory. Choose "update" when the candidate contradicts or supersedes the existing memory — a changed decision, preference, or value for the same fact (e.g. existing says "use npm", candidate says "use pnpm instead") — the existing memory\'s content should be replaced by the candidate\'s. Choose "delete" when the candidate explicitly asks to forget, retract, or invalidate the existing memory itself, rather than replace it with a new value (e.g. "forget that I prefer dark mode", "that decision is no longer valid"). Choose "merge" only when the candidate adds genuinely new, non-contradictory detail to the same memory. If they merely share project names or broad terms but describe different facts, choose "add". Return strict JSON: {"action":"add|merge|update|delete|ignore","reason":"short reason"}.',
-        },
-        {
-          role: 'user',
-          content: JSON.stringify({ candidate: candidate.content, existing_memory: match.content }),
-        },
-      ],
-    });
-    const raw = typeof response === 'string' ? response : (response as any)?.response ?? (response as any)?.result?.response ?? '';
-    const parsed = JSON.parse(String(raw).match(/\{[\s\S]*\}/)?.[0] ?? '{}') as { action?: CandidateAction; reason?: string };
-    if (parsed.action === 'add' || parsed.action === 'merge' || parsed.action === 'update' || parsed.action === 'delete' || parsed.action === 'ignore') {
-      return { action: parsed.action, reason: parsed.reason ?? 'LLM decision.' };
+  let lastInvalidRaw: string | null = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const result = await requestDedupDecision(env, candidate, match);
+      if ('action' in result) return result;
+      lastInvalidRaw = result.invalidRaw;
+    } catch (error) {
+      await writeMemoryEvent(env, {
+        userId: candidate.user_id,
+        eventType: 'llm_dedup_failed',
+        payload: { attempt, message: error instanceof Error ? error.message : String(error) },
+      });
     }
-  } catch (error) {
-    await writeMemoryEvent(env, {
-      userId: candidate.user_id,
-      eventType: 'llm_dedup_failed',
-      payload: { message: error instanceof Error ? error.message : String(error) },
-    });
   }
+  await writeMemoryEvent(env, {
+    userId: candidate.user_id,
+    eventType: 'llm_dedup_invalid_response',
+    payload: { raw: lastInvalidRaw?.slice(0, 500) ?? null },
+  });
   return null;
 }
 
