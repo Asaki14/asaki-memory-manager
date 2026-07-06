@@ -48,6 +48,17 @@ committed). Set them once in `~/.claude/settings.json`:
   extension's `memoryPrecheckInstruction()` (`../pi/asaki-memory.ts`). What's
   "stable" here is the instruction always firing, not a deterministic search;
   the actual search/add decision is the agent's judgment call.
+- `stop-extract.sh` — Stop hook, fires after every assistant turn. Sends the
+  plain-text user/assistant lines appended since the last processed transcript
+  offset to `/v1/memories/extract` for server-side LLM-based background
+  extraction (add/merge/ignore, same dedup pipeline as `asaki_memory_add`).
+  Tool calls, tool results, and thinking blocks are never sent — only plain
+  text turns. Fire-and-forget: the extraction request backgrounds itself so it
+  never blocks the Stop event. This intentionally sends conversation text
+  off-machine to the Worker — the opposite tradeoff from the Pi extension's
+  `memoryPrecheckInstruction()`, which keeps extraction agent-side to avoid
+  that. Per-session offset/log files live under
+  `${TMPDIR:-/tmp}/asaki-memory-stop-extract/`.
 - `tool-visibility.sh` — PostToolUse hook, surfaces memory tool calls in the TUI
 - `../mcp/asaki-memory.ts` — MCP server exposing `asaki_memory_search`/`asaki_memory_add`/etc.
 - `../../commands/memory.md` — `/memory` slash command. `/memory status` checks
