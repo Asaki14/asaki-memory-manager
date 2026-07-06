@@ -11,8 +11,46 @@ export interface ExtractedCandidate {
   scope: MemoryScope;
 }
 
-const SYSTEM_PROMPT =
-  'Extract durable memories from raw text. Only extract: explicit user preferences, decisions made, completed task learnings, bug fixes, established rules/conventions, or workflow changes. Also extract explicit requests to forget, retract, or invalidate a previous preference/decision/fact — keep the forget/retract wording intact in the candidate text (e.g. "forget that I prefer dark mode") so a downstream step can act on it. Skip transient chit-chat, questions, and anything without lasting future value. In particular, do NOT extract short imperative instructions or commands directed at the assistant (e.g. "refresh and verify", "run the tests", "push this") — these are one-off task directives, not durable facts, even if they appear alongside meaningful context. The text may also include the assistant quoting or paraphrasing source code, prompt strings, or CLI/tool output verbatim (e.g. explaining a piece of code that happens to contain example text like "forget that I prefer dark mode", or pasting console output from a command) — never extract these quoted/pasted fragments as if the user said or requested them; only extract what a participant actually, genuinely stated. Each memory must be a concise, self-contained statement understandable without the surrounding context. For each candidate also classify "scope": "global" for cross-project preferences/rules/conventions about how the user generally likes to work (editor settings, communication style, recurring habits), or "project" for facts/decisions specific to the codebase/project currently being discussed. Return strict JSON: {"candidates":[{"content":"...","kind":"preference|rule|fact|decision|task_learning|bug_fix|workflow","importance":0.0-1.0,"scope":"global|project"}]}. Return {"candidates":[]} if nothing durable is found. Never invent facts not present in the text.';
+// Modeled on mem0's fact-retrieval prompt design (role-scoped extraction + few-shot examples
+// instead of prose-only rules — an 8B model follows worked examples far more reliably than
+// abstract instructions). Unlike mem0's user-only rule, both roles remain eligible here because
+// this system's most valuable memories are the assistant's own completed-work summaries — but
+// each role gets its own bar, and the negative examples target failure modes actually observed
+// in production: quoted CLI/tool output, quoted source/prompt strings, and bare commands.
+const SYSTEM_PROMPT = `You are a memory extractor for a coding assistant's conversation log. The input is raw text made of "User: ..." and "Assistant: ..." turns.
+
+Extract only: explicit user preferences, decisions made, completed task learnings, bug fixes, established rules/conventions, or workflow changes. Also extract explicit requests to forget, retract, or invalidate a previous preference/decision/fact — keep the forget/retract wording intact in the candidate text so a downstream step can act on it.
+
+Both roles can be a source, but apply a different bar per role:
+- From User turns: extract genuine preferences, facts, or decisions the user actually states about themselves or the project.
+- From Assistant turns: extract ONLY a genuine, completed summary of what was learned, fixed, or decided. Never extract the assistant's quoted source code, prompt strings, or pasted CLI/tool output, and never extract the assistant's own questions or proposed next steps to the user — even when phrased as a declarative list of steps, a proposed plan is not a completed fact unless the text confirms it was actually carried out.
+
+Skip transient chit-chat, questions, short imperative commands directed at the assistant (e.g. "run the tests", "verify this", "refresh"), and anything without lasting future value.
+
+Examples:
+
+Input: User: 跑一下测试
+Output: {"candidates":[]}
+
+Input: Assistant: 插件已更新。CLI 输出：✔ Plugin updated from 1.3.1 to 1.3.2. Restart to apply changes.
+Output: {"candidates":[]}
+
+Input: Assistant: FORGET_SIGNALS 正则用于识别类似 "forget that I prefer dark mode" 这种表达，命中后转交 LLM 处理。
+Output: {"candidates":[]}
+
+Input: Assistant: 要不要跟上次一样：commit → push → bump 版本号 → claude plugin update 刷新本地缓存？
+Output: {"candidates":[]}
+
+Input: User: 以后都用 pnpm，不要用 npm
+Output: {"candidates":[{"content":"用户偏好使用 pnpm，不使用 npm","kind":"preference","importance":0.8,"scope":"global"}]}
+
+Input: Assistant: 根因是同时跑了两个 daemon 互相抢焦点，已加 pkill 守卫脚本防止野实例重新抢焦。
+Output: {"candidates":[{"content":"Focus-stealing bug 根因是两个 daemon 同时运行互相抢焦点；已加 pkill 守卫脚本防止野实例。","kind":"bug_fix","importance":0.7,"scope":"global"}]}
+
+Input: User: forget that I prefer dark mode
+Output: {"candidates":[{"content":"forget that I prefer dark mode","kind":"preference","importance":0.5,"scope":"global"}]}
+
+Each memory must be a concise, self-contained statement understandable without the surrounding context. For each candidate also classify "scope": "global" for cross-project preferences/rules/conventions about how the user generally likes to work (editor settings, communication style, recurring habits), or "project" for facts/decisions specific to the codebase/project currently being discussed. Return strict JSON: {"candidates":[{"content":"...","kind":"preference|rule|fact|decision|task_learning|bug_fix|workflow","importance":0.0-1.0,"scope":"global|project"}]}. Return {"candidates":[]} if nothing durable is found. Never invent facts not present in the text. Do not return the example inputs/outputs shown above verbatim — they are for pattern reference only.`;
 
 export async function extractMemoryCandidates(env: Env, text: string, userId: string): Promise<ExtractedCandidate[]> {
   if (!env.AI || !env.MEMORY_LLM_MODEL) return [];
