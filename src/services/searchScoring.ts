@@ -64,6 +64,13 @@ function searchTokens(value: string): Set<string> {
     addSearchToken(tokens, raw);
     for (const part of raw.split(/[_-]+/)) addSearchToken(tokens, part);
   }
+  // The ASCII match above is blind to CJK text (no [a-z0-9] characters at all), which left
+  // keyword/fallback search with an empty token set — and therefore zero keyword score — for
+  // any Chinese-only memory or query. Chinese has no whitespace word boundaries, so per-character
+  // tokens are the practical choice (same reasoning as candidateDecision.ts's tokenize()).
+  for (const char of value.match(/[一-鿿㐀-䶿]/g) ?? []) {
+    tokens.add(char);
+  }
   return tokens;
 }
 
