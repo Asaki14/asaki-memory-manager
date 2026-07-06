@@ -1,9 +1,10 @@
 import { Hono, type Context } from 'hono';
 import type { Env } from './types';
 import { processMemoryCandidates } from './services/candidates';
+import { extractMemoryCandidates } from './services/extraction';
 import { createMemory, deleteMemory, getMemory, listMemories, searchMemories, updateMemory } from './services/memories';
 import { createMemoryReviews, listMemoryReviews, resolveMemoryReview } from './services/reviews';
-import { validateCreateMemory, validateCreateMemoryReviews, validateListMemories, validateListMemoryReviews, validateMemoryIdInput, validateProcessCandidates, validateResolveMemoryReview, validateSearchMemories, validateUpdateMemory } from './utils/validation';
+import { validateCreateMemory, validateCreateMemoryReviews, validateExtractMemories, validateListMemories, validateListMemoryReviews, validateMemoryIdInput, validateProcessCandidates, validateResolveMemoryReview, validateSearchMemories, validateUpdateMemory } from './utils/validation';
 
 type Bindings = Env;
 
@@ -66,6 +67,32 @@ app.post('/v1/memories/candidates', async (c) => {
 
   const decisions = await processMemoryCandidates(c.env, validation.data);
   return c.json({ decisions });
+});
+
+app.post('/v1/memories/extract', async (c) => {
+  const body = await readJson(c);
+  if (!body.ok) return body.response;
+
+  const validation = validateExtractMemories(body.body);
+  if (!validation.ok) return c.json({ error: validation.error }, 400);
+
+  const { text, user_id, scope, project_id, session_id, source } = validation.data;
+  const resolvedScope = scope ?? 'global';
+  const extracted = await extractMemoryCandidates(c.env, text, user_id);
+  const candidates = extracted.map((item) => ({
+    content: item.content,
+    user_id,
+    scope: resolvedScope,
+    project_id: resolvedScope === 'project' ? project_id : null,
+    session_id: resolvedScope === 'session' ? session_id : null,
+    kind: item.kind,
+    importance: item.importance,
+    confidence: 0.7,
+    source: source ?? 'extraction',
+  }));
+
+  const decisions = candidates.length > 0 ? await processMemoryCandidates(c.env, candidates) : [];
+  return c.json({ decisions, extracted_count: extracted.length });
 });
 
 app.post('/v1/memories/list', async (c) => {

@@ -26,6 +26,15 @@ export interface CreateMemoryInput {
   expires_at?: string | null;
 }
 
+export interface ExtractMemoriesInput {
+  text: string;
+  user_id: string;
+  scope?: MemoryScope;
+  project_id?: string | null;
+  session_id?: string | null;
+  source?: string | null;
+}
+
 export interface SearchMemoriesInput {
   query: string;
   user_id: string;

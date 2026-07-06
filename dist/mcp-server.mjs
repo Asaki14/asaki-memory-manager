@@ -5,7 +5,11 @@ var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __commonJS = (cb, mod) => function __require() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  try {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  } catch (e) {
+    throw mod = 0, e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -10712,7 +10716,7 @@ ZodNaN.create = (params) => {
     ...processCreateParams(params)
   });
 };
-var BRAND = Symbol("zod_brand");
+var BRAND = /* @__PURE__ */ Symbol("zod_brand");
 var ZodBranded = class extends ZodType {
   _parse(input) {
     const { ctx } = this._processInputParams(input);
@@ -10972,7 +10976,6 @@ function $constructor(name, initializer3, params) {
   Object.defineProperty(_, "name", { value: name });
   return _;
 }
-var $brand = Symbol("zod_brand");
 var $ZodAsyncError = class extends Error {
   constructor() {
     super(`Encountered Promise during synchronous parse. Use .parseAsync() instead.`);
@@ -13476,8 +13479,6 @@ function en_default2() {
 }
 
 // integrations/mcp/node_modules/zod/v4/core/registries.js
-var $output = Symbol("ZodOutput");
-var $input = Symbol("ZodInput");
 var $ZodRegistry = class {
   constructor() {
     this._map = /* @__PURE__ */ new Map();
@@ -17153,7 +17154,7 @@ function isTerminal(status) {
 }
 
 // integrations/mcp/node_modules/zod-to-json-schema/dist/esm/Options.js
-var ignoreOverride = Symbol("Let zodToJsonSchema decide on which parser to use");
+var ignoreOverride = /* @__PURE__ */ Symbol("Let zodToJsonSchema decide on which parser to use");
 var defaultOptions = {
   name: void 0,
   $refStrategy: "root",
@@ -20129,7 +20130,7 @@ var Server = class extends Protocol {
 };
 
 // integrations/mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/server/completable.js
-var COMPLETABLE_SYMBOL = Symbol.for("mcp.completable");
+var COMPLETABLE_SYMBOL = /* @__PURE__ */ Symbol.for("mcp.completable");
 function isCompletable(schema) {
   return !!schema && typeof schema === "object" && COMPLETABLE_SYMBOL in schema;
 }
@@ -21285,6 +21286,36 @@ server.tool(
     const memoryId = decision?.memory?.id || decision?.matched_memory?.id;
     const reason = decision?.reason ? `: ${decision.reason}` : "";
     return { content: [{ type: "text", text: `Asaki memory ${action}${memoryId ? ` id=${memoryId}` : ""}${reason}` }] };
+  }
+);
+server.tool(
+  "asaki_memory_extract",
+  "Extract and store durable memories from a raw text blob (e.g. a conversation excerpt) via LLM-based extraction, instead of a single pre-distilled statement. Use when you have unstructured text rather than an already-concise memory.",
+  {
+    text: external_exports.string().describe("Raw text to extract durable memories from."),
+    scope: external_exports.enum(["global", "project", "session"]).optional().describe("Memory scope."),
+    project_id: external_exports.string().optional().describe("Project id override."),
+    session_id: external_exports.string().optional().describe("Session id override.")
+  },
+  async ({ text, scope, project_id, session_id }) => {
+    const cfg = memoryConfig();
+    const resolvedScope = scope || cfg.defaultScope;
+    const projectId = resolveProjectId(project_id);
+    const sessionId = session_id || cfg.sessionId || void 0;
+    const body = { text, user_id: cfg.userId, scope: resolvedScope, source: `${SOURCE_TAG}:extract` };
+    if (resolvedScope === "project") body.project_id = projectId;
+    if (resolvedScope === "session") body.session_id = sessionId;
+    const data = await apiRequest("/v1/memories/extract", body);
+    const decisions = Array.isArray(data.decisions) ? data.decisions : [];
+    if (decisions.length === 0) return { content: [{ type: "text", text: "No durable memories extracted." }] };
+    const text_out = decisions.map((decision, index) => {
+      const action = decision.action || "ok";
+      const memoryId = decision.memory?.id || decision.matched_memory?.id;
+      const reason = decision.reason ? `: ${decision.reason}` : "";
+      const content = decision.candidate?.content ?? "";
+      return `${index + 1}. [${action}]${memoryId ? ` id=${memoryId}` : ""} ${content}${reason}`;
+    }).join("\n");
+    return { content: [{ type: "text", text: text_out }] };
   }
 );
 server.tool(
