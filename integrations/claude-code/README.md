@@ -55,9 +55,9 @@ committed). Set them once in `~/.claude/settings.json`:
   Tool calls, tool results, and thinking blocks are never sent — only plain
   text turns. Fire-and-forget: the extraction request backgrounds itself so it
   never blocks the Stop event. This intentionally sends conversation text
-  off-machine to the Worker — the opposite tradeoff from the Pi extension's
-  `memoryPrecheckInstruction()`, which keeps extraction agent-side to avoid
-  that. Per-session offset/log files live under
+  off-machine to the Worker. The Pi extension can make the same tradeoff when
+  `ASAKI_MEMORY_AUTO_EXTRACT=1`, but uses Pi's `agent_end` event directly
+  instead of transcript offset files. Per-session offset/log files live under
   `${TMPDIR:-/tmp}/asaki-memory-stop-extract/`.
 - `tool-visibility.sh` — PostToolUse hook, surfaces memory tool calls in the TUI
 - `../mcp/asaki-memory.ts` — MCP server exposing `asaki_memory_search`/`asaki_memory_add`/etc.
