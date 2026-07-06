@@ -13,13 +13,20 @@ function normalizeText(value: string): string {
   return value.toLowerCase().replace(/[\s，。,.!！?？:：;；"'“”‘’（）()【】\[\]{}]/g, '');
 }
 
+// Word-level tokens for ASCII runs (so "npm" and "pnpm" don't count as near-identical just
+// because they share letters), single-character tokens for CJK (no whitespace word boundaries
+// to split on, so per-character bag-of-characters is the practical choice there).
+function tokenize(value: string): string[] {
+  return value.toLowerCase().match(/[a-z0-9]+|[一-鿿㐀-䶿]/g) ?? [];
+}
+
 export function lexicalSimilarity(a: string, b: string): number {
-  const left = new Set(normalizeText(a));
-  const right = new Set(normalizeText(b));
+  const left = new Set(tokenize(a));
+  const right = new Set(tokenize(b));
   if (left.size === 0 || right.size === 0) return 0;
   let intersection = 0;
-  for (const char of left) {
-    if (right.has(char)) intersection += 1;
+  for (const token of left) {
+    if (right.has(token)) intersection += 1;
   }
   return intersection / Math.max(left.size, right.size);
 }

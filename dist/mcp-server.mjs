@@ -21299,12 +21299,11 @@ server.tool(
   },
   async ({ text, scope, project_id, session_id }) => {
     const cfg = memoryConfig();
-    const resolvedScope = scope || cfg.defaultScope;
     const projectId = resolveProjectId(project_id);
     const sessionId = session_id || cfg.sessionId || void 0;
-    const body = { text, user_id: cfg.userId, scope: resolvedScope, source: `${SOURCE_TAG}:extract` };
-    if (resolvedScope === "project") body.project_id = projectId;
-    if (resolvedScope === "session") body.session_id = sessionId;
+    const body = { text, user_id: cfg.userId, project_id: projectId, source: `${SOURCE_TAG}:extract` };
+    if (scope) body.scope = scope;
+    if (scope === "session" || !scope && sessionId) body.session_id = sessionId;
     const data = await apiRequest("/v1/memories/extract", body);
     const decisions = Array.isArray(data.decisions) ? data.decisions : [];
     if (decisions.length === 0) return { content: [{ type: "text", text: "No durable memories extracted." }] };

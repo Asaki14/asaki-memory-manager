@@ -69,8 +69,10 @@ echo "$TOTAL" >"$STATE_FILE"
 [ "${#TEXT}" -lt 60 ] && exit 0
 TEXT="${TEXT:0:20000}"
 
+# No "scope" here on purpose — let the server infer global vs project per candidate.
+# project_id is still sent as a hint for whichever candidates resolve to project scope.
 BODY=$(jq -cn --arg text "$TEXT" --arg user "$ASAKI_USER" --arg project "$ASAKI_PROJECT" \
-  '{text: $text, user_id: $user, scope: "project", project_id: $project, source: "claude-code:auto-extract"}')
+  '{text: $text, user_id: $user, project_id: $project, source: "claude-code:auto-extract"}')
 
 LOG_FILE="$STATE_DIR/${SESSION_ID}.log"
 (

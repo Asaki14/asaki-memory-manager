@@ -77,19 +77,24 @@ app.post('/v1/memories/extract', async (c) => {
   if (!validation.ok) return c.json({ error: validation.error }, 400);
 
   const { text, user_id, scope, project_id, session_id, source } = validation.data;
-  const resolvedScope = scope ?? 'global';
   const extracted = await extractMemoryCandidates(c.env, text, user_id);
-  const candidates = extracted.map((item) => ({
-    content: item.content,
-    user_id,
-    scope: resolvedScope,
-    project_id: resolvedScope === 'project' ? project_id : null,
-    session_id: resolvedScope === 'session' ? session_id : null,
-    kind: item.kind,
-    importance: item.importance,
-    confidence: 0.7,
-    source: source ?? 'extraction',
-  }));
+  const candidates = extracted.map((item) => {
+    // An explicit request-level scope forces every candidate into it. Otherwise each candidate
+    // keeps its own LLM-inferred scope (global vs project) instead of being forced into one.
+    let resolvedScope = scope ?? item.scope;
+    if (resolvedScope === 'project' && !project_id) resolvedScope = 'global';
+    return {
+      content: item.content,
+      user_id,
+      scope: resolvedScope,
+      project_id: resolvedScope === 'project' ? project_id : null,
+      session_id: resolvedScope === 'session' ? session_id : null,
+      kind: item.kind,
+      importance: item.importance,
+      confidence: 0.7,
+      source: source ?? 'extraction',
+    };
+  });
 
   const decisions = candidates.length > 0 ? await processMemoryCandidates(c.env, candidates) : [];
   return c.json({ decisions, extracted_count: extracted.length });
