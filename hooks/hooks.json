@@ -37,7 +37,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "mcp__asaki-memory__.*",
+        "matcher": "mcp__.*__asaki_memory_.*",
         "hooks": [
           {
             "type": "command",

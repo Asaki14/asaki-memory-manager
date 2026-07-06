@@ -7,27 +7,34 @@ tool_name=$(echo "$input" | jq -r '.tool_name // empty')
 
 trunc() { echo "$1" | cut -c1-80; }
 
+# Match by tool-name suffix, not a fixed "mcp__<server>__" prefix — the prefix Claude Code
+# generates for plugin-bundled MCP servers (e.g. "mcp__plugin_asaki-memory_asaki-memory__...")
+# differs from a directly-registered server ("mcp__asaki-memory__..."), and has changed before.
 case "$tool_name" in
-  mcp__asaki-memory__asaki_memory_search)
+  *asaki_memory_search)
     query=$(echo "$input" | jq -r '.tool_input.query // empty')
     msg="🧠 Asaki memory search: \"$(trunc "$query")\""
     ;;
-  mcp__asaki-memory__asaki_memory_add)
+  *asaki_memory_add)
     text=$(echo "$input" | jq -r '.tool_input.text // empty')
     msg="🧠 Asaki memory add: \"$(trunc "$text")\""
     ;;
-  mcp__asaki-memory__asaki_memory_update)
+  *asaki_memory_extract)
+    text=$(echo "$input" | jq -r '.tool_input.text // empty')
+    msg="🧠 Asaki memory extract: \"$(trunc "$text")\""
+    ;;
+  *asaki_memory_update)
     id=$(echo "$input" | jq -r '.tool_input.id // empty')
     msg="🧠 Asaki memory update: id=$id"
     ;;
-  mcp__asaki-memory__asaki_memory_delete)
+  *asaki_memory_delete)
     id=$(echo "$input" | jq -r '.tool_input.id // empty')
     msg="🧠 Asaki memory delete: id=$id"
     ;;
-  mcp__asaki-memory__asaki_memory_list)
+  *asaki_memory_list)
     msg="🧠 Asaki memory list"
     ;;
-  mcp__asaki-memory__asaki_memory_review_create|mcp__asaki-memory__asaki_memory_review_list|mcp__asaki-memory__asaki_memory_review_resolve)
+  *asaki_memory_review_create|*asaki_memory_review_list|*asaki_memory_review_resolve)
     msg="🧠 Asaki memory: $tool_name"
     ;;
   *)
