@@ -305,6 +305,7 @@ export ASAKI_MEMORY_PROJECT_ID="demo-app"
 export ASAKI_MEMORY_DIGEST_TOP_K="8"
 export ASAKI_MEMORY_AUTO_INJECT="1"
 export ASAKI_MEMORY_AUTO_MIN_SCORE="0.50"
+export ASAKI_MEMORY_AUTO_EXTRACT="0"
 ```
 
 On every `session_start` (new/resume/fork, not plain extension `reload`), the
@@ -316,6 +317,13 @@ fires every turn so the agent decides for itself whether to call
 `asaki_memory_search`/`asaki_memory_add`. `ASAKI_MEMORY_AUTO_INJECT` (default
 off) additionally does a deterministic keyword-triggered search on top of
 that judgment call.
+
+`ASAKI_MEMORY_AUTO_EXTRACT` (default off) enables Pi-native background
+extraction on `agent_end`: the extension sends only text user/assistant
+messages from that prompt to `/v1/memories/extract`, excluding tool results,
+tool calls, and thinking blocks. This mirrors the Claude Code Stop hook's
+server-side extraction tradeoff, but uses Pi's in-process event API instead of
+transcript offset files. It intentionally sends conversation text off-machine.
 
 The extension exposes:
 

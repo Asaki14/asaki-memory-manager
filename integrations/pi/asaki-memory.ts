@@ -11,6 +11,9 @@ const DEFAULT_SCOPE = "project";
 const DEFAULT_AUTO_MIN_SCORE = 0.5;
 const AUTO_INJECT_TOP_K = 6;
 const DEFAULT_DIGEST_TOP_K = 8;
+const AUTO_EXTRACT_MIN_CHARS = 60;
+const AUTO_EXTRACT_MAX_CHARS = 20_000;
+const AUTO_EXTRACT_TIMEOUT_MS = 20_000;
 const MEMORY_NEEDED_RE =
   /(记忆|记得|回忆|想起|以前|之前|上次|过往|历史|偏好|习惯|约定|惯例|决策|背景|上下文|继续|延续|remember|recall|memory|previous|before|last time|preference|convention|decision|context|continue)/i;
 const SENSITIVE_RE_LIST = [
@@ -55,6 +58,7 @@ function memoryConfig() {
     sessionId: process.env.ASAKI_MEMORY_SESSION_ID || process.env.MEMORY_SESSION_ID || stringConfig(fileConfig, "sessionId", "session_id") || "",
     defaultScope: normalizeScope(process.env.ASAKI_MEMORY_DEFAULT_SCOPE || stringConfig(fileConfig, "defaultScope", "default_scope")) || DEFAULT_SCOPE,
     autoMinScore: numberConfig(process.env.ASAKI_MEMORY_AUTO_MIN_SCORE, numberConfig(fileConfig.autoMinScore ?? fileConfig.auto_min_score, DEFAULT_AUTO_MIN_SCORE)),
+    autoExtract: envFlagEnabledConfig(process.env.ASAKI_MEMORY_AUTO_EXTRACT ?? fileConfig.autoExtract ?? fileConfig.auto_extract, false),
   };
 }
 
@@ -88,6 +92,13 @@ function stringConfig(config: MemoryConfigFile, ...keys: string[]): string {
 function numberConfig(value: unknown, fallback: number): number {
   const number = typeof value === "number" ? value : typeof value === "string" && value ? Number(value) : NaN;
   return Number.isFinite(number) ? number : fallback;
+}
+
+function envFlagEnabledConfig(value: unknown, fallback: boolean): boolean {
+  if (value == null || value === "") return fallback;
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return fallback;
+  return !["0", "false", "off", "no"].includes(value.toLowerCase());
 }
 
 function normalizeScope(value: unknown): MemoryScope | undefined {
@@ -316,6 +327,69 @@ function containsSensitiveText(text: string): boolean {
   return SENSITIVE_RE_LIST.some((pattern) => pattern.test(text));
 }
 
+function extractTextContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((part): part is { type: string; text: string } => Boolean(part) && typeof part === "object" && (part as any).type === "text" && typeof (part as any).text === "string")
+    .map((part) => part.text)
+    .join(" ");
+}
+
+function buildExtractionText(messages: unknown): string {
+  if (!Array.isArray(messages)) return "";
+  const lines: string[] = [];
+  for (const message of messages as any[]) {
+    if (!message || typeof message !== "object") continue;
+    if (message.role === "user") {
+      const text = cleanMemoryText(extractTextContent(message.content));
+      if (text) lines.push(`User: ${text}`);
+    } else if (message.role === "assistant" && (!message.stopReason || message.stopReason === "stop" || message.stopReason === "toolUse")) {
+      const text = cleanMemoryText(extractTextContent(message.content));
+      if (text) lines.push(`Assistant: ${text}`);
+    }
+  }
+  return lines.join("\n\n");
+}
+
+function summarizeExtractionDecisions(decisions: unknown): string | null {
+  if (!Array.isArray(decisions) || decisions.length === 0) return null;
+  const verbs: Record<string, string> = { add: "added", merge: "merged", ignore: "ignored", update: "updated", delete: "deleted" };
+  const counts = new Map<string, number>();
+  for (const decision of decisions as any[]) {
+    const action = typeof decision?.action === "string" ? decision.action : "unknown";
+    counts.set(action, (counts.get(action) ?? 0) + 1);
+  }
+  const breakdown = [...counts.entries()].map(([action, count]) => `${count} ${verbs[action] ?? action}`).join(", ");
+  return `${decisions.length} candidates → ${breakdown}`;
+}
+
+function timeoutSignal(ms: number): AbortSignal {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  if (typeof (timer as any).unref === "function") (timer as any).unref();
+  return controller.signal;
+}
+
+async function autoExtractMemory(messages: unknown, ctx: unknown): Promise<string | null> {
+  const config = memoryConfig();
+  if (!config.autoExtract || !config.apiKey) return null;
+
+  const text = buildExtractionText(messages).slice(0, AUTO_EXTRACT_MAX_CHARS);
+  if (text.length < AUTO_EXTRACT_MIN_CHARS || containsSensitiveText(text)) return null;
+
+  const body: Record<string, unknown> = {
+    text,
+    user_id: config.userId,
+    project_id: resolveProjectId(ctx),
+    source: "pi:auto-extract",
+  };
+  if (config.sessionId) body.session_id = config.sessionId;
+
+  const data = await memoryRequest("/v1/memories/extract", body, timeoutSignal(AUTO_EXTRACT_TIMEOUT_MS));
+  return summarizeExtractionDecisions(data?.decisions);
+}
+
 export default function (pi: ExtensionAPI) {
   // Set on session_start (except plain "reload"), consumed by the next
   // before_agent_start so the project digest is injected once per session —
@@ -361,6 +435,19 @@ export default function (pi: ExtensionAPI) {
     };
   });
 
+  pi.on("agent_end", async (event, ctx) => {
+    void autoExtractMemory(event.messages, ctx)
+      .then((summary) => {
+        if (summary && ctx.hasUI) ctx.ui.notify(`🧠 Asaki auto-extract: ${summary}`, "info");
+      })
+      .catch((error) => {
+        if (envFlagEnabled("ASAKI_MEMORY_DEBUG", false) && ctx.hasUI) {
+          const message = error instanceof Error ? error.message : String(error);
+          ctx.ui.notify(`Asaki auto-extract failed: ${message}`, "warning");
+        }
+      });
+  });
+
   pi.registerCommand("memory", {
     description: "Audit and manage Asaki memories with agent assistance. Use /memory status to test backend connectivity.",
     handler: async (args, ctx) => {
@@ -373,6 +460,7 @@ export default function (pi: ExtensionAPI) {
           `- apiKey: ${config.apiKey ? "configured" : "missing"}`,
           `- userId: ${config.userId}`,
           `- defaultScope: ${config.defaultScope}`,
+          `- autoExtract: ${config.autoExtract ? "enabled" : "disabled"}`,
           `- projectId: ${resolveProjectId(ctx) || "missing"}`,
           `- sessionId: ${config.sessionId || "missing"}`,
         ];
