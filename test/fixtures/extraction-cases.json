@@ -38,5 +38,25 @@
     "name": "pos: explicit forget request",
     "text": "User: forget that I prefer dark mode",
     "expectEmpty": false
+  },
+  {
+    "name": "neg: assistant quoting its own newly-added prompt example while explaining it",
+    "text": "Assistant: 现在 prompt 里加了新的 few-shot 正例，比如 User: 以后都用 pnpm，不要用 npm 这种输入应该被正确抽取成用户偏好。跑了回归测试，8/8 全过。",
+    "expectEmpty": true
+  },
+  {
+    "name": "neg: assistant's own question buried inside a longer explanation",
+    "text": "Assistant: 建好了，eval:extraction 脚本已经能跑。要不要现在建这个 eval 文件？我建议现在建，因为能把踩过的坑固化成回归用例。",
+    "expectEmpty": true
+  },
+  {
+    "name": "neg: bare next-step question after a status update",
+    "text": "Assistant: 推送完了，origin/main 已经同步。要 commit + push 吗？",
+    "expectEmpty": true
+  },
+  {
+    "name": "neg: user's exploratory question, not a stated goal or decision",
+    "text": "User: 现在我想根据以后的记忆慢慢训练这个记忆系统，你觉得有必要么？",
+    "expectEmpty": true
   }
 ]
