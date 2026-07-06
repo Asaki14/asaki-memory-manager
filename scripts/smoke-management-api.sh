@@ -83,4 +83,14 @@ RESOLVE_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/reviews/${REVIEW_ID}/
   -d "{\"user_id\":\"${USER_ID}\",\"action\":\"ignore\",\"reason\":\"smoke test\"}")
 printf '%s' "$RESOLVE_RESPONSE" | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); if (j.review?.status !== "resolved" || j.review?.resolved_action !== "ignore") process.exit(1); });'
 
-echo "management API smoke passed: ${MEMORY_ID}; review smoke passed: ${REVIEW_ID}"
+EXTRACT_VALIDATION_STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/memories/extract" \
+  -H 'Content-Type: application/json' \
+  -d "{\"text\":\"some raw text\"}")
+[[ "$EXTRACT_VALIDATION_STATUS" == "400" ]] || { echo "expected 400 for extract without user_id, got ${EXTRACT_VALIDATION_STATUS}"; exit 1; }
+
+EXTRACT_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/extract" \
+  -H 'Content-Type: application/json' \
+  -d "{\"text\":\"raw conversation snippet for smoke test\",\"user_id\":\"${USER_ID}\",\"scope\":\"project\",\"project_id\":\"${PROJECT_ID}\"}")
+printf '%s' "$EXTRACT_RESPONSE" | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); if (!Array.isArray(j.decisions) || typeof j.extracted_count !== "number") process.exit(1); });'
+
+echo "management API smoke passed: ${MEMORY_ID}; review smoke passed: ${REVIEW_ID}; extract smoke passed"
