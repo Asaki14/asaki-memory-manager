@@ -43,6 +43,7 @@ Stack:
 npm install
 npm run typecheck
 npm run eval:candidates
+npm run eval:extraction
 npm run smoke:management
 npm run db:migrate:local
 npm run dev
@@ -72,10 +73,10 @@ npm run deploy
 - D1 is the source of truth; Vectorize is a recoverable index.
 - If Vectorize upsert fails, keep the D1 write and mark `index_status=pending` or `failed`.
 - Search should keep hybrid Vectorize + D1 lexical fallback behavior.
-- The active conversation agent extracts durable memory and calls `asaki_memory_add`; Cloudflare organizes, dedupes, merges, indexes, and stores candidates.
-- Do not add a server-side conversation extraction endpoint; the Worker should not receive full conversation transcripts for extraction.
+- The active conversation agent can call `asaki_memory_add` directly with a pre-distilled memory, or hand raw text to `POST /v1/memories/extract` (`asaki_memory_extract` MCP tool) for server-side LLM extraction; Cloudflare organizes, dedupes, merges, indexes, and stores candidates either way. The Claude Code Stop hook (`integrations/claude-code/stop-extract.sh`) uses the raw-text path, sending new plain-text conversation deltas off-machine for background extraction — this is a deliberate reversal of an earlier no-transcripts-off-machine stance.
 - Candidate processing should run deterministic duplicate checks before LLM decisions.
 - Run `npm run eval:candidates` after changing candidate dedupe thresholds or prompts.
+- Run `npm run eval:extraction` after changing the extraction prompt (`src/services/extraction.ts`); it hits a live Worker (defaults to production) since `env.AI.run()` needs a real Worker runtime. Add a new case to `test/fixtures/extraction-cases.json` whenever a production false positive/negative turns up.
 - Pi auto inject defaults to `ASAKI_MEMORY_AUTO_MIN_SCORE=0.50`; keep low-score memories out of injected context.
 - Keep changes small and consistent with existing style.
 - Run `npm run typecheck` after TypeScript edits.
