@@ -1,6 +1,6 @@
 import type { CreateMemoryInput, SearchResult } from '../types';
 
-export type CandidateAction = 'add' | 'merge' | 'update' | 'ignore';
+export type CandidateAction = 'add' | 'merge' | 'update' | 'delete' | 'ignore';
 
 export interface ProcessMemoryCandidateInput extends Required<Pick<CreateMemoryInput, 'content' | 'user_id' | 'scope' | 'kind' | 'importance' | 'confidence'>> {
   project_id?: string | null;
@@ -110,6 +110,12 @@ function hasContradictionSignal(text: string): boolean {
   return CONTRADICTION_SIGNALS.test(text);
 }
 
+const FORGET_SIGNALS = /\b(forget (that|about|it)|disregard|retract(?:ed)?|never\s?mind|delete (that|this)|remove (that|this)|scratch that|that('s| is) (not|no longer) (true|valid|correct))\b/i;
+
+function hasForgetSignal(text: string): boolean {
+  return FORGET_SIGNALS.test(text);
+}
+
 export function chooseDecision(candidate: ProcessMemoryCandidateInput, match: SearchResult | undefined, llm: { action: CandidateAction; reason: string } | null): { action: CandidateAction; reason: string } {
   const heuristic = heuristicDecision(candidate, match);
   if (!match || !llm) return heuristic;
@@ -122,7 +128,8 @@ export function chooseDecision(candidate: ProcessMemoryCandidateInput, match: Se
   // without contradicting it. Phrasing like "X instead of Y" or "switched to X" defeats that
   // assumption (it's a superset of characters/tokens while actually superseding the old fact) —
   // defer those to the LLM, which can tell "update" apart from "merge", instead of auto-merging.
-  if (hasContradictionSignal(candidate.content)) return llm;
+  // "Forget/retract" phrasing is the same story but for deletion — never auto-merge those either.
+  if (hasContradictionSignal(candidate.content) || hasForgetSignal(candidate.content)) return llm;
 
   const deterministic = incoming.includes(existing) || existing.includes(incoming) || tokenDecision(candidate.content, match.content) !== null || matchSimilarity(candidate, match) >= 0.95;
   return deterministic ? heuristic : llm;
