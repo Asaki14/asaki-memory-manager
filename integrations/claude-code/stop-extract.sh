@@ -52,23 +52,28 @@ report_and_exit() {
     LOG_LINES=$(wc -l <"$LOG_FILE" | tr -d ' ')
     if [ "$LOG_LINES" -gt "$LAST_REPORTED" ]; then
       RESP_JSON="$(tail -n 1 "$LOG_FILE" | sed -E 's/^[^ ]+ //')"
-      COUNTS=$(echo "$RESP_JSON" | jq -r '
-        def verb:
-          if . == "add" then "added"
-          elif . == "merge" then "merged"
-          elif . == "ignore" then "ignored"
-          elif . == "update" then "updated"
-          elif . == "delete" then "deleted"
-          else . end;
-        (.decisions // []) as $d
-        | ($d | length) as $n
-        | if $n == 0 then empty
-          else ($d | group_by(.action) | map("\(length) " + (.[0].action | verb)) | join(", ")) as $breakdown
-          | "\($n) candidates → \($breakdown)"
-          end
-      ' 2>/dev/null)
-      [ -n "$COUNTS" ] && MSG="🧠 Asaki auto-extract (prev turn): ${COUNTS}"
-      echo "$LOG_LINES" >"$REPORTED_FILE"
+      # Only advance REPORTED_FILE once RESP_JSON parses as valid JSON — a curl failure or a
+      # partial write from a still-in-flight background job must NOT be marked reported, or
+      # this result is silently skipped forever (the next Stop event only re-checks tail -1).
+      if echo "$RESP_JSON" | jq -e . >/dev/null 2>&1; then
+        COUNTS=$(echo "$RESP_JSON" | jq -r '
+          def verb:
+            if . == "add" then "added"
+            elif . == "merge" then "merged"
+            elif . == "ignore" then "ignored"
+            elif . == "update" then "updated"
+            elif . == "delete" then "deleted"
+            else . end;
+          (.decisions // []) as $d
+          | ($d | length) as $n
+          | if $n == 0 then empty
+            else ($d | group_by(.action) | map("\(length) " + (.[0].action | verb)) | join(", ")) as $breakdown
+            | "\($n) candidates → \($breakdown)"
+            end
+        ' 2>/dev/null)
+        [ -n "$COUNTS" ] && MSG="🧠 Asaki auto-extract (prev turn): ${COUNTS}"
+        echo "$LOG_LINES" >"$REPORTED_FILE"
+      fi
     fi
   fi
   [ -n "$MSG" ] && jq -cn --arg msg "$MSG" '{systemMessage: $msg}'
