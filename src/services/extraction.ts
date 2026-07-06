@@ -62,13 +62,38 @@ Output: {"candidates":[]}
 
 Each memory must be a concise, self-contained statement understandable without the surrounding context. For each candidate also classify "scope": "global" for cross-project preferences/rules/conventions about how the user generally likes to work (editor settings, communication style, recurring habits), or "project" for facts/decisions specific to the codebase/project currently being discussed. Return strict JSON: {"candidates":[{"content":"...","kind":"preference|rule|fact|decision|task_learning|bug_fix|workflow","importance":0.0-1.0,"scope":"global|project"}]}. Return {"candidates":[]} if nothing durable is found. Never invent facts not present in the text. Do not return the example inputs/outputs shown above verbatim — they are for pattern reference only.`;
 
+// Deterministic pre-filter for the syntactically-obvious junk patterns an 8B model keeps
+// missing despite prompt/few-shot tuning (see extraction-cases.json history). Only strips
+// Assistant paragraphs — User turns are never filtered, matching the role-scoped extraction
+// rule in SYSTEM_PROMPT. This is not meant to catch everything (quoted code, self-referential
+// examples, and open-deliberation combos still need the LLM's semantic judgment) — it just
+// removes the cheap, regex-detectable cases so the model's remaining error surface is smaller.
+const CLI_OUTPUT_PATTERN = /[✔✓❯]\s|Restart to apply changes|Total Upload:|Current Version ID:|Worker Startup Time:/;
+const BARE_QUESTION_PATTERN = /[?？]\s*$/;
+const BARE_QUESTION_MAX_LENGTH = 150;
+
+export function stripObviousNoise(text: string): string {
+  return text
+    .split('\n\n')
+    .filter((paragraph) => {
+      if (!paragraph.startsWith('Assistant:')) return true;
+      const trimmed = paragraph.trim();
+      if (CLI_OUTPUT_PATTERN.test(trimmed)) return false;
+      if (trimmed.length <= BARE_QUESTION_MAX_LENGTH && BARE_QUESTION_PATTERN.test(trimmed)) return false;
+      return true;
+    })
+    .join('\n\n');
+}
+
 export async function extractMemoryCandidates(env: Env, text: string, userId: string): Promise<ExtractedCandidate[]> {
   if (!env.AI || !env.MEMORY_LLM_MODEL) return [];
+  const filtered = stripObviousNoise(text).trim();
+  if (!filtered) return [];
   try {
     const response = await env.AI.run(env.MEMORY_LLM_MODEL, {
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: text },
+        { role: 'user', content: filtered },
       ],
     });
     const raw = typeof response === 'string' ? response : (response as any)?.response ?? (response as any)?.result?.response ?? '';
