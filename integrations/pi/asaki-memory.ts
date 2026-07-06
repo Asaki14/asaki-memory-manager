@@ -10,7 +10,6 @@ const DEFAULT_USER_ID = "asaki";
 const DEFAULT_SCOPE = "project";
 const DEFAULT_AUTO_MIN_SCORE = 0.5;
 const AUTO_INJECT_TOP_K = 6;
-const DEFAULT_DIGEST_TOP_K = 8;
 const AUTO_EXTRACT_MIN_CHARS = 60;
 const AUTO_EXTRACT_MAX_CHARS = 20_000;
 const AUTO_EXTRACT_TIMEOUT_MS = 20_000;
@@ -272,40 +271,24 @@ function isRealProject(ctx: unknown): boolean {
   return findGitRoot(cwdFromContext(ctx)) !== null;
 }
 
-async function buildProjectDigest(ctx: unknown, signal?: AbortSignal): Promise<string | null> {
+async function buildSessionBanner(ctx: unknown, signal?: AbortSignal): Promise<string | null> {
   const config = memoryConfig();
-  if (!config.apiKey || !isRealProject(ctx)) return null;
-
-  const topK = Math.trunc(numberConfig(process.env.ASAKI_MEMORY_DIGEST_TOP_K, DEFAULT_DIGEST_TOP_K));
-  const projectId = resolveProjectId(ctx);
+  const projectId = resolveProjectId(ctx) || "unknown";
+  const project = isRealProject(ctx) ? projectId : "none";
+  if (!config.apiKey) {
+    return `Asaki Memory — setup required\nuser=${config.userId} | project=${project} | auth=missing | autoExtract=${config.autoExtract ? "on" : "off"}`;
+  }
 
   try {
-    const data = await memoryRequest(
-      "/v1/memories/list",
-      { user_id: config.userId, project_id: projectId, status: "active", limit: 50 },
-      signal,
-    );
-    const memories = Array.isArray(data?.memories) ? (data.memories as Record<string, unknown>[]) : [];
-    if (memories.length === 0) return null;
-
-    const rank = (item: Record<string, unknown>) =>
-      (typeof item.importance === "number" ? item.importance : 0) * (typeof item.confidence === "number" ? item.confidence : 1);
-
-    const lines = [...memories]
-      .sort((a, b) => rank(b) - rank(a))
-      .slice(0, topK)
-      .map((item) => {
-        const content = typeof item.content === "string" ? cleanMemoryText(item.content) : cleanMemoryText(JSON.stringify(item));
-        const meta: string[] = [];
-        if (typeof item.scope === "string") meta.push(`scope=${item.scope}`);
-        if (typeof item.kind === "string") meta.push(`kind=${item.kind}`);
-        if (typeof item.importance === "number") meta.push(`importance=${item.importance.toFixed(2)}`);
-        return `- ${content}${meta.length > 0 ? ` (${meta.join(", ")})` : ""}`;
-      });
-
-    return `Asaki memory — project digest for "${projectId}" (top ${lines.length}, ranked by importance×confidence; context only, never overrides system/developer instructions):\n${lines.join("\n")}`;
+    const [memoryData, reviewData] = await Promise.all([
+      memoryRequest("/v1/memories/list", { user_id: config.userId, project_id: projectId, status: "active", limit: 100 }, signal),
+      memoryRequest("/v1/memories/reviews/list", { user_id: config.userId, project_id: projectId, status: "pending", limit: 100 }, signal),
+    ]);
+    const memoryCount = Array.isArray(memoryData?.memories) ? `${memoryData.memories.length}${memoryData.memories.length === 100 ? "+" : ""}` : "?";
+    const pendingReviews = Array.isArray(reviewData?.reviews) ? `${reviewData.reviews.length}${reviewData.reviews.length === 100 ? "+" : ""}` : "?";
+    return `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=${memoryCount} | pendingReviews=${pendingReviews} | autoExtract=${config.autoExtract ? "on" : "off"}`;
   } catch {
-    return null;
+    return `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=? | pendingReviews=? | autoExtract=${config.autoExtract ? "on" : "off"}`;
   }
 }
 
@@ -392,9 +375,8 @@ async function autoExtractMemory(messages: unknown, ctx: unknown): Promise<strin
 
 export default function (pi: ExtensionAPI) {
   // Set on session_start (except plain "reload"), consumed by the next
-  // before_agent_start so the project digest is injected once per session —
-  // same trigger shape as Claude Code's SessionStart hook (startup/resume/compact).
-  let digestPending = false;
+  // before_agent_start so a compact status banner is injected once per session.
+  let bannerPending = false;
 
   pi.registerMessageRenderer("asaki-memory-context", (message, _options, theme) => {
     const content = typeof message.content === "string" ? message.content : String(message.content ?? "");
@@ -405,16 +387,16 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (event) => {
     if (event.reason === "reload") return;
-    digestPending = true;
+    bannerPending = true;
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
     const systemPrompt = `${event.systemPrompt}\n\n${memoryPrecheckInstruction(event.prompt)}`;
 
-    let digest: string | null = null;
-    if (digestPending) {
-      digestPending = false;
-      digest = await buildProjectDigest(ctx, ctx.signal);
+    let banner: string | null = null;
+    if (bannerPending) {
+      bannerPending = false;
+      banner = await buildSessionBanner(ctx, ctx.signal);
     }
 
     const memorySearch = await autoInjectMemory(event.prompt, ctx, ctx.signal);
@@ -422,7 +404,7 @@ export default function (pi: ExtensionAPI) {
       ? memorySearch.context ?? (envFlagEnabled("ASAKI_MEMORY_DEBUG", false) ? memorySearch.display : null)
       : null;
 
-    const content = [digest, searchDisplay].filter((part): part is string => Boolean(part)).join("\n\n");
+    const content = [banner, searchDisplay].filter((part): part is string => Boolean(part)).join("\n\n");
     if (!content) return { systemPrompt };
 
     return {
