@@ -111,7 +111,9 @@ export function bestUsableMatch(candidate: ProcessMemoryCandidateInput, matches:
   return best;
 }
 
-const CONTRADICTION_SIGNALS = /\b(instead of|instead|no longer|not\s|rather than|switch(?:ed|ing)?\s+to|replace[sd]?|change[sd]?\s+to|revert(?:ed)?\s+to|versus|vs\.?)\b/i;
+// Deliberately excludes a bare "not" — it matches too much plain negation ("this is not a bug")
+// that isn't actually superseding anything, and would send routine candidates to the LLM.
+const CONTRADICTION_SIGNALS = /\b(instead of|instead|no longer|rather than|switch(?:ed|ing)?\s+to|replace[sd]?|change[sd]?\s+to|revert(?:ed)?\s+to|versus|vs\.?)\b/i;
 
 function hasContradictionSignal(text: string): boolean {
   return CONTRADICTION_SIGNALS.test(text);

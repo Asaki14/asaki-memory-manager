@@ -37,6 +37,14 @@ fi
 STATE_DIR="${TMPDIR:-/tmp}/asaki-memory-stop-extract"
 mkdir -p "$STATE_DIR"
 STATE_FILE="$STATE_DIR/${SESSION_ID}.offset"
+
+# `mkdir` is an atomic, portable lock (flock isn't available on macOS). If another invocation
+# for this session is already mid-flight, skip this one — the offset hasn't advanced, so the
+# next Stop event will pick up the full accumulated delta anyway.
+LOCK_DIR="$STATE_DIR/${SESSION_ID}.lock"
+mkdir "$LOCK_DIR" 2>/dev/null || exit 0
+trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
+
 LAST=0
 [ -f "$STATE_FILE" ] && LAST=$(cat "$STATE_FILE" 2>/dev/null || echo 0)
 TOTAL=$(wc -l <"$TRANSCRIPT" | tr -d ' ')
