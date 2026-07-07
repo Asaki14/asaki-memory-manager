@@ -490,11 +490,13 @@ Scope:
 - global memories
 - current project memories
 ${trimmedArgs ? `User focus: ${trimmedArgs}\n` : ""}
+Global scope discipline (the recurring failure mode this exists to catch): global memories get pulled into every project's context, so the bar is "genuinely useful in ANY conversation regardless of project" — cross-project dev preferences, communication/output style, secret-handling rules, this memory system's own operating rules, and durable personal/identity facts. It is NOT a dumping ground for system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs) that only happened to be captured while not inside a recognizable git repo — that content belongs in scope=project with project_id set to the relevant repo's basename (e.g. a dotfiles repo), even if it was captured elsewhere. For every global item ask "would this help in an unrelated project?" — if no, propose RESCOPE (UPDATE scope+project_id) rather than leaving it global.
+
 Workflow:
 1. Use asaki_memory_review_list to inspect pending reviews.
 2. Use asaki_memory_list to list global memories and current project memories.
-3. Analyze duplicates, stale items, noisy items, wrong scope/kind, low-value items, pending reviews, and missing durable memories.
-4. Propose REVIEW_RESOLVE/DELETE/UPDATE/MERGE/ADD/KEEP changes with reasons and affected ids.
+3. Analyze duplicates, stale items, noisy items, wrong scope/kind (see Global scope discipline above), low-value items, pending reviews, and missing durable memories.
+4. Propose REVIEW_RESOLVE/DELETE/UPDATE(rescope)/MERGE/ADD/KEEP changes with reasons and affected ids.
 5. Use questionnaire before any write. Offer options like apply all high-confidence changes, resolve selected reviews, only deletes, only updates/additions, or skip.
 6. Execute approved changes using asaki_memory_review_resolve, asaki_memory_update, asaki_memory_delete, and asaki_memory_add.
 7. Use asaki_memory_review_create instead of asaki_memory_add for high-risk uncertain memories.
