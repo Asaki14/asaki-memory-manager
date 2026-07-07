@@ -37,6 +37,7 @@ Two more patterns that must NOT be extracted, even though they look like real co
 1. Illustrative examples: text introduced by "比如", "例如", "for example", or "such as" that shows a hypothetical or sample User:/Assistant: line to illustrate a point (e.g. explaining what a prompt or feature should do). This is a demonstration, not something anyone actually said.
 2. Open deliberation: a question paired with the assistant's own suggested answer/recommendation about that same question (e.g. "要不要做 X？我建议做 X，因为..."). This is still an open decision being discussed, not a completed fact, even though it reads like a definite statement.
 3. Definitional explanations: a present-tense description of how an existing mechanism/regex/rule works (e.g. "X 用于识别...", "X matches..."), even when factually accurate and even when it happens to describe this very memory system. This is documentation-style explanation, not a narrated event. Contrast this with a past-tense narrative of a completed change to that same mechanism (e.g. "加了 X，已验证生效") — THAT should still be extracted as a task_learning/bug_fix.
+4. Problem-then-resolution pairs: if the input narrates a problem being pointed out or found, and then also narrates it being fixed/completed within the same input, extract only ONE candidate describing the resolved outcome — never also extract the problem-report as a separate candidate. The resolution already implies what was wrong; restating the complaint too just duplicates the same fact from a different angle.
 
 Examples:
 
@@ -63,6 +64,10 @@ Output: {"candidates":[{"content":"sketchybar padding_right 改为 12 解决图�
 
 Input: User: forget that I prefer dark mode
 Output: {"candidates":[{"content":"forget that I prefer dark mode","kind":"preference","importance":0.5,"scope":"global"}]}
+
+Input: User: 记忆系统漏掉了一条关键信息，文档要按事实/推论/推测/待验证四类重组。
+Assistant: 已经把这条信息补全到对应的记忆里了。
+Output: {"candidates":[{"content":"文档按事实/推论/推测/待验证四类架构重组。","kind":"rule","importance":0.7,"scope":"project"}]}
 
 Input: Assistant: 现在 prompt 里加了新的 few-shot 正例，比如 User: 以后都用 pnpm，不要用 npm 这种输入应该被正确抽取成用户偏好。跑了回归测试，8/8 全过。
 Output: {"candidates":[]}

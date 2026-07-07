@@ -71,6 +71,7 @@ for i in $(seq 0 $((CASE_COUNT - 1))); do
   TEXT=$(echo "$CASE" | jq -r '.text')
   EXPECT_EMPTY=$(echo "$CASE" | jq -r '.expectEmpty')
   EXPECT_SCOPE=$(echo "$CASE" | jq -r '.expectScope // empty')
+  EXPECT_COUNT=$(echo "$CASE" | jq -r '.expectCount // empty')
 
   RESP=$(curl -s -X POST "$BASE_URL/v1/memories/extract" \
     -H "Authorization: Bearer ${API_KEY}" -H "Content-Type: application/json" \
@@ -85,6 +86,11 @@ for i in $(seq 0 $((CASE_COUNT - 1))); do
   fi
 
   if { [ "$EXPECT_EMPTY" = "true" ] && [ "$COUNT" -eq 0 ]; } || { [ "$EXPECT_EMPTY" = "false" ] && [ "$COUNT" -gt 0 ]; }; then
+    if [ -n "$EXPECT_COUNT" ] && [ "$COUNT" != "$EXPECT_COUNT" ]; then
+      FAIL=$((FAIL + 1))
+      FAILURES+=("$NAME: expected exactly $EXPECT_COUNT candidate(s), got $COUNT")
+      continue
+    fi
     if [ -n "$EXPECT_SCOPE" ]; then
       ACTUAL_SCOPES=$(echo "$RESP" | jq -r '[(.decisions // [])[].candidate.scope, (.reviews // [])[].candidate.scope] | join(",")')
       if echo ",$ACTUAL_SCOPES," | grep -q ",${EXPECT_SCOPE},"; then
