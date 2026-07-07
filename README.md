@@ -305,6 +305,7 @@ export ASAKI_MEMORY_PROJECT_ID="demo-app"
 export ASAKI_MEMORY_AUTO_INJECT="1"
 export ASAKI_MEMORY_AUTO_MIN_SCORE="0.50"
 export ASAKI_MEMORY_AUTO_EXTRACT="0"
+export ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS="300"
 ```
 
 On every `session_start` (new/resume/fork, not plain extension `reload`), the
@@ -321,6 +322,11 @@ messages from that prompt to `/v1/memories/extract`, excluding tool results,
 tool calls, and thinking blocks. This mirrors the Claude Code Stop hook's
 server-side extraction tradeoff, but uses Pi's in-process event API instead of
 transcript offset files. It intentionally sends conversation text off-machine.
+Throttled to at most once per `ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS`
+(default 300 seconds). The extraction endpoint itself caps candidates at 2
+per call and only auto-adds project-scope candidates with importance ≥ 0.6 —
+global-scope or lower-importance candidates are queued to
+`/v1/memories/reviews` for human review instead of being written directly.
 
 The extension exposes:
 

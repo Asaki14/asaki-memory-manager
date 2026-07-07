@@ -24,6 +24,7 @@ fi
 
 ASAKI_BASE="${ASAKI_MEMORY_BASE_URL:-${ASAKI_MEMORY_API_URL:-}}"
 [ -z "$ASAKI_BASE" ] && exit 0
+[ "${ASAKI_MEMORY_AUTO_EXTRACT:-0}" != "1" ] && exit 0
 ASAKI_USER="${ASAKI_MEMORY_USER_ID:-asaki}"
 
 if [ -n "${ASAKI_MEMORY_PROJECT_ID:-}" ]; then
@@ -65,10 +66,13 @@ report_and_exit() {
             elif . == "delete" then "deleted"
             else . end;
           (.decisions // []) as $d
-          | ($d | length) as $n
-          | if $n == 0 then empty
-            else ($d | group_by(.action) | map("\(length) " + (.[0].action | verb)) | join(", ")) as $breakdown
-            | "\($n) candidates → \($breakdown)"
+          | (.reviews // []) as $r
+          | ($d | length) as $dn
+          | ($r | length) as $rn
+          | if ($dn + $rn) == 0 then empty
+            else ($d | group_by(.action) | map("\(length) " + (.[0].action | verb))) as $breakdown
+            | ($breakdown + (if $rn > 0 then ["\($rn) queued for review"] else [] end) | join(", ")) as $line
+            | "\($dn + $rn) candidates → \($line)"
             end
         ' 2>/dev/null)
         [ -n "$COUNTS" ] && MSG="🧠 Asaki auto-extract (prev turn): ${COUNTS}"
@@ -86,6 +90,16 @@ report_and_exit() {
 LOCK_DIR="$STATE_DIR/${SESSION_ID}.lock"
 mkdir "$LOCK_DIR" 2>/dev/null || report_and_exit
 trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
+
+# Throttle: skip firing another extraction call within the min interval since the last one
+# actually fired. Deliberately does NOT advance STATE_FILE below — the skipped delta stays
+# queued and gets folded into the next Stop event's (larger) increment instead of being lost.
+LAST_EXTRACT_FILE="$STATE_DIR/${SESSION_ID}.last_extract"
+MIN_INTERVAL="${ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS:-300}"
+NOW_EPOCH=$(date +%s)
+LAST_EXTRACT=0
+[ -f "$LAST_EXTRACT_FILE" ] && LAST_EXTRACT=$(cat "$LAST_EXTRACT_FILE" 2>/dev/null || echo 0)
+[ $((NOW_EPOCH - LAST_EXTRACT)) -lt "$MIN_INTERVAL" ] && report_and_exit
 
 LAST=0
 [ -f "$STATE_FILE" ] && LAST=$(cat "$STATE_FILE" 2>/dev/null || echo 0)
@@ -123,6 +137,8 @@ TEXT="${TEXT:0:20000}"
 # project_id is still sent as a hint for whichever candidates resolve to project scope.
 BODY=$(jq -cn --arg text "$TEXT" --arg user "$ASAKI_USER" --arg project "$ASAKI_PROJECT" \
   '{text: $text, user_id: $user, project_id: $project, source: "claude-code:auto-extract"}')
+
+echo "$NOW_EPOCH" >"$LAST_EXTRACT_FILE"
 
 (
   RESP=$(curl -sf --max-time 20 -X POST "${ASAKI_BASE}/v1/memories/extract" \

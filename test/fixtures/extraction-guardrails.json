@@ -1,0 +1,56 @@
+{
+  "capCandidates": [
+    {
+      "name": "under limit passes through unchanged",
+      "max": 2,
+      "input": [
+        { "content": "A", "kind": "fact", "importance": 0.6, "scope": "project" }
+      ],
+      "expectedContents": ["A"]
+    },
+    {
+      "name": "over limit keeps the two highest-importance candidates",
+      "max": 2,
+      "input": [
+        { "content": "low", "kind": "fact", "importance": 0.3, "scope": "project" },
+        { "content": "high", "kind": "fact", "importance": 0.9, "scope": "project" },
+        { "content": "mid", "kind": "fact", "importance": 0.6, "scope": "project" },
+        { "content": "highest", "kind": "fact", "importance": 0.95, "scope": "global" }
+      ],
+      "expectedContents": ["highest", "high"]
+    }
+  ],
+  "dedupeCandidateBatch": [
+    {
+      "name": "distinct candidates in same batch stay separate",
+      "input": [
+        { "content": "用户偏好使用 pnpm，不使用 npm", "importance": 0.8 },
+        { "content": "根因是两个 daemon 同时运行互相抢焦点", "importance": 0.7 }
+      ],
+      "expectedCount": 2
+    },
+    {
+      "name": "near-duplicate candidates in same batch merge into one",
+      "input": [
+        { "content": "用户偏好使用 pnpm 而不是 npm 来管理依赖", "importance": 0.6 },
+        { "content": "用户偏好使用 pnpm 而不是 npm 来管理依赖包", "importance": 0.8 }
+      ],
+      "expectedCount": 1,
+      "expectedImportance": 0.8
+    },
+    {
+      "name": "same wording but different scope does not merge",
+      "input": [
+        { "content": "以后都用 pnpm 而不是 npm", "importance": 0.5, "scope": "global" },
+        { "content": "以后都用 pnpm 而不是 npm", "importance": 0.9, "scope": "project" }
+      ],
+      "expectedCount": 2
+    }
+  ],
+  "isAutoAddEligible": [
+    { "name": "project scope, high importance -> eligible", "candidate": { "importance": 0.8, "scope": "project" }, "expected": true },
+    { "name": "project scope, low importance -> not eligible", "candidate": { "importance": 0.4, "scope": "project" }, "expected": false },
+    { "name": "global scope, high importance -> not eligible", "candidate": { "importance": 0.9, "scope": "global" }, "expected": false },
+    { "name": "project scope, exactly at threshold -> eligible", "candidate": { "importance": 0.6, "scope": "project" }, "expected": true }
+  ]
+}
