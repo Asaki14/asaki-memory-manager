@@ -59,7 +59,7 @@ async function llmDecision(env: Env, candidate: ProcessMemoryCandidateInput, mat
   return null;
 }
 
-async function findLexicalMatch(env: Env, candidate: ProcessMemoryCandidateInput): Promise<SearchResult | undefined> {
+export async function findLexicalMatch(env: Env, candidate: ProcessMemoryCandidateInput): Promise<SearchResult | undefined> {
   const result = await env.DB.prepare(
     `SELECT * FROM memories
      WHERE user_id = ?1 AND status = 'active' AND scope = ?2
