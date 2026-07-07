@@ -1,10 +1,34 @@
 import type { Env, MemoryReviewRecord, MemoryReviewRow } from '../types';
-import { createMemory, getMemory, updateMemoryContent } from './memories';
+import { createMemory, getMemory, searchMemories, updateMemoryContent } from './memories';
 import { writeMemoryEvent } from './memoryEvents';
-import { BATCH_DEDUP_SIMILARITY_THRESHOLD, lexicalSimilarity, mergeContent, type ProcessMemoryCandidateInput } from './candidateDecision';
+import { BATCH_DEDUP_SIMILARITY_THRESHOLD, bestUsableMatch, heuristicDecision, lexicalSimilarity, mergeContent, type ProcessMemoryCandidateInput } from './candidateDecision';
+import { findLexicalMatch } from './candidates';
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+// Catches the gap a review-queue-only dedup (findSimilarPendingReview below) can't: a candidate
+// that duplicates a memory that's already `active` (not merely another pending review). Reuses
+// the exact same search + deterministic-match machinery processMemoryCandidate() uses for the
+// auto-add bucket (searchMemories + findLexicalMatch + bestUsableMatch + heuristicDecision), but
+// deliberately stops at the deterministic heuristic — no LLM dedup call here. Only preempts the
+// review on a heuristic "ignore" (genuine duplicate, nothing new); "merge"/"update"/"delete"
+// verdicts still require human judgment via the normal review path, since auto-mutating an active
+// memory from an unvetted (global/low-importance) candidate would defeat the point of routing it
+// to review in the first place.
+async function findActiveDuplicate(env: Env, candidate: ProcessMemoryCandidateInput) {
+  const similar = await searchMemories(env, {
+    query: candidate.content,
+    user_id: candidate.user_id,
+    scope: candidate.scope,
+    project_id: candidate.project_id ?? null,
+    session_id: candidate.session_id ?? null,
+    top_k: 5,
+  });
+  const match = bestUsableMatch(candidate, [...similar, await findLexicalMatch(env, candidate)]);
+  if (!match) return undefined;
+  return heuristicDecision(candidate, match).action === 'ignore' ? match : undefined;
 }
 
 // Finds an existing pending review that's "the same fact" as `candidate`, so repeated mentions
@@ -57,8 +81,15 @@ export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCan
   const reviews: MemoryReviewRow[] = [];
   const createdIds: string[] = [];
   const mergedIds: string[] = [];
+  const skippedDuplicateIds: string[] = [];
 
   for (const candidate of candidates) {
+    const activeDuplicate = await findActiveDuplicate(env, candidate);
+    if (activeDuplicate) {
+      skippedDuplicateIds.push(activeDuplicate.id);
+      continue;
+    }
+
     const similar = await findSimilarPendingReview(env, candidate);
 
     if (similar) {
@@ -131,6 +162,13 @@ export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCan
       userId: reviews[0].user_id,
       eventType: 'review_merge',
       payload: { count: mergedIds.length, review_ids: mergedIds },
+    });
+  }
+  if (skippedDuplicateIds.length > 0) {
+    await writeMemoryEvent(env, {
+      userId: candidates[0].user_id,
+      eventType: 'review_skip_duplicate',
+      payload: { count: skippedDuplicateIds.length, matched_memory_ids: skippedDuplicateIds },
     });
   }
 
