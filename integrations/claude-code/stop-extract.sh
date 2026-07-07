@@ -127,10 +127,12 @@ process.stdin.on("end", () => {
 });
 ')
 
-echo "$TOTAL" >"$STATE_FILE"
-
-# Skip trivial/empty slices — not worth an LLM extraction call.
-[ "${#TEXT}" -lt 60 ] && report_and_exit
+# Skip trivial/empty slices — not worth an LLM extraction call. Safe to consume the offset here:
+# losing a handful of characters of chit-chat is an acceptable, permanent no-op.
+if [ "${#TEXT}" -lt 60 ]; then
+  echo "$TOTAL" >"$STATE_FILE"
+  report_and_exit
+fi
 
 # Necessary-but-not-sufficient content gate: only proceed if the delta contains at least one
 # durable-memory signal marker (preference/rule/decision/bug_fix/task_learning/workflow language).
@@ -139,8 +141,15 @@ echo "$TOTAL" >"$STATE_FILE"
 # False negatives are expected and accepted; false positives just fall through to today's behavior.
 # KEEP IN SYNC with EXTRACT_SIGNAL_RE in integrations/pi/asaki-memory.ts.
 EXTRACT_SIGNAL_PATTERN='以后都|以后就|不要再|别再|记住|记得|规则是|统一用|统一使用|根因是|已验证|已修复|已确认|踩坑|决定用|决定是|改用|换成|约定是|复盘|经验是|remember|always|never|from now on|going forward|decided to|decision is|decision was|root cause is|root cause was|already fixed|now fixed|now verified|already verified|learned that|instead of|switch to|switched to|switching to|convention is|the rule is'
-echo "$TEXT" | grep -qiE "$EXTRACT_SIGNAL_PATTERN" || report_and_exit
+if ! echo "$TEXT" | grep -qiE "$EXTRACT_SIGNAL_PATTERN"; then
+  # Deliberately does NOT advance STATE_FILE, unlike the length check above — this text might
+  # still be durable, just not phrased in a way the gate recognizes yet. Leave the offset where
+  # it is so this slice folds into the next Stop event's (larger) delta instead of being silently
+  # and permanently lost, mirroring the throttle's carry-forward behavior earlier in this script.
+  report_and_exit
+fi
 
+echo "$TOTAL" >"$STATE_FILE"
 TEXT="${TEXT:0:20000}"
 
 # No "scope" here on purpose — let the server infer global vs project per candidate.
