@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import type { Env } from './types';
-import { processMemoryCandidates } from './services/candidates';
+import { dedupeCandidateBatch, isAutoAddEligible, processMemoryCandidates } from './services/candidates';
 import { extractMemoryCandidates } from './services/extraction';
 import { createMemory, deleteMemory, getMemory, listMemories, searchMemories, updateMemory } from './services/memories';
 import { createMemoryReviews, listMemoryReviews, resolveMemoryReview } from './services/reviews';
@@ -96,8 +96,13 @@ app.post('/v1/memories/extract', async (c) => {
     };
   });
 
-  const decisions = candidates.length > 0 ? await processMemoryCandidates(c.env, candidates) : [];
-  return c.json({ decisions, extracted_count: extracted.length });
+  const deduped = dedupeCandidateBatch(candidates);
+  const autoBucket = deduped.filter((item) => isAutoAddEligible(item));
+  const reviewBucket = deduped.filter((item) => !isAutoAddEligible(item));
+
+  const decisions = autoBucket.length > 0 ? await processMemoryCandidates(c.env, autoBucket) : [];
+  const reviews = reviewBucket.length > 0 ? await createMemoryReviews(c.env, reviewBucket) : [];
+  return c.json({ decisions, reviews, extracted_count: extracted.length });
 });
 
 app.post('/v1/memories/list', async (c) => {

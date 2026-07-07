@@ -48,16 +48,22 @@ committed). Set them once in `~/.claude/settings.json`:
   extension's `memoryPrecheckInstruction()` (`../pi/asaki-memory.ts`). What's
   "stable" here is the instruction always firing, not a deterministic search;
   the actual search/add decision is the agent's judgment call.
-- `stop-extract.sh` — Stop hook, fires after every assistant turn. Sends the
-  plain-text user/assistant lines appended since the last processed transcript
-  offset to `/v1/memories/extract` for server-side LLM-based background
-  extraction (add/merge/ignore, same dedup pipeline as `asaki_memory_add`).
-  Tool calls, tool results, and thinking blocks are never sent — only plain
-  text turns. Fire-and-forget: the extraction request backgrounds itself so it
-  never blocks the Stop event. This intentionally sends conversation text
-  off-machine to the Worker. The Pi extension can make the same tradeoff when
-  `ASAKI_MEMORY_AUTO_EXTRACT=1`, but uses Pi's `agent_end` event directly
-  instead of transcript offset files. Per-session offset/log files live under
+- `stop-extract.sh` — Stop hook, runs after every assistant turn but only
+  actually fires when `ASAKI_MEMORY_AUTO_EXTRACT=1` is set (default off,
+  matching the Pi extension). When enabled, sends the plain-text user/assistant
+  lines appended since the last processed transcript offset to
+  `/v1/memories/extract` for server-side LLM-based background extraction,
+  throttled to at most once per `ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS`
+  (default 300) — a throttled turn's text is not dropped, it's carried into
+  the next Stop event's (larger) increment. Extracted candidates are capped at
+  2 per call; within that, project-scope candidates with importance ≥ 0.6 are
+  auto-added (same dedup pipeline as `asaki_memory_add`), and everything else
+  (global scope, or importance < 0.6) is queued to `/v1/memories/reviews`
+  for human review instead of being written directly. Tool calls, tool
+  results, and thinking blocks are never sent — only plain text turns.
+  Fire-and-forget: the extraction request backgrounds itself so it never
+  blocks the Stop event. This intentionally sends conversation text
+  off-machine to the Worker. Per-session offset/log/throttle files live under
   `${TMPDIR:-/tmp}/asaki-memory-stop-extract/`.
 - `tool-visibility.sh` — PostToolUse hook, surfaces memory tool calls in the TUI
 - `../mcp/asaki-memory.ts` — MCP server exposing `asaki_memory_search`/`asaki_memory_add`/etc.

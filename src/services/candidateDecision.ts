@@ -101,6 +101,50 @@ export function mergeContent(existing: string, candidate: string): string {
   return `${existing}\n${candidate}`;
 }
 
+// Prompt-level "at most N" instructions are not reliably followed by an 8B model, so this is
+// the hard backstop for extractMemoryCandidates(): when the model over-produces, keep only the
+// highest-importance candidates instead of writing every one of them (the actual source of
+// "4 candidates, 4 added" bloat).
+export const MAX_CANDIDATES_PER_EXTRACTION = 2;
+
+export function capCandidates<T extends { importance: number }>(candidates: T[], max: number = MAX_CANDIDATES_PER_EXTRACTION): T[] {
+  if (candidates.length <= max) return candidates;
+  return [...candidates].sort((a, b) => b.importance - a.importance).slice(0, max);
+}
+
+// Matches the lexical-similarity cutoff used against the DB below, so "similar enough to be
+// the same fact" means the same thing whether the comparison is against an existing memory or
+// a sibling candidate in the same extraction batch.
+const BATCH_DEDUP_SIMILARITY_THRESHOLD = 0.5;
+
+// Auto-extracted candidates below this importance, or scoped globally, skip straight-to-`add`
+// and go to the memory_reviews queue instead — matches the standing preference to not
+// auto-trust low-confidence or global rule/preference candidates. Initial default; recalibrate
+// with an eval once enough auto-extract history exists.
+export const AUTO_ADD_MIN_IMPORTANCE = 0.6;
+
+// Candidates within one extraction response are never compared to each other, only to the
+// existing DB — so several near-duplicate candidates from the same batch each independently
+// miss finding a DB match and all get `add`ed. Merge lookalikes within the batch first.
+export function dedupeCandidateBatch(candidates: ProcessMemoryCandidateInput[]): ProcessMemoryCandidateInput[] {
+  const kept: ProcessMemoryCandidateInput[] = [];
+  for (const candidate of candidates) {
+    const match = kept.find((item) => item.scope === candidate.scope && lexicalSimilarity(item.content, candidate.content) >= BATCH_DEDUP_SIMILARITY_THRESHOLD);
+    if (!match) {
+      kept.push(candidate);
+      continue;
+    }
+    match.content = mergeContent(match.content, candidate.content);
+    match.importance = Math.max(match.importance, candidate.importance);
+    match.confidence = Math.max(match.confidence, candidate.confidence);
+  }
+  return kept;
+}
+
+export function isAutoAddEligible(candidate: ProcessMemoryCandidateInput): boolean {
+  return candidate.scope !== 'global' && candidate.importance >= AUTO_ADD_MIN_IMPORTANCE;
+}
+
 export function bestUsableMatch(candidate: ProcessMemoryCandidateInput, matches: Array<SearchResult | undefined>): SearchResult | undefined {
   let best: SearchResult | undefined;
   for (const match of matches) {

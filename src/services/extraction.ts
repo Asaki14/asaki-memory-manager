@@ -1,5 +1,6 @@
 import type { Env, MemoryKind, MemoryScope } from '../types';
 import { writeMemoryEvent } from './memoryEvents';
+import { capCandidates } from './candidateDecision';
 
 const KINDS: MemoryKind[] = ['preference', 'rule', 'fact', 'decision', 'task_learning', 'bug_fix', 'workflow'];
 const SCOPES: MemoryScope[] = ['global', 'project'];
@@ -61,7 +62,7 @@ Output: {"candidates":[]}
 Input: Assistant: 建好了，eval:extraction 脚本已经能跑。要不要现在建这个 eval 文件？我建议现在建，因为能把踩过的坑固化成回归用例。
 Output: {"candidates":[]}
 
-Each memory must be a concise, self-contained statement understandable without the surrounding context. For each candidate also classify "scope": "global" for cross-project preferences/rules/conventions about how the user generally likes to work (editor settings, communication style, recurring habits), or "project" for facts/decisions specific to the codebase/project currently being discussed. Return strict JSON: {"candidates":[{"content":"...","kind":"preference|rule|fact|decision|task_learning|bug_fix|workflow","importance":0.0-1.0,"scope":"global|project"}]}. Return {"candidates":[]} if nothing durable is found. Never invent facts not present in the text. Do not return the example inputs/outputs shown above verbatim — they are for pattern reference only.`;
+Each memory must be a concise, self-contained statement understandable without the surrounding context. For each candidate also classify "scope": "global" for cross-project preferences/rules/conventions about how the user generally likes to work (editor settings, communication style, recurring habits), or "project" for facts/decisions specific to the codebase/project currently being discussed. Return at most 2 candidates per call — if more than 2 durable facts are present, keep only the most valuable, self-contained ones and drop the rest. Return strict JSON: {"candidates":[{"content":"...","kind":"preference|rule|fact|decision|task_learning|bug_fix|workflow","importance":0.0-1.0,"scope":"global|project"}]}. Return {"candidates":[]} if nothing durable is found. Never invent facts not present in the text. Do not return the example inputs/outputs shown above verbatim — they are for pattern reference only.`;
 
 // Deterministic pre-filter for the syntactically-obvious junk patterns an 8B model keeps
 // missing despite prompt/few-shot tuning (see extraction-cases.json history). Only strips
@@ -124,7 +125,7 @@ export async function extractMemoryCandidates(env: Env, text: string, userId: st
         scope: SCOPES.includes(scope as MemoryScope) ? (scope as MemoryScope) : 'project',
       });
     }
-    return result;
+    return capCandidates(result);
   } catch (error) {
     await writeMemoryEvent(env, {
       userId,

@@ -4,7 +4,7 @@ import { writeMemoryEvent } from './memoryEvents';
 
 import { bestUsableMatch, chooseDecision, heuristicDecision, lexicalSimilarity, mergeContent, type CandidateAction, type ProcessMemoryCandidateInput } from './candidateDecision';
 export type { CandidateAction, ProcessMemoryCandidateInput } from './candidateDecision';
-export { heuristicDecision, mergeContent } from './candidateDecision';
+export { heuristicDecision, mergeContent, dedupeCandidateBatch, isAutoAddEligible, AUTO_ADD_MIN_IMPORTANCE } from './candidateDecision';
 
 export interface CandidateDecision {
   action: CandidateAction;

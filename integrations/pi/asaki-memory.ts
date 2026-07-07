@@ -13,6 +13,7 @@ const AUTO_INJECT_TOP_K = 6;
 const AUTO_EXTRACT_MIN_CHARS = 60;
 const AUTO_EXTRACT_MAX_CHARS = 20_000;
 const AUTO_EXTRACT_TIMEOUT_MS = 20_000;
+const DEFAULT_EXTRACT_MIN_INTERVAL_SECONDS = 300;
 const MEMORY_NEEDED_RE =
   /(记忆|记得|回忆|想起|以前|之前|上次|过往|历史|偏好|习惯|约定|惯例|决策|背景|上下文|继续|延续|remember|recall|memory|previous|before|last time|preference|convention|decision|context|continue)/i;
 const SENSITIVE_RE_LIST = [
@@ -58,6 +59,8 @@ function memoryConfig() {
     defaultScope: normalizeScope(process.env.ASAKI_MEMORY_DEFAULT_SCOPE || stringConfig(fileConfig, "defaultScope", "default_scope")) || DEFAULT_SCOPE,
     autoMinScore: numberConfig(process.env.ASAKI_MEMORY_AUTO_MIN_SCORE, numberConfig(fileConfig.autoMinScore ?? fileConfig.auto_min_score, DEFAULT_AUTO_MIN_SCORE)),
     autoExtract: envFlagEnabledConfig(process.env.ASAKI_MEMORY_AUTO_EXTRACT ?? fileConfig.autoExtract ?? fileConfig.auto_extract, false),
+    extractMinIntervalMs:
+      numberConfig(process.env.ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS, numberConfig(fileConfig.extractMinIntervalSeconds ?? fileConfig.extract_min_interval_seconds, DEFAULT_EXTRACT_MIN_INTERVAL_SECONDS)) * 1000,
   };
 }
 
@@ -335,16 +338,19 @@ function buildExtractionText(messages: unknown): string {
   return lines.join("\n\n");
 }
 
-function summarizeExtractionDecisions(decisions: unknown): string | null {
-  if (!Array.isArray(decisions) || decisions.length === 0) return null;
+function summarizeExtractionDecisions(decisions: unknown, reviews?: unknown): string | null {
+  const decisionList = Array.isArray(decisions) ? (decisions as any[]) : [];
+  const reviewCount = Array.isArray(reviews) ? reviews.length : 0;
+  if (decisionList.length === 0 && reviewCount === 0) return null;
   const verbs: Record<string, string> = { add: "added", merge: "merged", ignore: "ignored", update: "updated", delete: "deleted" };
   const counts = new Map<string, number>();
-  for (const decision of decisions as any[]) {
+  for (const decision of decisionList) {
     const action = typeof decision?.action === "string" ? decision.action : "unknown";
     counts.set(action, (counts.get(action) ?? 0) + 1);
   }
-  const breakdown = [...counts.entries()].map(([action, count]) => `${count} ${verbs[action] ?? action}`).join(", ");
-  return `${decisions.length} candidates → ${breakdown}`;
+  const parts = [...counts.entries()].map(([action, count]) => `${count} ${verbs[action] ?? action}`);
+  if (reviewCount > 0) parts.push(`${reviewCount} queued for review`);
+  return `${decisionList.length + reviewCount} candidates → ${parts.join(", ")}`;
 }
 
 function timeoutSignal(ms: number): AbortSignal {
@@ -354,12 +360,23 @@ function timeoutSignal(ms: number): AbortSignal {
   return controller.signal;
 }
 
+// Module-level, not per-call: agent_end fires every turn, and this must survive across those
+// calls within the same process to actually throttle repeat extraction attempts.
+let lastAutoExtractAt = 0;
+
 async function autoExtractMemory(messages: unknown, ctx: unknown): Promise<string | null> {
   const config = memoryConfig();
   if (!config.autoExtract || !config.apiKey) return null;
 
+  const now = Date.now();
+  if (now - lastAutoExtractAt < config.extractMinIntervalMs) return null;
+
   const text = buildExtractionText(messages).slice(0, AUTO_EXTRACT_MAX_CHARS);
   if (text.length < AUTO_EXTRACT_MIN_CHARS || containsSensitiveText(text)) return null;
+
+  // Set before the request lands, not after, so a slow/in-flight call still blocks a
+  // concurrent agent_end from firing a second extraction within the same interval.
+  lastAutoExtractAt = now;
 
   const body: Record<string, unknown> = {
     text,
@@ -370,7 +387,7 @@ async function autoExtractMemory(messages: unknown, ctx: unknown): Promise<strin
   if (config.sessionId) body.session_id = config.sessionId;
 
   const data = await memoryRequest("/v1/memories/extract", body, timeoutSignal(AUTO_EXTRACT_TIMEOUT_MS));
-  return summarizeExtractionDecisions(data?.decisions);
+  return summarizeExtractionDecisions(data?.decisions, data?.reviews);
 }
 
 export default function (pi: ExtensionAPI) {
