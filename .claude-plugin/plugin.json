@@ -1,6 +1,6 @@
 {
   "name": "asaki-memory",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Persistent cross-session memory for Claude Code: auto-injected recall on session start, on-demand search/store via MCP tools, /memory audit command.",
   "author": { "name": "wangyao" },
   "homepage": "https://github.com/Asaki14/asaki-memory-manager",

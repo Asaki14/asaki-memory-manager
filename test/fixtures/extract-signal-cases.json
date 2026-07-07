@@ -1,0 +1,57 @@
+[
+  {
+    "name": "neg: plain acknowledgement",
+    "text": "User: 好的谢谢",
+    "expectSignal": false
+  },
+  {
+    "name": "neg: bare status update, no durable content",
+    "text": "Assistant: 推送完了，origin/main 已经同步。",
+    "expectSignal": false
+  },
+  {
+    "name": "neg: bare imperative command",
+    "text": "User: 跑一下测试",
+    "expectSignal": false
+  },
+  {
+    "name": "neg: english small talk",
+    "text": "User: looks good, thanks!",
+    "expectSignal": false
+  },
+  {
+    "name": "pos: zh preference marker",
+    "text": "User: 以后都用 pnpm，不要用 npm",
+    "expectSignal": true
+  },
+  {
+    "name": "pos: zh rule/convention marker",
+    "text": "Assistant: 统一用 fish shell 的环境变量文件存密钥，这是规则是。",
+    "expectSignal": true
+  },
+  {
+    "name": "pos: zh decision marker",
+    "text": "User: 决定改用 D1 存记忆，不用 KV 了",
+    "expectSignal": true
+  },
+  {
+    "name": "pos: zh bug-fix/root-cause marker",
+    "text": "Assistant: 根因是同时跑了两个 daemon 互相抢焦点，已修复。",
+    "expectSignal": true
+  },
+  {
+    "name": "pos: en preference marker",
+    "text": "User: remember that I always prefer dark mode",
+    "expectSignal": true
+  },
+  {
+    "name": "pos: en decision marker",
+    "text": "Assistant: we decided to switch to D1 instead of KV going forward.",
+    "expectSignal": true
+  },
+  {
+    "name": "pos: en bug-fix marker",
+    "text": "Assistant: root cause was two daemons racing for focus; already fixed with a pkill guard.",
+    "expectSignal": true
+  }
+]

@@ -1,10 +1,37 @@
 import type { Env, MemoryReviewRecord, MemoryReviewRow } from '../types';
 import { createMemory, getMemory, updateMemoryContent } from './memories';
 import { writeMemoryEvent } from './memoryEvents';
-import { mergeContent, type ProcessMemoryCandidateInput } from './candidateDecision';
+import { BATCH_DEDUP_SIMILARITY_THRESHOLD, lexicalSimilarity, mergeContent, type ProcessMemoryCandidateInput } from './candidateDecision';
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+// Finds an existing pending review that's "the same fact" as `candidate`, so repeated mentions
+// of the same preference/decision across separate extraction calls merge into one queued review
+// instead of piling up near-duplicate pending rows. Scoped the same way visibility is scoped
+// elsewhere (same scope, and matching project_id/session_id when the candidate has one) —
+// LIMIT 100 most-recently-touched pending reviews per user is the same bound used for the
+// lexical DB scan in candidates.ts's findLexicalMatch.
+async function findSimilarPendingReview(env: Env, candidate: ProcessMemoryCandidateInput): Promise<MemoryReviewRecord | undefined> {
+  const result = await env.DB.prepare(
+    `SELECT * FROM memory_reviews WHERE user_id = ?1 AND status = 'pending' ORDER BY updated_at DESC LIMIT 100`
+  )
+    .bind(candidate.user_id)
+    .all<MemoryReviewRecord>();
+
+  let best: { row: MemoryReviewRecord; similarity: number } | undefined;
+  for (const row of result.results ?? []) {
+    const existing = JSON.parse(row.candidate_json) as ProcessMemoryCandidateInput;
+    if (existing.scope !== candidate.scope) continue;
+    if (candidate.scope === 'project' && (existing.project_id ?? null) !== (candidate.project_id ?? null)) continue;
+    if (candidate.scope === 'session' && (existing.session_id ?? null) !== (candidate.session_id ?? null)) continue;
+    const similarity = lexicalSimilarity(candidate.content, existing.content);
+    if (similarity >= BATCH_DEDUP_SIMILARITY_THRESHOLD && (!best || similarity > best.similarity)) {
+      best = { row, similarity };
+    }
+  }
+  return best?.row;
 }
 
 function parseReview(row: MemoryReviewRecord): MemoryReviewRow {
@@ -28,8 +55,43 @@ function parseReview(row: MemoryReviewRecord): MemoryReviewRow {
 export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCandidateInput[]): Promise<MemoryReviewRow[]> {
   const timestamp = nowIso();
   const reviews: MemoryReviewRow[] = [];
+  const createdIds: string[] = [];
+  const mergedIds: string[] = [];
 
   for (const candidate of candidates) {
+    const similar = await findSimilarPendingReview(env, candidate);
+
+    if (similar) {
+      const existing = JSON.parse(similar.candidate_json) as ProcessMemoryCandidateInput;
+      const merged: ProcessMemoryCandidateInput = {
+        ...existing,
+        content: mergeContent(existing.content, candidate.content),
+        importance: Math.max(existing.importance, candidate.importance),
+        confidence: Math.max(existing.confidence, candidate.confidence),
+      };
+      await env.DB.prepare(`UPDATE memory_reviews SET candidate_json = ?1, updated_at = ?2 WHERE id = ?3`)
+        .bind(JSON.stringify(merged), timestamp, similar.id)
+        .run();
+
+      mergedIds.push(similar.id);
+      reviews.push({
+        id: similar.id,
+        user_id: similar.user_id,
+        status: 'pending',
+        candidate: merged,
+        resolved_action: null,
+        memory_id: null,
+        project_id: similar.project_id,
+        session_id: similar.session_id,
+        source: similar.source,
+        reason: null,
+        created_at: similar.created_at,
+        updated_at: timestamp,
+        resolved_at: null,
+      });
+      continue;
+    }
+
     const id = crypto.randomUUID();
     await env.DB.prepare(
       `INSERT INTO memory_reviews (
@@ -39,6 +101,7 @@ export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCan
       .bind(id, candidate.user_id, JSON.stringify(candidate), candidate.project_id ?? null, candidate.session_id ?? null, candidate.source ?? null, timestamp, timestamp)
       .run();
 
+    createdIds.push(id);
     reviews.push({
       id,
       user_id: candidate.user_id,
@@ -56,11 +119,18 @@ export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCan
     });
   }
 
-  if (reviews.length > 0) {
+  if (createdIds.length > 0) {
     await writeMemoryEvent(env, {
       userId: reviews[0].user_id,
       eventType: 'review_create',
-      payload: { count: reviews.length, review_ids: reviews.map((review) => review.id) },
+      payload: { count: createdIds.length, review_ids: createdIds },
+    });
+  }
+  if (mergedIds.length > 0) {
+    await writeMemoryEvent(env, {
+      userId: reviews[0].user_id,
+      eventType: 'review_merge',
+      payload: { count: mergedIds.length, review_ids: mergedIds },
     });
   }
 

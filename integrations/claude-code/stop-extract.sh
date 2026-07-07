@@ -131,6 +131,16 @@ echo "$TOTAL" >"$STATE_FILE"
 
 # Skip trivial/empty slices — not worth an LLM extraction call.
 [ "${#TEXT}" -lt 60 ] && report_and_exit
+
+# Necessary-but-not-sufficient content gate: only proceed if the delta contains at least one
+# durable-memory signal marker (preference/rule/decision/bug_fix/task_learning/workflow language).
+# This never blocks a call the length gate above would already have allowed through on its own —
+# it only removes calls for turns that are plausibly chit-chat/status updates with no signal at all.
+# False negatives are expected and accepted; false positives just fall through to today's behavior.
+# KEEP IN SYNC with EXTRACT_SIGNAL_RE in integrations/pi/asaki-memory.ts.
+EXTRACT_SIGNAL_PATTERN='以后都|以后就|不要再|别再|记住|记得|规则是|统一用|统一使用|根因是|已验证|已修复|已确认|踩坑|决定用|决定是|改用|换成|约定是|复盘|经验是|remember|always|never|from now on|going forward|decided to|decision is|decision was|root cause is|root cause was|already fixed|now fixed|now verified|already verified|learned that|instead of|switch to|switched to|switching to|convention is|the rule is'
+echo "$TEXT" | grep -qiE "$EXTRACT_SIGNAL_PATTERN" || report_and_exit
+
 TEXT="${TEXT:0:20000}"
 
 # No "scope" here on purpose — let the server infer global vs project per candidate.

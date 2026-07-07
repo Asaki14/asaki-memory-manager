@@ -12,6 +12,11 @@ export interface ExtractedCandidate {
   scope: MemoryScope;
 }
 
+// The scope-classification rule below is a condensed copy of the "Global scope discipline" text
+// in commands/memory.md and integrations/pi/asaki-memory.ts's /memory command — keep all three in
+// sync. Those two apply the rule at audit time (after the fact); this applies it at extraction
+// time (before a memory is even created), so a candidate shouldn't need a later RESCOPE at all.
+//
 // Modeled on mem0's fact-retrieval prompt design (role-scoped extraction + few-shot examples
 // instead of prose-only rules — an 8B model follows worked examples far more reliably than
 // abstract instructions). Unlike mem0's user-only rule, both roles remain eligible here because
@@ -51,7 +56,10 @@ Input: User: 以后都用 pnpm，不要用 npm
 Output: {"candidates":[{"content":"用户偏好使用 pnpm，不使用 npm","kind":"preference","importance":0.8,"scope":"global"}]}
 
 Input: Assistant: 根因是同时跑了两个 daemon 互相抢焦点，已加 pkill 守卫脚本防止野实例重新抢焦。
-Output: {"candidates":[{"content":"Focus-stealing bug 根因是两个 daemon 同时运行互相抢焦点；已加 pkill 守卫脚本防止野实例。","kind":"bug_fix","importance":0.7,"scope":"global"}]}
+Output: {"candidates":[{"content":"Focus-stealing bug 根因是两个 daemon 同时运行互相抢焦点；已加 pkill 守卫脚本防止野实例。","kind":"bug_fix","importance":0.7,"scope":"project"}]}
+
+Input: Assistant: sketchybar 配置里 padding_right 改成 12 后图标不贴边了，已验证生效，这是 dotfiles 仓库里的全局设置。
+Output: {"candidates":[{"content":"sketchybar padding_right 改为 12 解决图标贴边问题，已验证生效。","kind":"bug_fix","importance":0.6,"scope":"project"}]}
 
 Input: User: forget that I prefer dark mode
 Output: {"candidates":[{"content":"forget that I prefer dark mode","kind":"preference","importance":0.5,"scope":"global"}]}
@@ -62,7 +70,7 @@ Output: {"candidates":[]}
 Input: Assistant: 建好了，eval:extraction 脚本已经能跑。要不要现在建这个 eval 文件？我建议现在建，因为能把踩过的坑固化成回归用例。
 Output: {"candidates":[]}
 
-Each memory must be a concise, self-contained statement understandable without the surrounding context. For each candidate also classify "scope": "global" for cross-project preferences/rules/conventions about how the user generally likes to work (editor settings, communication style, recurring habits), or "project" for facts/decisions specific to the codebase/project currently being discussed. Return at most 2 candidates per call — if more than 2 durable facts are present, keep only the most valuable, self-contained ones and drop the rest. Return strict JSON: {"candidates":[{"content":"...","kind":"preference|rule|fact|decision|task_learning|bug_fix|workflow","importance":0.0-1.0,"scope":"global|project"}]}. Return {"candidates":[]} if nothing durable is found. Never invent facts not present in the text. Do not return the example inputs/outputs shown above verbatim — they are for pattern reference only.`;
+Each memory must be a concise, self-contained statement understandable without the surrounding context. For each candidate also classify "scope": use this test — "global" only if the statement would genuinely help in ANY unrelated project (cross-project dev preferences, communication/output style, secret-handling rules, durable personal/identity facts), and "project" for everything else, including system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs, OS-level fixes) even when it wasn't said inside a recognizable project — that is still "project", not "global", just scoped to whatever repo/tool it actually concerns. When scope is ambiguous, prefer "project". Return at most 2 candidates per call — if more than 2 durable facts are present, keep only the most valuable, self-contained ones and drop the rest. Return strict JSON: {"candidates":[{"content":"...","kind":"preference|rule|fact|decision|task_learning|bug_fix|workflow","importance":0.0-1.0,"scope":"global|project"}]}. Return {"candidates":[]} if nothing durable is found. Never invent facts not present in the text. Do not return the example inputs/outputs shown above verbatim — they are for pattern reference only.`;
 
 // Deterministic pre-filter for the syntactically-obvious junk patterns an 8B model keeps
 // missing despite prompt/few-shot tuning (see extraction-cases.json history). Only strips
