@@ -64,5 +64,11 @@
     "text": "Assistant: karabiner 配置里 caps lock 映射成 escape 后误触问题解决了，已验证生效，这是 dotfiles 仓库里的全局按键设置。",
     "expectEmpty": false,
     "expectScope": "project"
+  },
+  {
+    "name": "pos: problem-then-resolution pair collapses into one candidate, not two",
+    "text": "User: 记忆系统漏掉了一条关键信息，关于缓存过期时间的配置项。\nAssistant: 已经把这条信息补全到对应的记忆里了，缓存过期时间统一改成 300 秒。",
+    "expectEmpty": false,
+    "expectCount": 1
   }
 ]
