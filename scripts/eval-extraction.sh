@@ -10,6 +10,11 @@
 #
 # Each fixture case in test/fixtures/extraction-cases.json is a real production false positive/
 # negative this project has hit — add a new case here whenever a future one turns up.
+#
+# A "non-empty" case counts as pass whether the candidate landed in `decisions` (auto-added,
+# project scope + importance >= 0.6) or `reviews` (global scope or lower importance, queued for
+# human review) — this eval only checks that the LLM found something durable, not which bucket
+# the routing threshold sent it to.
 set -uo pipefail
 
 BASE_URL="${ASAKI_MEMORY_BASE_URL:-${ASAKI_MEMORY_API_URL:-https://asaki-memory-manager.wangyao1414114wy.workers.dev}}"
@@ -45,6 +50,17 @@ cleanup() {
         -d "$(jq -cn --arg user "$TEST_USER" '{user_id:$user}')" >/dev/null
     done
   done
+
+  # Low-importance/global candidates route to memory_reviews instead of memories — resolve
+  # those away too, or every eval run leaves orphaned pending reviews behind in production.
+  REVIEW_IDS=$(curl -s -X POST "$BASE_URL/v1/memories/reviews/list" \
+    -H "Authorization: Bearer ${API_KEY}" -H "Content-Type: application/json" \
+    -d "$(jq -cn --arg user "$TEST_USER" '{user_id:$user, status:"pending", limit:50}')" | jq -r '.reviews[]?.id')
+  for id in $REVIEW_IDS; do
+    curl -s -X POST "$BASE_URL/v1/memories/reviews/$id/resolve" \
+      -H "Authorization: Bearer ${API_KEY}" -H "Content-Type: application/json" \
+      -d "$(jq -cn --arg user "$TEST_USER" '{user_id:$user, action:"ignore", reason:"eval cleanup"}')" >/dev/null
+  done
 }
 trap cleanup EXIT
 
@@ -59,7 +75,7 @@ for i in $(seq 0 $((CASE_COUNT - 1))); do
     -H "Authorization: Bearer ${API_KEY}" -H "Content-Type: application/json" \
     -d "$(jq -cn --arg text "$TEXT" --arg user "$TEST_USER" --arg project "$PROJECT_ID" \
       '{text:$text, user_id:$user, project_id:$project, source:"eval-extraction"}')")
-  COUNT=$(echo "$RESP" | jq '.decisions | length' 2>/dev/null)
+  COUNT=$(echo "$RESP" | jq '((.decisions // []) | length) + ((.reviews // []) | length)' 2>/dev/null)
 
   if [ -z "$COUNT" ] || [ "$COUNT" = "null" ]; then
     FAIL=$((FAIL + 1))
