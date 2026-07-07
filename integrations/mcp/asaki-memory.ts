@@ -194,7 +194,7 @@ server.tool(
   "asaki_memory_add",
   "Store a durable memory in Asaki personal memory. Do not store secrets or sensitive transient data.",
   {
-    text: z.string().describe("Concise, self-contained memory text to store."),
+    text: z.string().describe("Concise, self-contained memory text to store (1-3 sentences, roughly 40-300 chars). Summarize the durable takeaway only — never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives."),
     type: z.string().optional().describe("Memory kind."),
     scope: z.enum(["global", "project", "session"]).optional().describe("Memory scope."),
     project_id: z.string().optional().describe("Project id override."),
