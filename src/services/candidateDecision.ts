@@ -113,9 +113,9 @@ export function capCandidates<T extends { importance: number }>(candidates: T[],
 }
 
 // Matches the lexical-similarity cutoff used against the DB below, so "similar enough to be
-// the same fact" means the same thing whether the comparison is against an existing memory or
-// a sibling candidate in the same extraction batch.
-const BATCH_DEDUP_SIMILARITY_THRESHOLD = 0.5;
+// the same fact" means the same thing whether the comparison is against an existing memory, a
+// sibling candidate in the same extraction batch, or (via reviews.ts) an existing pending review.
+export const BATCH_DEDUP_SIMILARITY_THRESHOLD = 0.5;
 
 // Auto-extracted candidates below this importance, or scoped globally, skip straight-to-`add`
 // and go to the memory_reviews queue instead — matches the standing preference to not

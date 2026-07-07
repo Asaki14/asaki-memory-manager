@@ -58,5 +58,11 @@
     "name": "neg: user's exploratory question, not a stated goal or decision",
     "text": "User: 现在我想根据以后的记忆慢慢训练这个记忆系统，你觉得有必要么？",
     "expectEmpty": true
+  },
+  {
+    "name": "pos: system/dotfiles troubleshooting outside a project must be scoped project, not global",
+    "text": "Assistant: karabiner 配置里 caps lock 映射成 escape 后误触问题解决了，已验证生效，这是 dotfiles 仓库里的全局按键设置。",
+    "expectEmpty": false,
+    "expectScope": "project"
   }
 ]

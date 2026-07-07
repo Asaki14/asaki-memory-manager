@@ -16,6 +16,13 @@ const AUTO_EXTRACT_TIMEOUT_MS = 20_000;
 const DEFAULT_EXTRACT_MIN_INTERVAL_SECONDS = 300;
 const MEMORY_NEEDED_RE =
   /(记忆|记得|回忆|想起|以前|之前|上次|过往|历史|偏好|习惯|约定|惯例|决策|背景|上下文|继续|延续|remember|recall|memory|previous|before|last time|preference|convention|decision|context|continue)/i;
+// Necessary-but-not-sufficient content gate for auto-extraction: the delta must contain at least
+// one durable-memory signal marker (preference/rule/decision/bug_fix/task_learning/workflow
+// language) before we even ask the cloud LLM to look. False negatives are expected and accepted;
+// false positives just fall through to today's behavior (the LLM still has to agree it's durable).
+// KEEP IN SYNC with EXTRACT_SIGNAL_PATTERN in integrations/claude-code/stop-extract.sh.
+const EXTRACT_SIGNAL_RE =
+  /以后都|以后就|不要再|别再|记住|记得|规则是|统一用|统一使用|根因是|已验证|已修复|已确认|踩坑|决定用|决定是|改用|换成|约定是|复盘|经验是|remember|always|never|from now on|going forward|decided to|decision is|decision was|root cause is|root cause was|already fixed|now fixed|now verified|already verified|learned that|instead of|switch to|switched to|switching to|convention is|the rule is/i;
 const SENSITIVE_RE_LIST = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/i,
   /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b/i,
@@ -373,6 +380,7 @@ async function autoExtractMemory(messages: unknown, ctx: unknown): Promise<strin
 
   const text = buildExtractionText(messages).slice(0, AUTO_EXTRACT_MAX_CHARS);
   if (text.length < AUTO_EXTRACT_MIN_CHARS || containsSensitiveText(text)) return null;
+  if (!EXTRACT_SIGNAL_RE.test(text)) return null;
 
   // Set before the request lands, not after, so a slow/in-flight call still blocks a
   // concurrent agent_end from firing a second extraction within the same interval.
@@ -490,10 +498,10 @@ Scope:
 - global memories
 - current project memories
 ${trimmedArgs ? `User focus: ${trimmedArgs}\n` : ""}
-Global scope discipline (the recurring failure mode this exists to catch): global memories get pulled into every project's context, so the bar is "genuinely useful in ANY conversation regardless of project" — cross-project dev preferences, communication/output style, secret-handling rules, this memory system's own operating rules, and durable personal/identity facts. It is NOT a dumping ground for system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs) that only happened to be captured while not inside a recognizable git repo — that content belongs in scope=project with project_id set to the relevant repo's basename (e.g. a dotfiles repo), even if it was captured elsewhere. For every global item ask "would this help in an unrelated project?" — if no, propose RESCOPE (UPDATE scope+project_id) rather than leaving it global.
+Global scope discipline (the recurring failure mode this exists to catch): global memories get pulled into every project's context, so the bar is "genuinely useful in ANY conversation regardless of project" — cross-project dev preferences, communication/output style, secret-handling rules, this memory system's own operating rules, and durable personal/identity facts. It is NOT a dumping ground for system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs) that only happened to be captured while not inside a recognizable git repo — that content belongs in scope=project with project_id set to the relevant repo's basename (e.g. a dotfiles repo), even if it was captured elsewhere. For every global item ask "would this help in an unrelated project?" — if no, propose RESCOPE (UPDATE scope+project_id) rather than leaving it global. (This text is mirrored in commands/memory.md's /memory command and, condensed, in src/services/extraction.ts's SYSTEM_PROMPT — keep those in sync.)
 
 Workflow:
-1. Use asaki_memory_review_list to inspect pending reviews.
+1. Use asaki_memory_review_list to inspect pending reviews. For any review with created_at older than 14 days, flag it explicitly in your output as "stale — pending review needs a decision" rather than treating it identically to a fresh review.
 2. Use asaki_memory_list to list global memories and current project memories.
 3. Analyze duplicates, stale items, noisy items, wrong scope/kind (see Global scope discipline above), low-value items, pending reviews, and missing durable memories.
 4. Propose REVIEW_RESOLVE/DELETE/UPDATE(rescope)/MERGE/ADD/KEEP changes with reasons and affected ids.

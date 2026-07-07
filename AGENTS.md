@@ -34,8 +34,10 @@ Stack:
 - `src/services/memoryEvents.ts`: event logging.
 - `src/ai/embeddings.ts`: Workers AI embedding helpers.
 - `src/utils/validation.ts`: request validation.
+- `src/services/extraction.ts`: LLM extraction prompt (`SYSTEM_PROMPT`) + deterministic noise pre-filter.
 - `integrations/pi/asaki-memory.ts`: optional Pi extension.
 - `commands/memory.md`: Claude Code plugin `/memory` slash command (audit workflow; mirrors the Pi extension's `registerCommand("memory", ...)`).
+- The "Global scope discipline" text lives in three places that must stay in sync: `commands/memory.md`, `integrations/pi/asaki-memory.ts`'s `/memory` command, and (condensed) `src/services/extraction.ts`'s `SYSTEM_PROMPT` — the first two apply it at audit time, the third applies it at extraction time.
 
 ## Commands
 
