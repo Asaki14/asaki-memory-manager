@@ -613,12 +613,14 @@ Safety:
     promptGuidelines: [
       "The current conversation agent decides what is worth remembering; do not send full conversation transcripts to the Worker for extraction.",
       "Use asaki_memory_add after completing meaningful work, recording decisions, bug fixes, conventions, or user preferences.",
+      "Keep each memory to 1-3 sentences summarizing the durable takeaway only — never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives.",
       "Do not store secrets, raw credentials, private tokens, or sensitive transient data with asaki_memory_add.",
       "For asaki_memory_add, use scope=global only for user-wide preferences/rules; use scope=project for project conventions, decisions, workflows, task learnings, and bug fixes.",
     ],
     parameters: Type.Object({
       text: Type.String({
-        description: "Concise, self-contained memory text to store.",
+        description:
+          "Concise, self-contained memory text to store (1-3 sentences, roughly 40-300 chars). Summarize the durable takeaway only — never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives.",
       }),
       type: Type.Optional(
         Type.String({
