@@ -35,12 +35,13 @@ committed). Set them once in `~/.claude/settings.json`:
 
 ## What's bundled
 
-- `session-start.sh` — SessionStart hook. Always shows the status banner; if
-  the cwd is inside a project (git repo), it also calls `/v1/memories/list`
-  itself (global + this project's scope) and injects a **real digest** of the
-  top `ASAKI_MEMORY_DIGEST_TOP_K` (default 8) memories ranked by
-  `importance * confidence` — actual project history up front, not a "go
-  search yourself" nudge.
+- `session-start.sh` — SessionStart hook, fires on startup/resume/compact.
+  Injects a compact counts-only status banner (`memories=N | pendingReviews=N
+  | autoExtract=on|off`) — no memory content. Mirrors the Pi extension's
+  `buildSessionBanner()`: a content-bearing digest would re-inject its full
+  text on every `compact` within the same session and pile up in the
+  transcript, so the agent decides for itself when to actually search/read
+  memories instead.
 - `user-prompt.sh` — UserPromptSubmit hook. Unconditionally injects one fixed
   instruction every turn (no keyword regex, no scripted API call): the agent
   itself reads user intent and decides whether `asaki_memory_search` is
