@@ -13,9 +13,27 @@
 - `POST /v1/memories/search` 支持可选 `min_score` 过滤；`asaki_memory_search`（Pi/MCP）支持可选 `debug` 参数展示 `score_details`。
 - entity 匹配识别裸相对路径（如 `src/services/memories.ts`），不再依赖前导 `/` 或连字符。
 
-## 近期完成（原"下一步"三项，已清空）
+## 下一步（按优先级，代码审查发现的真缺陷/清理项，非猜测）
 
-主动排的三项都做完了。剩下的都在"持续维护"（跟着 eval 走）和"需要证据再做"（先攒数据，别预先建机制）里，没有新的主动待办——下次动手前先看有没有新证据（gap 报告、误 merge 案例、review 队列堆积）再决定做什么。
+1. Vectorize 索引失败无重试/backfill（真缺陷，优先级最高）
+   - `src/services/memories.ts:21-41` `upsertVector()`：embedding 生成失败或 upsert 失败时，`index_status` 落 `pending`/`failed` 后没有任何代码重试。AGENTS.md 写"Vectorize is a **recoverable** index"，但全仓库搜不到 reindex/backfill 逻辑——`vectorize_failed` 事件写进 `memory_events` 后没人读。
+   - 影响：这条记忆此后只能靠 `fallbackSearch` 的关键词/entity 命中才捞得到（`memories.ts:171-187`），换个说法问就永久搜不到语义相关结果，用户毫无感知。
+   - 待办：加一个手动触发的 backfill 脚本（`scripts/` 下，类似 `shadow-run-extraction.ts` 的风格：读 `index_status IN ('pending','failed')` 的记忆，重新生成 embedding + upsert，成功则更新 `index_status='indexed'`）。先不做成 cron/自动重试——个人规模下手动跑一次就能清空积压，不需要常驻机制。
+
+2. `expires_at` 字段没有被任何查询读取——需要拍板方向
+   - 全仓库 grep：`expires_at` 只在写入/更新路径出现（`memories.ts:62,343`），search/list/fallbackSearch 没有一处 `WHERE expires_at ...`。设了过期时间的记忆永远不会真的过期。
+   - 两个方向都行，选一个别留着装饰性字段：(a) 补上过滤（list/search 默认排除已过期，`status`可选`expired`地展示）；(b) 如果实际没人用这个字段，直接删掉（列 + migration + 相关类型），别留死字段。
+   - 待办：先看有没有人在用 `expires_at` 建过记忆（查 D1 `expires_at IS NOT NULL` 的行数），有就选 (a)，没有就选 (b)。
+
+3. `projects` / `memory_sources` / `api_keys` 三张表是死 schema
+   - `migrations/0001_init.sql` 建了但 `src/` 里零引用。`api_keys`（带 `key_hash`）说明当初想做 per-user 鉴权，现在实际鉴权只有一把共享 `ADMIN_API_KEY`（`src/index.ts:20-27`）。
+   - 待办：确认这三张表未来也不打算实现（跟 per-user 鉴权一样，个人规模下没必要），写一条新 migration 删掉；如果还想留 `api_keys` 给未来"team"场景用，至少在 schema 里加注释说明"未实现，占位"，别让读代码的人以为它在生效。
+
+4. README "team agents" 措辞跟实际鉴权模型不符（文档修正，不涉及代码）
+   - 现状：`user_id` 是客户端自报字段，任何持有共享 `ADMIN_API_KEY` 的人可以传别人的 `user_id` 读/删对方全部记忆。这对"个人自托管单人用"没问题，但 README 写"personal **and team** agents"暗示了它没有的多用户隔离能力。
+   - 待办：README 加一句明确说明——当前鉴权是单一共享密钥，`user_id` 只做数据分区不做身份校验；team 场景下所有 key 持有者互相可见彼此数据，靠共享 key 的分发范围控制信任边界。
+
+## 近期完成（已验证落地）
 
 1. ~~云端抽取降级为 shadow-run 校准工具~~ — 已完成
    - `scripts/shadow-run-extraction.ts`（`npm run shadow-run:extraction -- <transcript.jsonl> --user <id> --project <id>`）：读取 Claude Code transcript，调 `/v1/memories/extract`（新增 `dry_run` 参数，见 `src/index.ts`）拿云端候选但不写库，再跟同窗口内 agent 直接 `asaki_memory_add` 的记忆做 `lexicalSimilarity` diff，只读输出 covered/gap 报告；`--create-reviews` 可选择把 gap 候选推进 review 队列（默认不推，只报告）。
@@ -34,18 +52,21 @@
 
 - 降低误 merge：`npm run eval:candidates` 已覆盖同关键词不同事实的 add/merge 判断。发现新误判案例时补 `test/fixtures/candidate-decisions.json`，不手调 magic number。
 - entity 规则余量：还没覆盖 npm 包名（`@scope/pkg`）、纯数字版本号等形态，等实际误召再补。
+- 小味道，顺手改：`src/services/memories.ts` 的 `vectorSearch()` 里 `Math.max(input.top_k * 3, input.top_k)` 数学上恒等于 `input.top_k * 3`（`top_k` 已校验 ≥1），`Math.max` 纯多余。不值得单独开 PR，下次改这块顺手带一下。
 
 ## 需要证据再做（不预先投入）
 
 - 记忆压缩与冲突治理：同一主题多条旧记忆归并成 summary、冲突记忆标记 conflict——个人规模下人工偶尔清理成本远低于建自动治理机制的成本，先攒观测数据看是否真有堆积。
 - 生命周期策略（stale/archived 建议、按命中率降权）：同理，无证据不投入。
+- 服务端限流：当前只有单一共享 `ADMIN_API_KEY`，没有速率限制——key 一旦泄露就是无限 AI 调用成本敞口。个人规模下 key 只在自己机器/CI 用，没发生过滥用，先不投入；真出现异常调用量再加（Cloudflare 自带的 Workers Rate Limiting 绑定，不用自己写）。
+- 单元测试框架：目前只有 eval 回归（`eval:candidates`/`eval:search`/`eval:extraction`/`eval:extraction-guardrails`）+ smoke 脚本，`validation.ts` 每个函数的错误分支没有系统性覆盖。项目已经明确选了"eval 驱动"而不是传统单测——不无证据引入新测试框架；`validation.ts` 或别处真出一个具体 bug 时，优先补一条对应的 eval/guardrail case，而不是补一整套单测基础设施。
 
 ## 已评估并砍掉（不做）
 
 - **D1 FTS5 / BM25 全文索引**：当前 keyword score（token recall + jaccard）配合 entity match 已 51/51 eval 通过、margin 健康。BM25 的价值在语料量大时才明显，个人规模用不上，只会换来迁移和混合召回的复杂度。
 - **Rank fusion（RRF）升级**：手写加权公式已调好，且刚为 `score_details` 投入了调试展示（见上）。RRF 是纯排名法，会丢弃绝对分数、削弱刚建的可调试性，不是"更先进"就该换。
-- **Structured memory extraction（subject/predicate/object）**：与既定方向相反——项目正把云端 LLM 从"生产写手"降级为"事后阅卷"（见下一步 1），这条却是给云端 LLM 加更多结构化写权限。agent 侧已经自己蒸馏内容再提交，没必要在后端再加一层结构化。
-- **离线 replay 系统**：给多租户产品用的重投入，个人工具规模用不上；观测的廉价部分（字段级）已经够用，见"下一步 2"。
+- **Structured memory extraction（subject/predicate/object）**：与既定方向相反——项目正把云端 LLM 从"生产写手"降级为"事后阅卷"（见"近期完成"第 1 项），这条却是给云端 LLM 加更多结构化写权限。agent 侧已经自己蒸馏内容再提交，没必要在后端再加一层结构化。
+- **离线 replay 系统**：给多租户产品用的重投入，个人工具规模用不上；观测的廉价部分（字段级）已经够用，见"近期完成"第 2 项。
 
 ## 当前不要做
 
