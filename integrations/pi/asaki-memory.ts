@@ -278,8 +278,9 @@ function formatReviewLine(item: any, index?: number): string {
   const importance = typeof candidate.importance === "number" ? ` importance=${candidate.importance.toFixed(2)}` : "";
   const confidence = typeof candidate.confidence === "number" ? ` confidence=${candidate.confidence.toFixed(2)}` : "";
   const content = candidate.content || JSON.stringify(candidate);
-  const dup = item.potential_duplicate
-    ? ` potential_duplicate=[memory_id=${item.potential_duplicate.memory_id} suggested=${item.potential_duplicate.action} reason="${item.potential_duplicate.reason}"]`
+  const potentialDuplicate = item.potential_duplicate && typeof item.potential_duplicate === "object" ? item.potential_duplicate : null;
+  const dup = potentialDuplicate
+    ? ` potential_duplicate=[memory_id=${potentialDuplicate.memory_id} suggested=${potentialDuplicate.action} reason="${potentialDuplicate.reason}"]`
     : "";
   return `${prefix}${content}${id}${status}${action}${memoryId}${scope}${kind}${importance}${confidence}${updatedAt}${dup}`;
 }
@@ -648,8 +649,8 @@ Safety:
           results.map((item: any, index: number) => {
             const score = typeof item.score === "number" ? ` score=${item.score.toFixed(3)}` : "";
             const similarity = typeof item.similarity === "number" ? ` similarity=${item.similarity.toFixed(3)}` : "";
-            const debug = params.debug ? formatScoreDetails(item.score_details) : "";
-            return `${formatMemoryLine(item, index)}${score}${similarity}${debug}`;
+            const scoreDetails = params.debug ? formatScoreDetails(item.score_details) : "";
+            return `${formatMemoryLine(item, index)}${score}${similarity}${scoreDetails}`;
           }),
         );
 

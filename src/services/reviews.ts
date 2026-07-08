@@ -216,7 +216,7 @@ export async function listMemoryReviews(env: Env, input: { user_id: string; stat
   // Only worth computing for still-pending rows — a resolved review's suggestion is moot.
   return Promise.all(
     reviews.map(async (review) => {
-      if (review.status !== 'pending') return review;
+      if (review.status !== 'pending') return { ...review, potential_duplicate: null };
       const match = await findBestMatch(env, review.candidate);
       if (!match) return { ...review, potential_duplicate: null };
       const { action, reason } = heuristicDecision(review.candidate, match);
