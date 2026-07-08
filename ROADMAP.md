@@ -42,6 +42,12 @@
    - `POST /v1/memories/reviews/list` 新增可选 `include_suggestions`：为每条 pending review 复用 `findBestMatch`（原 `findActiveDuplicate` 拆出的共享逻辑）算一次 `potential_duplicate: { memory_id, content, action, reason }`，默认关闭不影响现有调用方。Pi/MCP 的 `asaki_memory_review_list` 同步暴露该参数并在输出行里展示。本地 `wrangler dev` 验证过：造一条跟已有记忆高度相似的候选，`include_suggestions=true` 时能正确带出 `potential_duplicate`；不传时字段不出现，行为不变。
    - **没做批量 approve/ignore，主动砍掉**：这个项目里 review 的实际消费者是 agent（`/memory` 审计工作流），不是人工点 UI 复选框——agent 已经能在同一轮里对 `asaki_memory_review_resolve` 循环调用 N 次来达到"批量"效果，专门加一个 batch 端点是给不存在的 UI 交互模式建基础设施，跟"个人规模工具、不要造需求外的灵活性"的调性不符。
 
+5. ~~生命周期策略：长期未调用记忆自动清理~~ — 已完成（用户明确要求，覆盖此前"无证据不投入"的判断）
+   - 新增 `POST /v1/memories/prune-stale`（`pruneStaleMemories()`，`src/services/memories.ts`；`deleteMemory()` 顺手抽出共享的 `softDeleteMemory()` 避免重复）：按 `COALESCE(last_accessed_at, created_at)` 早于 `days`（默认 90，可配 1–3650）判定 stale，软删除（`status='deleted'` + Vectorize `deleteByIds`，跟 `DELETE /v1/memories/:id` 同一套机制，可从 `memory_events` 的 `prune_stale` 事件审计、可手动改回 `active` 恢复），不做物理硬删除。`limit` 默认 100（上限 500），`apply` 默认 `false`（dry-run，只报候选不动数据）。
+   - `scripts/prune-stale.ts`（`npm run prune:stale -- [--days 90] [--limit 100] [--apply] [--max-rounds 20]`）：默认 dry-run 打印候选（kind/importance/last_accessed_at/内容预览），确认后加 `--apply` 才真删；`--apply` 时分轮跑到队列清空。
+   - 手动触发，不做 cron——沿用项目"个人规模不需要常驻机制"的一贯方向。
+   - 本地 `wrangler dev` 端到端验证过：造一条 `created_at` 回填到一年前、从未被访问的记忆，dry-run 正确列出候选且不改数据；`--apply` 后 `status` 变 `deleted`、`memory_events` 落 `prune_stale` 事件且 payload 字段正确；再跑 dry-run 该记忆不再出现（已排除非 active）。
+
 4. ~~Vectorize 索引失败无重试/backfill~~ — 已完成
    - 新增 `POST /v1/memories/backfill-index`（`src/services/memories.ts` 的 `backfillPendingIndex()`，`upsertVector()` 同步导出复用）：查 `index_status IN ('pending','failed')` 的 active 记忆（默认 limit 50，上限 500），逐条重新生成 embedding + upsert，成功则落 `index_status='indexed'`，返回 `{ checked, indexed, remaining, remaining_ids }`。
    - `scripts/backfill-index.ts`（`npm run backfill:index -- [--limit n] [--max-rounds n]`）：跟 `shadow-run-extraction.ts` 一样走 HTTP 打已部署的 Worker（脚本本身摸不到 D1/Vectorize/AI binding），循环调用直到队列清空或到 `--max-rounds`。
@@ -57,7 +63,7 @@
 ## 需要证据再做（不预先投入）
 
 - 记忆压缩与冲突治理：同一主题多条旧记忆归并成 summary、冲突记忆标记 conflict——个人规模下人工偶尔清理成本远低于建自动治理机制的成本，先攒观测数据看是否真有堆积。
-- 生命周期策略（stale/archived 建议、按命中率降权）：同理，无证据不投入。
+- 按命中率降权（非删除的 stale 建议）：仍无证据不投入，跟"生命周期策略"里已实现的硬删除是两回事。
 - 服务端限流：当前只有单一共享 `ADMIN_API_KEY`，没有速率限制——key 一旦泄露就是无限 AI 调用成本敞口。个人规模下 key 只在自己机器/CI 用，没发生过滥用，先不投入；真出现异常调用量再加（Cloudflare 自带的 Workers Rate Limiting 绑定，不用自己写）。
 - 单元测试框架：目前只有 eval 回归（`eval:candidates`/`eval:search`/`eval:extraction`/`eval:extraction-guardrails`）+ smoke 脚本，`validation.ts` 每个函数的错误分支没有系统性覆盖。项目已经明确选了"eval 驱动"而不是传统单测——不无证据引入新测试框架；`validation.ts` 或别处真出一个具体 bug 时，优先补一条对应的 eval/guardrail case，而不是补一整套单测基础设施。
 

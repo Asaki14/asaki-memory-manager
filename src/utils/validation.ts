@@ -259,6 +259,16 @@ export function validateBackfillIndex(value: unknown): { ok: true; data: { limit
   return { ok: true, data: { limit } };
 }
 
+export function validatePruneStale(value: unknown): { ok: true; data: { days: number; limit: number; apply: boolean } } | { ok: false; error: string } {
+  const input = (value && typeof value === 'object' ? value : {}) as { days?: unknown; limit?: unknown; apply?: unknown };
+  const days = input.days == null ? 90 : input.days;
+  if (typeof days !== 'number' || !Number.isInteger(days) || days < 1 || days > 3650) return { ok: false, error: 'days must be an integer between 1 and 3650.' };
+  const limit = input.limit == null ? 100 : input.limit;
+  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 500) return { ok: false, error: 'limit must be an integer between 1 and 500.' };
+  if (input.apply !== undefined && typeof input.apply !== 'boolean') return { ok: false, error: 'apply must be a boolean.' };
+  return { ok: true, data: { days, limit, apply: input.apply === true } };
+}
+
 export function validateResolveMemoryReview(value: unknown): { ok: true; data: { user_id: string; action: 'add' | 'merge' | 'ignore'; memory_id?: string | null; reason?: string | null } } | { ok: false; error: string } {
   if (!value || typeof value !== 'object') return { ok: false, error: 'Body must be a JSON object.' };
   const input = value as { user_id?: unknown; action?: unknown; memory_id?: unknown; reason?: unknown };
