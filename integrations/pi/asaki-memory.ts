@@ -11,7 +11,6 @@ const DEFAULT_SCOPE = "project";
 const DEFAULT_AUTO_MIN_SCORE = 0.5;
 const AUTO_INJECT_TOP_K = 6;
 const DEFAULT_STARTUP_TOP_K = 6;
-const AUTO_EXTRACT_MIN_CHARS = 60;
 const AUTO_EXTRACT_MAX_CHARS = 20_000;
 const AUTO_EXTRACT_TIMEOUT_MS = 20_000;
 const DEFAULT_EXTRACT_MIN_INTERVAL_SECONDS = 300;
@@ -419,7 +418,7 @@ async function autoExtractMemory(messages: unknown, ctx: unknown): Promise<strin
   if (now - lastAutoExtractAt < config.extractMinIntervalMs) return null;
 
   const text = buildExtractionText(messages).slice(0, AUTO_EXTRACT_MAX_CHARS);
-  if (text.length < AUTO_EXTRACT_MIN_CHARS || containsSensitiveText(text)) return null;
+  if (containsSensitiveText(text)) return null;
   if (!EXTRACT_SIGNAL_RE.test(text)) return null;
 
   // Set before the request lands, not after, so a slow/in-flight call still blocks a
