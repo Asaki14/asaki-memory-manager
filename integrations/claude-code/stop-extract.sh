@@ -247,13 +247,25 @@ else
   # the conversation" instead of classifying it, producing prose instead of JSON. Confirmed via
   # two real production failures before this flag was added.
   CLASSIFIER_SCHEMA='{"type":"object","properties":{"flag":{"type":"boolean"},"summary":{"type":"string"}},"required":["flag","summary"],"additionalProperties":false}'
+  # --system-prompt fully replaces Claude Code's default system prompt (which otherwise leaks
+  # ambient cwd/git-status context into every call) — confirmed via direct test. It also cleanly
+  # separates role/instructions from the delta content itself (system turn vs. user turn),
+  # instead of concatenating both into one prompt string.
   # KEEP IN SYNC with the prompt template in scripts/eval-classifier.sh.
-  CLASSIFIER_PROMPT=$(printf 'You are a memory-candidate detector, not a writer. Given this conversation delta, decide if it contains something worth flagging for the main agent to consider saving as a durable memory: a stated preference, a made decision, a completed bug fix or verified task outcome (look for cues like 已验证/已修复/已确认/根因是/verified/fixed/root cause is), an established rule/convention (以后都/统一用/from now on), or an explicit forget/retract request.\nDo NOT flag: questions, chit-chat, one-off commands, hypothetical/illustrative examples or quoted text used only to explain how something works (even if the quoted text itself sounds like a preference), an in-progress/undecided plan, or a routine implementation-progress update within ongoing work.\n\nTwo contrastive examples:\n- "解决了内存泄漏问题，已验证生效" -> flag=true (a previously-existing problem is now resolved).\n- "加了个测试用例，跑了一下全过了" -> flag=false (a routine step of ongoing work, no prior problem being resolved, nothing durable to recall later).\n\nBe conservative: when genuinely unsure, prefer flag=false — a missed candidate falls back to the existing prompt-based reminder, a false alarm costs the main agent one wasted turn.\n\nDelta:\n%s' "$TEXT")
+  CLASSIFIER_SYSTEM_PROMPT='You are a memory-candidate detector, not a writer. Given a conversation delta, decide if it contains something worth flagging for the main agent to consider saving as a durable memory: a stated preference, a made decision, a completed bug fix or verified task outcome (look for cues like 已验证/已修复/已确认/根因是/verified/fixed/root cause is), an established rule/convention (以后都/统一用/from now on), or an explicit forget/retract request.
+Do NOT flag: questions, chit-chat, one-off commands, hypothetical/illustrative examples or quoted text used only to explain how something works (even if the quoted text itself sounds like a preference), an in-progress/undecided plan, or a routine implementation-progress update within ongoing work.
+
+Two contrastive examples:
+- "解决了内存泄漏问题，已验证生效" -> flag=true (a previously-existing problem is now resolved).
+- "加了个测试用例，跑了一下全过了" -> flag=false (a routine step of ongoing work, no prior problem being resolved, nothing durable to recall later).
+
+Be conservative: when genuinely unsure, prefer flag=false — a missed candidate falls back to the existing prompt-based reminder, a false alarm costs the main agent one wasted turn.'
+  CLASSIFIER_PROMPT=$(printf 'Delta:\n%s' "$TEXT")
 
   echo "$NOW_EPOCH" >"$LAST_EXTRACT_FILE"
 
   (
-    RESP=$(claude -p --safe-mode --tools "" --model "$CLASSIFIER_MODEL" --json-schema "$CLASSIFIER_SCHEMA" "$CLASSIFIER_PROMPT" 2>>"$CLASSIFIER_LOG_FILE")
+    RESP=$(claude -p --safe-mode --tools "" --model "$CLASSIFIER_MODEL" --system-prompt "$CLASSIFIER_SYSTEM_PROMPT" --json-schema "$CLASSIFIER_SCHEMA" "$CLASSIFIER_PROMPT" 2>>"$CLASSIFIER_LOG_FILE")
     # Collapse to one line defensively before appending — report_and_exit's `tail -n 1` can only
     # ever recover a whole response if each run is exactly one log line.
     RESP_SINGLE_LINE=$(echo "$RESP" | tr '\n' ' ')
