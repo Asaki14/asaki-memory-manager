@@ -47,6 +47,7 @@ Both the Claude Code plugin and the Pi extension are consumed straight from this
 - `scripts/shadow-run-extraction.ts`: shadow-run calibration tool — runs `/v1/memories/extract` in `dry_run` mode against a transcript and diffs cloud candidates against real agent-added memories, without writing anything.
 - `scripts/backfill-index.ts`: manual Vectorize backfill trigger — calls `POST /v1/memories/backfill-index` (`backfillPendingIndex()` in `src/services/memories.ts`) in a loop to re-embed and re-upsert memories stuck at `index_status` `pending`/`failed`.
 - `scripts/prune-stale.ts`: manual stale-memory cleanup — calls `POST /v1/memories/prune-stale` (`pruneStaleMemories()` in `src/services/memories.ts`) to soft-delete memories not accessed in N days. Defaults to dry-run; `--apply` is required to actually delete.
+- `scripts/eval-classifier.sh`: regression eval for the local Stop-hook memory-candidate classifier (the `AUTO_EXTRACT=0` branch of `integrations/claude-code/stop-extract.sh`) — hits `claude -p --safe-mode` for real against `test/fixtures/classifier-cases.json`, no Worker/API key needed since nothing gets written.
 - The "Global scope discipline" text lives in three places that must stay in sync: `commands/memory.md`, `integrations/pi/asaki-memory.ts`'s `/memory` command, and (condensed) `src/services/extraction.ts`'s `SYSTEM_PROMPT` — the first two apply it at audit time, the third applies it at extraction time.
 
 ## Commands
@@ -56,6 +57,7 @@ npm install
 npm run typecheck
 npm run eval:candidates
 npm run eval:extraction
+npm run eval:classifier
 npm run shadow-run:extraction -- <transcript.jsonl> --user <id> --project <id>
 npm run backfill:index -- --limit 50
 npm run prune:stale -- --days 90
@@ -88,10 +90,11 @@ npm run deploy
 - D1 is the source of truth; Vectorize is a recoverable index.
 - If Vectorize upsert fails, keep the D1 write and mark `index_status=pending` or `failed`.
 - Search should keep hybrid Vectorize + D1 lexical fallback behavior.
-- The active conversation agent can call `asaki_memory_add` directly with a pre-distilled memory, or hand raw text to `POST /v1/memories/extract` (`asaki_memory_extract` MCP tool) for server-side LLM extraction; Cloudflare organizes, dedupes, merges, indexes, and stores candidates either way. The Claude Code Stop hook (`integrations/claude-code/stop-extract.sh`) uses the raw-text path, sending new plain-text conversation deltas off-machine for background extraction — this is a deliberate reversal of an earlier no-transcripts-off-machine stance.
+- The active conversation agent can call `asaki_memory_add` directly with a pre-distilled memory, or hand raw text to `POST /v1/memories/extract` (`asaki_memory_extract` MCP tool) for server-side LLM extraction; Cloudflare organizes, dedupes, merges, indexes, and stores candidates either way. The Claude Code Stop hook (`integrations/claude-code/stop-extract.sh`) uses the raw-text path when `ASAKI_MEMORY_AUTO_EXTRACT=1`, sending new plain-text conversation deltas off-machine for background extraction — this is a deliberate reversal of an earlier no-transcripts-off-machine stance. Cloud auto-extract is permanently off by default (`AUTO_EXTRACT=0`); that branch instead runs a local, no-write-access classifier (`claude -p --safe-mode`) that flags durable-memory candidates and, on the next Stop event, forces one more agent turn (`decision:"block"`) to check the flagged candidate against the 6-criteria checklist and decide whether to call `asaki_memory_add` — the conversation agent remains the sole writer.
 - Candidate processing should run deterministic duplicate checks before LLM decisions.
 - Run `npm run eval:candidates` after changing candidate dedupe thresholds or prompts.
 - Run `npm run eval:extraction` after changing the extraction prompt (`src/services/extraction.ts`); it hits a live Worker (defaults to production) since `env.AI.run()` needs a real Worker runtime. Add a new case to `test/fixtures/extraction-cases.json` whenever a production false positive/negative turns up.
+- Run `npm run eval:classifier` after changing the classifier prompt (`CLASSIFIER_PROMPT` in `integrations/claude-code/stop-extract.sh`). Add a new case to `test/fixtures/classifier-cases.json` whenever a production false positive/negative turns up.
 - Pi auto inject defaults to `ASAKI_MEMORY_AUTO_MIN_SCORE=0.67` (calibrated via `npm run eval:search`); keep low-score memories out of injected context.
 - Keep changes small and consistent with existing style.
 - Run `npm run typecheck` after TypeScript edits.

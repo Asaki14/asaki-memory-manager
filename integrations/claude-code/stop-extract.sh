@@ -1,17 +1,32 @@
 #!/usr/bin/env bash
 # Hook: Stop
 #
-# After each assistant turn, sends the plain-text user/assistant lines
-# appended since the last processed offset to /v1/memories/extract for
-# server-side LLM-based background memory extraction. Tool calls, tool
-# results, and thinking blocks are never sent — only plain text turns.
+# When ASAKI_MEMORY_AUTO_EXTRACT=1, sends the plain-text user/assistant lines appended since
+# the last processed offset to /v1/memories/extract for server-side LLM-based background memory
+# extraction. Tool calls, tool results, and thinking blocks are never sent — only plain text
+# turns. Fire-and-forget: the extraction request runs in the background so it never blocks the
+# Stop event.
 #
 # NOTE: this deliberately sends conversation text off-machine to the Worker.
-# Fire-and-forget: the extraction request runs in the background so it
-# never blocks the Stop event.
+#
+# When ASAKI_MEMORY_AUTO_EXTRACT is unset/0 (the default), cloud auto-extract is permanently
+# off and the conversation agent is the sole writer of durable memory. Instead of doing nothing,
+# this hook runs a local, no-write-access classifier (`claude -p --safe-mode`) in the background
+# to flag whether the delta looks like it contains a durable-memory candidate. If the previous
+# turn's classifier run flagged something, this Stop event forces one more agent turn
+# (decision:block) to check it against the 6-criteria checklist and decide whether to call
+# asaki_memory_add — the classifier itself has no asaki_memory_add access, it can only nudge.
 set -uo pipefail
 
 INPUT=$(cat)
+
+# Guard against the block below re-triggering itself: when Claude Code is already forcing a
+# continuation from a previous Stop hook decision, stop_hook_active is true. Bail immediately —
+# emitting another block here would compound with Claude Code's own hook infinitely, until its
+# native 8-consecutive-block circuit breaker kicks in.
+STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null)
+[ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0
+
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
 CWD=$(echo "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)
@@ -24,7 +39,7 @@ fi
 
 ASAKI_BASE="${ASAKI_MEMORY_BASE_URL:-${ASAKI_MEMORY_API_URL:-}}"
 [ -z "$ASAKI_BASE" ] && exit 0
-[ "${ASAKI_MEMORY_AUTO_EXTRACT:-0}" != "1" ] && exit 0
+AUTO_EXTRACT="${ASAKI_MEMORY_AUTO_EXTRACT:-0}"
 ASAKI_USER="${ASAKI_MEMORY_USER_ID:-asaki}"
 
 if [ -n "${ASAKI_MEMORY_PROJECT_ID:-}" ]; then
@@ -40,12 +55,49 @@ mkdir -p "$STATE_DIR"
 STATE_FILE="$STATE_DIR/${SESSION_ID}.offset"
 LOG_FILE="$STATE_DIR/${SESSION_ID}.log"
 REPORTED_FILE="$STATE_DIR/${SESSION_ID}.reported"
+CLASSIFIER_LOG_FILE="$STATE_DIR/${SESSION_ID}.classifier.log"
+CLASSIFIER_REPORTED_FILE="$STATE_DIR/${SESSION_ID}.classifier.reported"
 
-# The extraction curl runs fire-and-forget in the background (see below), so its result
-# isn't known when this invocation exits. Instead, each Stop event first checks whether the
-# *previous* invocation's response landed in LOG_FILE since it was last reported, and surfaces
-# it as a systemMessage — one turn of delay, but visible in the TUI without blocking Stop.
+# The extraction/classifier calls run fire-and-forget in the background (see below), so their
+# result isn't known when this invocation exits. Instead, each Stop event first checks whether
+# the *previous* invocation's response landed in one of the log files since it was last
+# reported, and surfaces it — one turn of delay, but visible without blocking Stop every time.
 report_and_exit() {
+  # Classifier result takes priority: it's the structural trigger (decision:block), not just an
+  # FYI systemMessage. The two paths are mutually exclusive in practice (a session runs with
+  # AUTO_EXTRACT either on or off for its lifetime), so there's no real conflict to merge.
+  if [ -f "$CLASSIFIER_LOG_FILE" ]; then
+    CLASSIFIER_LAST_REPORTED=0
+    [ -f "$CLASSIFIER_REPORTED_FILE" ] && CLASSIFIER_LAST_REPORTED=$(cat "$CLASSIFIER_REPORTED_FILE" 2>/dev/null || echo 0)
+    CLASSIFIER_LOG_LINES=$(wc -l <"$CLASSIFIER_LOG_FILE" | tr -d ' ')
+    if [ "$CLASSIFIER_LOG_LINES" -gt "$CLASSIFIER_LAST_REPORTED" ]; then
+      CLASSIFIER_RESP="$(tail -n 1 "$CLASSIFIER_LOG_FILE" | sed -E 's/^[^ ]+ //')"
+      # Defensively strip a markdown code fence in case the model wraps its JSON despite being
+      # told not to.
+      CLASSIFIER_JSON=$(echo "$CLASSIFIER_RESP" | sed -E '/^```/d')
+      # Only advance CLASSIFIER_REPORTED_FILE once this parses as valid JSON — same reasoning as
+      # the cloud path below: a still-in-flight or failed background job must not be marked
+      # reported, or the next Stop event silently skips checking it forever.
+      if echo "$CLASSIFIER_JSON" | jq -e . >/dev/null 2>&1; then
+        echo "$CLASSIFIER_LOG_LINES" >"$CLASSIFIER_REPORTED_FILE"
+        FLAG=$(echo "$CLASSIFIER_JSON" | jq -r '.flag // false')
+        if [ "$FLAG" = "true" ]; then
+          SUMMARY=$(echo "$CLASSIFIER_JSON" | jq -r '.summary // ""')
+          jq -cn --arg reason "Asaki memory: possible durable memory detected" --arg summary "$SUMMARY" '
+            {
+              decision: "block",
+              reason: $reason,
+              hookSpecificOutput: {
+                hookEventName: "Stop",
+                additionalContext: ("Classifier flagged this candidate: \"" + $summary + "\". Check it against the 6-criteria checklist (durable / actually happened / not noise / not duplicate — asaki_memory_search first / self-contained / right scope) and call asaki_memory_add if it qualifies. If not, say why briefly and move on.")
+              }
+            }'
+          exit 0
+        fi
+      fi
+    fi
+  fi
+
   MSG=""
   if [ -f "$LOG_FILE" ]; then
     LAST_REPORTED=0
@@ -91,9 +143,10 @@ LOCK_DIR="$STATE_DIR/${SESSION_ID}.lock"
 mkdir "$LOCK_DIR" 2>/dev/null || report_and_exit
 trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
 
-# Throttle: skip firing another extraction call within the min interval since the last one
-# actually fired. Deliberately does NOT advance STATE_FILE below — the skipped delta stays
-# queued and gets folded into the next Stop event's (larger) increment instead of being lost.
+# Throttle: skip firing another extraction/classifier call within the min interval since the
+# last one actually fired. Deliberately does NOT advance STATE_FILE below — the skipped delta
+# stays queued and gets folded into the next Stop event's (larger) increment instead of being
+# lost. Shared between the cloud and classifier paths since a session only ever runs one.
 LAST_EXTRACT_FILE="$STATE_DIR/${SESSION_ID}.last_extract"
 MIN_INTERVAL="${ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS:-300}"
 NOW_EPOCH=$(date +%s)
@@ -128,9 +181,10 @@ process.stdin.on("end", () => {
 ')
 
 # Sensitive-content gate: never send private keys, bearer tokens, provider API keys, AWS access
-# keys, or key=value secret assignments off-machine. Consume the offset here — a slice containing
-# a secret must never be retried, since leaving it queued would just resend the same secret in
-# every future (larger) delta until it scrolls out of the transcript.
+# keys, or key=value secret assignments off-machine — applies to both the cloud extraction call
+# and the local classifier call (the classifier is still a real model call over the network).
+# A slice containing a secret must never be retried, since leaving it queued would just resend
+# the same secret in every future (larger) delta until it scrolls out of the transcript.
 # KEEP IN SYNC with SENSITIVE_RE_LIST in integrations/pi/asaki-memory.ts and
 # scripts/shadow-run-extraction.ts.
 SENSITIVE_PATTERN='-----BEGIN [A-Z ]*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b|\b(sk|sk-ant|sk-proj|ghp|gho|ghu|ghs|github_pat)_[A-Za-z0-9_=-]{16,}\b|\bAKIA[0-9A-Z]{16}\b|\b(api[_-]?key|token|secret|password|passwd|authorization)\b\s*[:=]\s*"?[^"'"'"' ]{8,}|set\s+-gx\s+[[:alnum:]_]*(KEY|TOKEN|SECRET|PASSWORD)[[:alnum:]_]*\s+[^$[:space:]][^[:space:]]{8,}'
@@ -139,38 +193,59 @@ if echo "$TEXT" | grep -qiE "$SENSITIVE_PATTERN"; then
   report_and_exit
 fi
 
-# Content gate: only proceed if the delta contains at least one durable-memory signal marker
-# (preference/rule/decision/bug_fix/task_learning/workflow language), regardless of length —
-# a short, decisive one-liner ("以后都用pnpm") is exactly the kind of turn worth catching, so
-# there is no separate minimum-length cutoff.
-# False negatives are expected and accepted; false positives just fall through to today's behavior.
-# KEEP IN SYNC with EXTRACT_SIGNAL_RE in integrations/pi/asaki-memory.ts.
-EXTRACT_SIGNAL_PATTERN='以后都|以后就|不要再|别再|记住|记得|规则是|统一用|统一使用|根因是|已验证|已修复|已确认|踩坑|决定用|决定是|改用|换成|约定是|复盘|经验是|remember|always|never|from now on|going forward|decided to|decision is|decision was|root cause is|root cause was|already fixed|now fixed|now verified|already verified|learned that|instead of|switch to|switched to|switching to|convention is|the rule is'
-if ! echo "$TEXT" | grep -qiE "$EXTRACT_SIGNAL_PATTERN"; then
-  # Deliberately does NOT advance STATE_FILE — this text might still be durable, just not
-  # phrased in a way the gate recognizes yet. Leave the offset where
-  # it is so this slice folds into the next Stop event's (larger) delta instead of being silently
-  # and permanently lost, mirroring the throttle's carry-forward behavior earlier in this script.
-  report_and_exit
+if [ "$AUTO_EXTRACT" = "1" ]; then
+  # Content gate: only proceed if the delta contains at least one durable-memory signal marker
+  # (preference/rule/decision/bug_fix/task_learning/workflow language), regardless of length —
+  # a short, decisive one-liner ("以后都用pnpm") is exactly the kind of turn worth catching, so
+  # there is no separate minimum-length cutoff.
+  # False negatives are expected and accepted; false positives just fall through to today's behavior.
+  # KEEP IN SYNC with EXTRACT_SIGNAL_RE in integrations/pi/asaki-memory.ts.
+  EXTRACT_SIGNAL_PATTERN='以后都|以后就|不要再|别再|记住|记得|规则是|统一用|统一使用|根因是|已验证|已修复|已确认|踩坑|决定用|决定是|改用|换成|约定是|复盘|经验是|remember|always|never|from now on|going forward|decided to|decision is|decision was|root cause is|root cause was|already fixed|now fixed|now verified|already verified|learned that|instead of|switch to|switched to|switching to|convention is|the rule is'
+  if ! echo "$TEXT" | grep -qiE "$EXTRACT_SIGNAL_PATTERN"; then
+    # Deliberately does NOT advance STATE_FILE — this text might still be durable, just not
+    # phrased in a way the gate recognizes yet. Leave the offset where
+    # it is so this slice folds into the next Stop event's (larger) delta instead of being silently
+    # and permanently lost, mirroring the throttle's carry-forward behavior earlier in this script.
+    report_and_exit
+  fi
+
+  echo "$TOTAL" >"$STATE_FILE"
+  TEXT="${TEXT:0:20000}"
+
+  # No "scope" here on purpose — let the server infer global vs project per candidate.
+  # project_id is still sent as a hint for whichever candidates resolve to project scope.
+  BODY=$(jq -cn --arg text "$TEXT" --arg user "$ASAKI_USER" --arg project "$ASAKI_PROJECT" \
+    '{text: $text, user_id: $user, project_id: $project, source: "claude-code:auto-extract"}')
+
+  echo "$NOW_EPOCH" >"$LAST_EXTRACT_FILE"
+
+  (
+    RESP=$(curl -sf --max-time 20 -X POST "${ASAKI_BASE}/v1/memories/extract" \
+      -H "Authorization: Bearer ${ASAKI_MEMORY_API_KEY}" \
+      -H "Content-Type: application/json" \
+      -d "$BODY" 2>>"$LOG_FILE")
+    echo "$(date -u +%FT%TZ) ${RESP}" >>"$LOG_FILE"
+  ) >/dev/null 2>&1 &
+  disown
+else
+  # Cloud auto-extract is off (the default): no regex pre-filter here on purpose — a real LLM
+  # judgment call is more reliable than a keyword gate at deciding whether a delta is worth
+  # flagging, and this classifier has no write access, so a false positive only costs one extra
+  # agent turn, not a bad write.
+  echo "$TOTAL" >"$STATE_FILE"
+  TEXT="${TEXT:0:20000}"
+
+  CLASSIFIER_MODEL="${ASAKI_MEMORY_CLASSIFIER_MODEL:-claude-haiku-4-5-20251001}"
+  # KEEP IN SYNC with the prompt template in scripts/eval-classifier.sh.
+  CLASSIFIER_PROMPT=$(printf 'You are a memory-candidate detector, not a writer. Given this conversation delta, decide if it contains something worth flagging for the main agent to consider saving as a durable memory: a stated preference, a made decision, a completed bug fix or verified task outcome (look for cues like 已验证/已修复/已确认/根因是/verified/fixed/root cause is), an established rule/convention (以后都/统一用/from now on), or an explicit forget/retract request.\nDo NOT flag: questions, chit-chat, one-off commands, hypothetical/illustrative examples or quoted text used only to explain how something works (even if the quoted text itself sounds like a preference), an in-progress/undecided plan, or a routine implementation-progress update within ongoing work.\n\nTwo contrastive examples:\n- "解决了内存泄漏问题，已验证生效" -> flag=true (a previously-existing problem is now resolved).\n- "加了个测试用例，跑了一下全过了" -> flag=false (a routine step of ongoing work, no prior problem being resolved, nothing durable to recall later).\n\nRespond with ONLY a raw JSON object, no markdown fences, no commentary: {"flag": boolean, "summary": "one-line candidate summary, empty string if flag is false"}\nBe conservative: when genuinely unsure, prefer flag=false — a missed candidate falls back to the existing prompt-based reminder, a false alarm costs the main agent one wasted turn.\n\nDelta:\n%s' "$TEXT")
+
+  echo "$NOW_EPOCH" >"$LAST_EXTRACT_FILE"
+
+  (
+    RESP=$(claude -p --safe-mode --model "$CLASSIFIER_MODEL" "$CLASSIFIER_PROMPT" 2>>"$CLASSIFIER_LOG_FILE")
+    echo "$(date -u +%FT%TZ) ${RESP}" >>"$CLASSIFIER_LOG_FILE"
+  ) >/dev/null 2>&1 &
+  disown
 fi
-
-echo "$TOTAL" >"$STATE_FILE"
-TEXT="${TEXT:0:20000}"
-
-# No "scope" here on purpose — let the server infer global vs project per candidate.
-# project_id is still sent as a hint for whichever candidates resolve to project scope.
-BODY=$(jq -cn --arg text "$TEXT" --arg user "$ASAKI_USER" --arg project "$ASAKI_PROJECT" \
-  '{text: $text, user_id: $user, project_id: $project, source: "claude-code:auto-extract"}')
-
-echo "$NOW_EPOCH" >"$LAST_EXTRACT_FILE"
-
-(
-  RESP=$(curl -sf --max-time 20 -X POST "${ASAKI_BASE}/v1/memories/extract" \
-    -H "Authorization: Bearer ${ASAKI_MEMORY_API_KEY}" \
-    -H "Content-Type: application/json" \
-    -d "$BODY" 2>>"$LOG_FILE")
-  echo "$(date -u +%FT%TZ) ${RESP}" >>"$LOG_FILE"
-) >/dev/null 2>&1 &
-disown
 
 report_and_exit
