@@ -68,5 +68,15 @@
     "name": "pos: problem-then-resolution pair still worth flagging",
     "text": "User: 记忆系统漏掉了一条关键信息，关于缓存过期时间的配置项。\nAssistant: 已经把这条信息补全到对应的记忆里了，缓存过期时间统一改成 300 秒。",
     "expectFlag": true
+  },
+  {
+    "name": "neg: real production failure - delta ends on an open question, model tried to answer it instead of classifying (without --json-schema)",
+    "text": "Assistant: 抓到了一个逻辑缺口。整理一下现状：任务书第50行渗透率是主指标候选，第51行护栏清单里没有渗透率，但primary-metric-argument.md第18行说\"已定为护栏指标\"是超前表述，guardrail-metrics.md护栏指标清单中根本没有渗透率。结论：earlier的说法不准确，这条需要改。要不要现在改这两处，把缺口补上？",
+    "expectFlag": false
+  },
+  {
+    "name": "neg: real production failure - self-referential delta about the classifier/throttle mechanism itself, model produced rambling prose instead of JSON (without --json-schema)",
+    "text": "Assistant: 節流仍在生效：上一次分類器實際運行是17:22:28，距現在只過了73秒，還差227秒才能超過300秒窗口。17:14那條多行classifier.log已被判定為JSON解析失敗，沒有寫入.classifier.reported，會在下一次分類器運行時被拋棄。修復後的脚本在下一輪真正觸發時會生效。主公發下一條消息，這一輪Stop結束時，如果時間已超過300秒窗口，就會用修復後的版本跑分類器。",
+    "expectFlag": false
   }
 ]
