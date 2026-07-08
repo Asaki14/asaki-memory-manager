@@ -59,25 +59,35 @@ committed). Set them once in `~/.claude/settings.json`:
   and injects those into context before the agent starts — so memory recall
   doesn't depend solely on the agent proactively calling the tool. Output is
   capped at a fixed character budget regardless of result count.
-- `stop-extract.sh` — Stop hook, runs after every assistant turn but only
-  actually fires when `ASAKI_MEMORY_AUTO_EXTRACT=1` is set (default off,
-  matching the Pi extension). When enabled, sends the plain-text user/assistant
-  lines appended since the last processed transcript offset to
-  `/v1/memories/extract` for server-side LLM-based background extraction,
-  throttled to at most once per `ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS`
-  (default 300) — a throttled turn's text is not dropped, it's carried into
-  the next Stop event's (larger) increment. A delta matching a private-key/
-  bearer-token/API-key/AWS-key/secret-assignment pattern is never sent (offset
-  is consumed instead, matching the Pi extension's `containsSensitiveText()`
-  gate — see `SENSITIVE_RE_LIST` in `../pi/asaki-memory.ts`). Extracted candidates are capped at
-  2 per call; within that, project-scope candidates with importance ≥ 0.6 are
+- `stop-extract.sh` — Stop hook, runs after every assistant turn. There are two
+  modes:
+  - `ASAKI_MEMORY_AUTO_EXTRACT=1`: sends the plain-text user/assistant lines
+    appended since the last processed transcript offset to
+    `/v1/memories/extract` for server-side LLM-based background extraction.
+    This intentionally sends conversation text off-machine to the Worker.
+  - default `ASAKI_MEMORY_AUTO_EXTRACT=0`: cloud auto-extract stays off, but the
+    hook runs a local, no-write-access classifier via `claude -p --safe-mode`
+    in the background. This still sends the conversation delta to the Claude
+    CLI/model provider, but it cannot write memory directly. If it flags a
+    durable-memory candidate, the next Stop event returns `decision:"block"` to
+    force one more agent turn; the main agent must then check the 6-criteria
+    checklist and decide whether to call `asaki_memory_add`.
+
+  Both modes are throttled to at most once per
+  `ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS` (default 300) — a throttled
+  turn's text is not dropped, it's carried into the next Stop event's (larger)
+  increment. A delta matching a private-key/bearer-token/API-key/AWS-key/
+  secret-assignment pattern is never sent to either the Worker or classifier
+  (offset is consumed instead, matching the Pi extension's
+  `containsSensitiveText()` gate — see `SENSITIVE_RE_LIST` in
+  `../pi/asaki-memory.ts`). In Worker extraction mode, extracted candidates are
+  capped at 2 per call; project-scope candidates with importance ≥ 0.6 are
   auto-added (same dedup pipeline as `asaki_memory_add`), and everything else
-  (global scope, or importance < 0.6) is queued to `/v1/memories/reviews`
-  for human review instead of being written directly. Tool calls, tool
-  results, and thinking blocks are never sent — only plain text turns.
-  Fire-and-forget: the extraction request backgrounds itself so it never
-  blocks the Stop event. This intentionally sends conversation text
-  off-machine to the Worker. Per-session offset/log/throttle files live under
+  (global scope, or importance < 0.6) is queued to `/v1/memories/reviews` for
+  human review instead of being written directly. Tool calls, tool results, and
+  thinking blocks are never sent — only plain text turns. Fire-and-forget:
+  extraction/classifier requests background themselves so Stop does not block.
+  Per-session offset/log/throttle files live under
   `${TMPDIR:-/tmp}/asaki-memory-stop-extract/`.
 - `tool-visibility.sh` — PostToolUse hook, surfaces memory tool calls in the TUI
 - `../mcp/asaki-memory.ts` — MCP server exposing `asaki_memory_search`/`asaki_memory_add`/etc.
