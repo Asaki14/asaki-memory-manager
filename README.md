@@ -143,7 +143,7 @@ curl -X POST http://127.0.0.1:8787/v1/memories/search \
   }'
 ```
 
-Search defaults to `global + current project + current session` when `project_id` / `session_id` are provided. Explicit `scope=project` requires `project_id`; explicit `scope=session` requires `session_id`.
+Search defaults to `global + current project + current session` when `project_id` / `session_id` are provided. Explicit `scope=project` requires `project_id`; explicit `scope=session` requires `session_id`. Optional `min_score` (0-1) drops results below that score.
 
 ### List memories
 

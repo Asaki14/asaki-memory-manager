@@ -210,7 +210,8 @@ export async function searchMemories(env: Env, input: Required<Pick<SearchMemori
   }
 
   const lexicalResults = await fallbackSearch(env, input);
-  const results = vectorResults ? mergeSearchResults([vectorResults, lexicalResults], input.top_k) : lexicalResults;
+  const merged = vectorResults ? mergeSearchResults([vectorResults, lexicalResults], input.top_k) : lexicalResults;
+  const results = typeof input.min_score === 'number' ? merged.filter((result) => result.score >= input.min_score!) : merged;
 
   if (results.length > 0) {
     const timestamp = nowIso();
@@ -222,7 +223,7 @@ export async function searchMemories(env: Env, input: Required<Pick<SearchMemori
   await writeMemoryEvent(env, {
     userId: input.user_id,
     eventType: 'search',
-    payload: { query: input.query, top_k: input.top_k, result_count: results.length },
+    payload: { query: input.query, top_k: input.top_k, min_score: input.min_score, result_count: results.length },
   });
 
   return results;

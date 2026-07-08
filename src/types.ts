@@ -42,6 +42,7 @@ export interface SearchMemoriesInput {
   project_id?: string | null;
   session_id?: string | null;
   top_k?: number;
+  min_score?: number;
 }
 
 export interface ListMemoriesInput {
