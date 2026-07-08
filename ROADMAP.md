@@ -1,6 +1,6 @@
 # Asaki Memory Roadmap
 
-目标：把当前可用 beta 打磨成稳定、可调试、低噪声的**个人/小团队自托管** agent memory layer。规模假设：单用户几百到几千条记忆，不是多租户 SaaS——这决定了下面哪些投入划算。
+目标：把当前可用 beta 打磨成稳定、可调试、低噪声的**个人自托管** agent memory layer。定位专精个人记忆系统，不为团队/多用户场景服务。规模假设：单用户几百到几千条记忆，不是多租户 SaaS——这决定了下面哪些投入划算。
 
 ## 已完成基线（勿重复投入，需要改动时再展开）
 
@@ -26,12 +26,11 @@
    - 待办：先看有没有人在用 `expires_at` 建过记忆（查 D1 `expires_at IS NOT NULL` 的行数），有就选 (a)，没有就选 (b)。
 
 3. `projects` / `memory_sources` / `api_keys` 三张表是死 schema
-   - `migrations/0001_init.sql` 建了但 `src/` 里零引用。`api_keys`（带 `key_hash`）说明当初想做 per-user 鉴权，现在实际鉴权只有一把共享 `ADMIN_API_KEY`（`src/index.ts:20-27`）。
-   - 待办：确认这三张表未来也不打算实现（跟 per-user 鉴权一样，个人规模下没必要），写一条新 migration 删掉；如果还想留 `api_keys` 给未来"team"场景用，至少在 schema 里加注释说明"未实现，占位"，别让读代码的人以为它在生效。
+   - `migrations/0001_init.sql` 建了但 `src/` 里零引用。`api_keys`（带 `key_hash`）说明当初想做 per-user 鉴权——现在项目已明确定位为个人单用户工具，不再需要 per-user 鉴权，这三张表没有存在理由。
+   - 待办：写一条新 migration 删掉这三张表 + 对应索引，不再留占位。
 
-4. README "team agents" 措辞跟实际鉴权模型不符（文档修正，不涉及代码）
-   - 现状：`user_id` 是客户端自报字段，任何持有共享 `ADMIN_API_KEY` 的人可以传别人的 `user_id` 读/删对方全部记忆。这对"个人自托管单人用"没问题，但 README 写"personal **and team** agents"暗示了它没有的多用户隔离能力。
-   - 待办：README 加一句明确说明——当前鉴权是单一共享密钥，`user_id` 只做数据分区不做身份校验；team 场景下所有 key 持有者互相可见彼此数据，靠共享 key 的分发范围控制信任边界。
+4. ~~README "team agents" 措辞跟实际鉴权模型不符~~ — 已解决（改定位而不是改措辞）
+   - 项目定位已明确改为个人单用户工具，不再服务团队/多用户场景，`README.md`/`AGENTS.md`/`package.json` 的描述已同步去掉"team"相关措辞。鉴权模型（单一共享 `ADMIN_API_KEY`）跟"个人单用户"定位天然一致，不再需要解释信任边界给团队用户。
 
 ## 近期完成（已验证落地）
 
