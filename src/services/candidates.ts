@@ -1,6 +1,7 @@
-import type { Env, MemoryReviewRow, MemoryRow, SearchResult } from '../types';
+import type { Env, MemoryReviewRow, MemoryRow, SearchMemoriesInput, SearchResult } from '../types';
 import { createMemory, deleteMemory, searchMemories, updateMemoryContent } from './memories';
 import { writeMemoryEvent } from './memoryEvents';
+import { scoreMemoryForSearch } from './searchScoring';
 
 import { bestUsableMatch, chooseDecision, hasContradictionSignal, hasForgetSignal, heuristicDecision, lexicalSimilarity, mergeContent, needsLlmDecision, type CandidateAction, type ProcessMemoryCandidateInput } from './candidateDecision';
 export type { CandidateAction, ProcessMemoryCandidateInput } from './candidateDecision';
@@ -79,13 +80,25 @@ export async function findLexicalMatch(env: Env, candidate: ProcessMemoryCandida
     .bind(candidate.user_id, candidate.scope)
     .all<MemoryRow>();
 
+  // similarity stays the raw lexicalSimilarity() Jaccard value — that's what
+  // usableMatch()/matchSimilarity() in candidateDecision.ts actually read for dedup matching.
+  // score/score_details go through the same scoreMemoryForSearch() weighting every other search
+  // path uses, so a `matched_memory.score_details` in an API response means the same thing
+  // whether it came from searchMemories() or this dedup-only lexical scan.
+  const searchInput: SearchMemoriesInput = {
+    query: candidate.content,
+    user_id: candidate.user_id,
+    project_id: candidate.project_id ?? null,
+    session_id: candidate.session_id ?? null,
+  };
+
   let best: SearchResult | undefined;
   for (const row of result.results ?? []) {
     if (row.scope === 'project' && candidate.project_id && row.project_id !== candidate.project_id) continue;
     if (row.scope === 'session' && candidate.session_id && row.session_id !== candidate.session_id) continue;
     const similarity = lexicalSimilarity(candidate.content, row.content);
     if (!best || similarity > best.similarity) {
-      best = { ...row, similarity, score: similarity, score_details: { semantic: 0, keyword: similarity, entity: 0, metadata: 0, source: 'keyword' } };
+      best = { ...row, similarity, ...scoreMemoryForSearch(row, searchInput, 0, 'keyword') };
     }
   }
   return best && best.similarity >= 0.5 ? best : undefined;
