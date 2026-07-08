@@ -8,11 +8,12 @@
 # intentionally mirrors the Pi extension's buildSessionBanner(): numbers
 # only, the agent decides for itself when to actually search/read memories.
 #
-# Optional: when ASAKI_MEMORY_STARTUP_INJECT=1, also inject the top
-# ASAKI_MEMORY_STARTUP_TOP_K (default 6) highest-importance active memories
-# once at session start (startup/resume, not compact) — a one-shot seed so
-# the agent doesn't need to search for well-known context immediately. Later
-# turns still rely on on-demand search rather than per-turn auto-inject.
+# Also injects the top ASAKI_MEMORY_STARTUP_TOP_K (default 6)
+# highest-importance active memories once at session start (startup/resume,
+# not compact) — a one-shot seed so the agent doesn't need to search for
+# well-known context immediately. Later turns still rely on on-demand search
+# rather than per-turn auto-inject. Default on; set
+# ASAKI_MEMORY_STARTUP_INJECT=0 to disable.
 #
 # Output: plain text injected into the system context.
 set -uo pipefail
@@ -64,7 +65,7 @@ if command -v curl >/dev/null 2>&1; then
 fi
 
 TOP_MEMORIES_SECTION=""
-if [ "${ASAKI_MEMORY_STARTUP_INJECT:-0}" = "1" ] && [ "$SOURCE" != "compact" ] && [ -n "${LIST_RESP:-}" ]; then
+if [ "${ASAKI_MEMORY_STARTUP_INJECT:-1}" = "1" ] && [ "$SOURCE" != "compact" ] && [ -n "${LIST_RESP:-}" ]; then
   TOP_K="${ASAKI_MEMORY_STARTUP_TOP_K:-6}"
   TOP_MEMORIES=$(echo "$LIST_RESP" | jq -r --argjson k "$TOP_K" '
     (.memories // [])
