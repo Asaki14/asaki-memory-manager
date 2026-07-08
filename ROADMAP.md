@@ -13,7 +13,9 @@
 - `POST /v1/memories/search` 支持可选 `min_score` 过滤；`asaki_memory_search`（Pi/MCP）支持可选 `debug` 参数展示 `score_details`。
 - entity 匹配识别裸相对路径（如 `src/services/memories.ts`），不再依赖前导 `/` 或连字符。
 
-## 下一步（按顺序）
+## 近期完成（原"下一步"三项，已清空）
+
+主动排的三项都做完了。剩下的都在"持续维护"（跟着 eval 走）和"需要证据再做"（先攒数据，别预先建机制）里，没有新的主动待办——下次动手前先看有没有新证据（gap 报告、误 merge 案例、review 队列堆积）再决定做什么。
 
 1. ~~云端抽取降级为 shadow-run 校准工具~~ — 已完成
    - `scripts/shadow-run-extraction.ts`（`npm run shadow-run:extraction -- <transcript.jsonl> --user <id> --project <id>`）：读取 Claude Code transcript，调 `/v1/memories/extract`（新增 `dry_run` 参数，见 `src/index.ts`）拿云端候选但不写库，再跟同窗口内 agent 直接 `asaki_memory_add` 的记忆做 `lexicalSimilarity` diff，只读输出 covered/gap 报告；`--create-reviews` 可选择把 gap 候选推进 review 队列（默认不推，只报告）。
@@ -24,9 +26,9 @@
    - `search` 事件（`src/services/memories.ts:223-233`）现在记录 `query`/`top_k`/`min_score`/`result_count`/`result_ids`/`score_details`。本地 `wrangler dev` + 直接查 D1 `memory_events` 表验证过字段真落地。
    - 未做："是否被 auto-inject 采用"——这个判断发生在客户端（Pi/hook 收到 search 结果后自己按 autoMinScore 过滤），服务端 search 事件那一刻并不知道。要记这个得让客户端回调一次，不是"加字段"这么便宜了，先不做，等真需要复盘 auto-inject 效果再评估。
 
-3. Review 工作流增强（不急，等队列真的堆积再做）
-   - 现状：`src/services/reviews.ts` 的 `resolveMemoryReview` 只支持单条 resolve；`listMemoryReviews` 不返回 potential duplicate / suggested action。
-   - 待办：review list 复用已有的 `bestUsableMatch`/`findLexicalMatch` 数据展示潜在重复项和建议动作；支持批量 approve/ignore。
+3. ~~Review 工作流增强~~ — 已完成（范围收窄）
+   - `POST /v1/memories/reviews/list` 新增可选 `include_suggestions`：为每条 pending review 复用 `findBestMatch`（原 `findActiveDuplicate` 拆出的共享逻辑）算一次 `potential_duplicate: { memory_id, content, action, reason }`，默认关闭不影响现有调用方。Pi/MCP 的 `asaki_memory_review_list` 同步暴露该参数并在输出行里展示。本地 `wrangler dev` 验证过：造一条跟已有记忆高度相似的候选，`include_suggestions=true` 时能正确带出 `potential_duplicate`；不传时字段不出现，行为不变。
+   - **没做批量 approve/ignore，主动砍掉**：这个项目里 review 的实际消费者是 agent（`/memory` 审计工作流），不是人工点 UI 复选框——agent 已经能在同一轮里对 `asaki_memory_review_resolve` 循环调用 N 次来达到"批量"效果，专门加一个 batch 端点是给不存在的 UI 交互模式建基础设施，跟"个人规模工具、不要造需求外的灵活性"的调性不符。
 
 ## 持续维护（非新投入，靠 eval 驱动）
 
