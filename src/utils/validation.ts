@@ -64,6 +64,9 @@ export function validateSearchMemories(value: unknown): { ok: true; data: Requir
   if (input.scope && !scopes.has(input.scope)) return { ok: false, error: 'scope must be global, project, or session.' };
   if (input.scope === 'project' && !input.project_id) return { ok: false, error: 'project_id is required when scope is project.' };
   if (input.scope === 'session' && !input.session_id) return { ok: false, error: 'session_id is required when scope is session.' };
+  if (input.min_score !== undefined && (typeof input.min_score !== 'number' || input.min_score < 0 || input.min_score > 1)) {
+    return { ok: false, error: 'min_score must be a number between 0 and 1.' };
+  }
 
   return {
     ok: true,
@@ -74,6 +77,7 @@ export function validateSearchMemories(value: unknown): { ok: true; data: Requir
       project_id: input.project_id ?? null,
       session_id: input.session_id ?? null,
       top_k: topK,
+      min_score: input.min_score,
     },
   };
 }

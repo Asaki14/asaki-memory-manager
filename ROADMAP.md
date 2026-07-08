@@ -12,9 +12,9 @@
 
 ## P0 — 先修一致性问题，再谈新功能
 
-1. ~~统一 auto-inject 的 score 阈值~~ — 已完成
+1. ~~统一 auto-inject 的 score 阈值 + search 接口加 min_score~~ — 已完成
    - 三处默认值（`integrations/pi/asaki-memory.ts`、`integrations/claude-code/user-prompt.sh`、`.env.example`）及 `README.md`/`AGENTS.md`/`integrations/claude-code/README.md` 文档已统一为 `npm run eval:search` 建议的 `auto_inject_min_score=0.67`。
-   - 剩余子任务（未做）：`POST /v1/memories/search`（`src/services/memories.ts`）目前不做任何 min_score 过滤，只有 auto-inject 侧在过滤。评估是否要在 search 接口也加一个可选 `min_score` 参数（eval 建议 `search_min_score=0.65`），而不是把过滤逻辑全部留在客户端。
+   - `POST /v1/memories/search`（`src/services/memories.ts`）新增可选 `min_score`（0-1），过滤发生在 merge 之后、`last_accessed_at` 更新之前，避免给被过滤掉的记忆刷访问时间；`min_score` 也记进 `search` 事件 payload。客户端（Pi/MCP 工具）暂未暴露该参数，先留作后端能力。
 
 2. ~~`score_details` 调试展示~~ — 已完成
    - `asaki_memory_search`（Pi `integrations/pi/asaki-memory.ts` 和 MCP `integrations/mcp/asaki-memory.ts`）新增可选 `debug` 参数，开启后每条结果附加 `[semantic=.. keyword=.. entity=.. metadata=.. source=..]`，默认关闭保持简洁。
