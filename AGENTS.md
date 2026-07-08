@@ -79,7 +79,7 @@ npm run deploy
 - Candidate processing should run deterministic duplicate checks before LLM decisions.
 - Run `npm run eval:candidates` after changing candidate dedupe thresholds or prompts.
 - Run `npm run eval:extraction` after changing the extraction prompt (`src/services/extraction.ts`); it hits a live Worker (defaults to production) since `env.AI.run()` needs a real Worker runtime. Add a new case to `test/fixtures/extraction-cases.json` whenever a production false positive/negative turns up.
-- Pi auto inject defaults to `ASAKI_MEMORY_AUTO_MIN_SCORE=0.50`; keep low-score memories out of injected context.
+- Pi auto inject defaults to `ASAKI_MEMORY_AUTO_MIN_SCORE=0.67` (calibrated via `npm run eval:search`); keep low-score memories out of injected context.
 - Keep changes small and consistent with existing style.
 - Run `npm run typecheck` after TypeScript edits.
 
