@@ -127,17 +127,10 @@ process.stdin.on("end", () => {
 });
 ')
 
-# Skip trivial/empty slices — not worth an LLM extraction call. Safe to consume the offset here:
-# losing a handful of characters of chit-chat is an acceptable, permanent no-op.
-if [ "${#TEXT}" -lt 60 ]; then
-  echo "$TOTAL" >"$STATE_FILE"
-  report_and_exit
-fi
-
 # Sensitive-content gate: never send private keys, bearer tokens, provider API keys, AWS access
-# keys, or key=value secret assignments off-machine. Consume the offset like the length gate
-# above — a slice containing a secret must never be retried, since leaving it queued would just
-# resend the same secret in every future (larger) delta until it scrolls out of the transcript.
+# keys, or key=value secret assignments off-machine. Consume the offset here — a slice containing
+# a secret must never be retried, since leaving it queued would just resend the same secret in
+# every future (larger) delta until it scrolls out of the transcript.
 # KEEP IN SYNC with SENSITIVE_RE_LIST in integrations/pi/asaki-memory.ts.
 SENSITIVE_PATTERN='-----BEGIN [A-Z ]*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b|\b(sk|sk-ant|sk-proj|ghp|gho|ghu|ghs|github_pat)_[A-Za-z0-9_=-]{16,}\b|\bAKIA[0-9A-Z]{16}\b|\b(api[_-]?key|token|secret|password|passwd|authorization)\b\s*[:=]\s*"?[^"'"'"' ]{8,}|set\s+-gx\s+[[:alnum:]_]*(KEY|TOKEN|SECRET|PASSWORD)[[:alnum:]_]*\s+[^$[:space:]][^[:space:]]{8,}'
 if echo "$TEXT" | grep -qiE "$SENSITIVE_PATTERN"; then
@@ -145,16 +138,16 @@ if echo "$TEXT" | grep -qiE "$SENSITIVE_PATTERN"; then
   report_and_exit
 fi
 
-# Necessary-but-not-sufficient content gate: only proceed if the delta contains at least one
-# durable-memory signal marker (preference/rule/decision/bug_fix/task_learning/workflow language).
-# This never blocks a call the length gate above would already have allowed through on its own —
-# it only removes calls for turns that are plausibly chit-chat/status updates with no signal at all.
+# Content gate: only proceed if the delta contains at least one durable-memory signal marker
+# (preference/rule/decision/bug_fix/task_learning/workflow language), regardless of length —
+# a short, decisive one-liner ("以后都用pnpm") is exactly the kind of turn worth catching, so
+# there is no separate minimum-length cutoff.
 # False negatives are expected and accepted; false positives just fall through to today's behavior.
 # KEEP IN SYNC with EXTRACT_SIGNAL_RE in integrations/pi/asaki-memory.ts.
 EXTRACT_SIGNAL_PATTERN='以后都|以后就|不要再|别再|记住|记得|规则是|统一用|统一使用|根因是|已验证|已修复|已确认|踩坑|决定用|决定是|改用|换成|约定是|复盘|经验是|remember|always|never|from now on|going forward|decided to|decision is|decision was|root cause is|root cause was|already fixed|now fixed|now verified|already verified|learned that|instead of|switch to|switched to|switching to|convention is|the rule is'
 if ! echo "$TEXT" | grep -qiE "$EXTRACT_SIGNAL_PATTERN"; then
-  # Deliberately does NOT advance STATE_FILE, unlike the length check above — this text might
-  # still be durable, just not phrased in a way the gate recognizes yet. Leave the offset where
+  # Deliberately does NOT advance STATE_FILE — this text might still be durable, just not
+  # phrased in a way the gate recognizes yet. Leave the offset where
   # it is so this slice folds into the next Stop event's (larger) delta instead of being silently
   # and permanently lost, mirroring the throttle's carry-forward behavior earlier in this script.
   report_and_exit
