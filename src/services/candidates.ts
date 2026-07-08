@@ -2,7 +2,7 @@ import type { Env, MemoryRow, SearchResult } from '../types';
 import { createMemory, deleteMemory, searchMemories, updateMemoryContent } from './memories';
 import { writeMemoryEvent } from './memoryEvents';
 
-import { bestUsableMatch, chooseDecision, heuristicDecision, lexicalSimilarity, mergeContent, type CandidateAction, type ProcessMemoryCandidateInput } from './candidateDecision';
+import { bestUsableMatch, chooseDecision, heuristicDecision, lexicalSimilarity, mergeContent, needsLlmDecision, type CandidateAction, type ProcessMemoryCandidateInput } from './candidateDecision';
 export type { CandidateAction, ProcessMemoryCandidateInput } from './candidateDecision';
 export { heuristicDecision, mergeContent, dedupeCandidateBatch, isAutoAddEligible, AUTO_ADD_MIN_IMPORTANCE } from './candidateDecision';
 
@@ -91,7 +91,8 @@ export async function processMemoryCandidate(env: Env, candidate: ProcessMemoryC
     top_k: 5,
   });
   const match = bestUsableMatch(candidate, [...similar, await findLexicalMatch(env, candidate)]);
-  const decision = chooseDecision(candidate, match, await llmDecision(env, candidate, match));
+  const llm = needsLlmDecision(candidate, match) ? await llmDecision(env, candidate, match) : null;
+  const decision = chooseDecision(candidate, match, llm);
 
   if (decision.action === 'ignore') {
     await writeMemoryEvent(env, {
