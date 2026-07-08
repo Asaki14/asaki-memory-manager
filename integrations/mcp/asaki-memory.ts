@@ -265,8 +265,9 @@ server.tool(
     const decision = Array.isArray(data.decisions) ? (data.decisions[0] as Record<string, any> | undefined) : undefined;
     const action = decision?.action || "ok";
     const memoryId = decision?.memory?.id || decision?.matched_memory?.id;
+    const reviewId = decision?.review?.id;
     const reason = decision?.reason ? `: ${decision.reason}` : "";
-    return { content: [{ type: "text" as const, text: `Asaki memory ${action}${memoryId ? ` id=${memoryId}` : ""}${reason}` }] };
+    return { content: [{ type: "text" as const, text: `Asaki memory ${action}${memoryId ? ` id=${memoryId}` : ""}${reviewId ? ` review_id=${reviewId}` : ""}${reason}` }] };
   },
 );
 
@@ -405,10 +406,10 @@ server.tool(
 
 server.tool(
   "asaki_memory_review_resolve",
-  "Resolve a pending Asaki memory review as add, merge, or ignore. Only call after explicit user approval.",
+  "Resolve a pending Asaki memory review as add, merge, update, delete, or ignore. update/delete/merge require memory_id (the existing memory to replace/delete/merge into). Only call after explicit user approval.",
   {
     id: z.string(),
-    action: z.enum(["add", "merge", "ignore"]),
+    action: z.enum(["add", "merge", "update", "delete", "ignore"]),
     memory_id: z.string().optional(),
     reason: z.string().optional(),
   },

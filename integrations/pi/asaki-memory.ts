@@ -767,12 +767,14 @@ Safety:
         const action = decision?.action || "ok";
         const memory = decision?.memory || decision?.matched_memory;
         const memoryId = memory?.id;
+        const reviewId = decision?.review?.id;
         const reason = decision?.reason ? `: ${decision.reason}` : "";
         const memoryLine = memory ? `\nMemory: ${formatMemoryLine(memory)}` : "";
+        const reviewLine = reviewId ? `\nReview: id=${reviewId} (unresolved contradiction/forget signal — use asaki_memory_review_resolve after confirming with the user)` : "";
 
         return {
-          content: [{ type: "text", text: `Asaki memory ${action}${memoryId ? ` id=${memoryId}` : ""}${reason}\nCandidate: ${formatMemoryLine(candidate)}${memoryLine}` }],
-          details: { action, memory_id: memoryId, user_id: config.userId, project_id: projectId, scope, candidate },
+          content: [{ type: "text", text: `Asaki memory ${action}${memoryId ? ` id=${memoryId}` : ""}${reason}\nCandidate: ${formatMemoryLine(candidate)}${memoryLine}${reviewLine}` }],
+          details: { action, memory_id: memoryId, review_id: reviewId, user_id: config.userId, project_id: projectId, scope, candidate },
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -953,16 +955,19 @@ Safety:
   pi.registerTool({
     name: "asaki_memory_review_resolve",
     label: "Asaki Memory Review Resolve",
-    description: "Resolve a pending Asaki memory review as add, merge, or ignore.",
+    description: "Resolve a pending Asaki memory review as add, merge, update, delete, or ignore.",
     promptSnippet: "Resolve a specific Asaki memory review after explicit user approval.",
     promptGuidelines: [
       "Only call asaki_memory_review_resolve after the user has explicitly approved the action.",
-      "Use action=merge only with a target memory_id.",
+      "Use action=merge/update/delete only with a target memory_id — merge folds the candidate into the existing memory, update replaces the existing memory's content with the candidate's, delete removes the existing memory (the candidate contradicted or asked to forget/retract it).",
     ],
     parameters: Type.Object({
       id: Type.String({ description: "Review id to resolve." }),
-      action: Type.Union([Type.Literal("add"), Type.Literal("merge"), Type.Literal("ignore")], { description: "Resolution action." }),
-      memory_id: Type.Optional(Type.String({ description: "Target memory id when action=merge." })),
+      action: Type.Union(
+        [Type.Literal("add"), Type.Literal("merge"), Type.Literal("update"), Type.Literal("delete"), Type.Literal("ignore")],
+        { description: "Resolution action." },
+      ),
+      memory_id: Type.Optional(Type.String({ description: "Target memory id. Required when action is merge, update, or delete." })),
       reason: Type.Optional(Type.String({ description: "Short resolution reason." })),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {

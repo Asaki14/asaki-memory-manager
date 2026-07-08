@@ -1,16 +1,17 @@
-import type { Env, MemoryRow, SearchResult } from '../types';
+import type { Env, MemoryReviewRow, MemoryRow, SearchResult } from '../types';
 import { createMemory, deleteMemory, searchMemories, updateMemoryContent } from './memories';
 import { writeMemoryEvent } from './memoryEvents';
 
-import { bestUsableMatch, chooseDecision, heuristicDecision, lexicalSimilarity, mergeContent, needsLlmDecision, type CandidateAction, type ProcessMemoryCandidateInput } from './candidateDecision';
+import { bestUsableMatch, chooseDecision, hasContradictionSignal, hasForgetSignal, heuristicDecision, lexicalSimilarity, mergeContent, needsLlmDecision, type CandidateAction, type ProcessMemoryCandidateInput } from './candidateDecision';
 export type { CandidateAction, ProcessMemoryCandidateInput } from './candidateDecision';
 export { heuristicDecision, mergeContent, dedupeCandidateBatch, isAutoAddEligible, AUTO_ADD_MIN_IMPORTANCE } from './candidateDecision';
 
 export interface CandidateDecision {
-  action: CandidateAction;
+  action: CandidateAction | 'review';
   candidate: ProcessMemoryCandidateInput;
   memory?: MemoryRow;
   matched_memory?: SearchResult;
+  review?: MemoryReviewRow;
   reason: string;
 }
 
@@ -24,12 +25,21 @@ async function requestDedupDecision(env: Env, candidate: ProcessMemoryCandidateI
       { role: 'user', content: JSON.stringify({ candidate: candidate.content, existing_memory: match.content }) },
     ],
   });
-  const raw = typeof response === 'string' ? response : (response as any)?.response ?? (response as any)?.result?.response ?? '';
-  const parsed = JSON.parse(String(raw).match(/\{[\s\S]*\}/)?.[0] ?? '{}') as { action?: CandidateAction; reason?: string };
+  // Some models (e.g. reasoning/"thinking" variants) return an already-parsed object in
+  // `.response` instead of a JSON string — only fall back to string-scraping when needed.
+  // KEEP IN SYNC with the equivalent handling in extraction.ts's extractMemoryCandidates().
+  const rawResponse = (response as any)?.response ?? (response as any)?.result?.response ?? response;
+  let parsed: { action?: CandidateAction; reason?: string };
+  if (rawResponse && typeof rawResponse === 'object' && 'action' in rawResponse) {
+    parsed = rawResponse as { action?: CandidateAction; reason?: string };
+  } else {
+    const rawText = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse ?? '');
+    parsed = JSON.parse(rawText.match(/\{[\s\S]*\}/)?.[0] ?? '{}') as { action?: CandidateAction; reason?: string };
+  }
   if (parsed.action === 'add' || parsed.action === 'merge' || parsed.action === 'update' || parsed.action === 'delete' || parsed.action === 'ignore') {
     return { action: parsed.action, reason: parsed.reason ?? 'LLM decision.' };
   }
-  return { invalidRaw: String(raw) };
+  return { invalidRaw: typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse ?? '') };
 }
 
 // The small model occasionally returns a response with no parseable/valid "action" — silently
@@ -91,7 +101,27 @@ export async function processMemoryCandidate(env: Env, candidate: ProcessMemoryC
     top_k: 5,
   });
   const match = bestUsableMatch(candidate, [...similar, await findLexicalMatch(env, candidate)]);
-  const llm = needsLlmDecision(candidate, match) ? await llmDecision(env, candidate, match) : null;
+  const requiresLlm = needsLlmDecision(candidate, match);
+  const llm = requiresLlm ? await llmDecision(env, candidate, match) : null;
+
+  // needsLlmDecision() routes contradiction/forget-signal candidates to the LLM specifically
+  // because the deterministic heuristic can't tell "update"/"delete" apart from "add" for them
+  // (heuristicDecision's default branch is always "add"). If the LLM call fails for one of
+  // these, don't silently fall back to that "add" — it would leave a stale, contradicting
+  // memory sitting next to the new one with no signal about which is current. Queue for review
+  // instead of guessing.
+  if (requiresLlm && !llm && match && (hasContradictionSignal(candidate.content) || hasForgetSignal(candidate.content))) {
+    const { createMemoryReviews } = await import('./reviews');
+    const [review] = await createMemoryReviews(env, [candidate]);
+    return {
+      action: 'review',
+      candidate,
+      matched_memory: match,
+      review,
+      reason: 'LLM dedup unavailable for a contradiction/forget signal; queued for review instead of guessing.',
+    };
+  }
+
   const decision = chooseDecision(candidate, match, llm);
 
   if (decision.action === 'ignore') {
