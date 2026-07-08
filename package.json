@@ -10,6 +10,7 @@
     "eval:search": "node --experimental-strip-types scripts/eval-search-scoring.ts",
     "eval:extraction": "bash scripts/eval-extraction.sh",
     "eval:extraction-guardrails": "node --experimental-strip-types scripts/eval-extraction-guardrails.ts",
+    "eval:classifier": "bash scripts/eval-classifier.sh",
     "shadow-run:extraction": "node --experimental-strip-types scripts/shadow-run-extraction.ts",
     "backfill:index": "node --experimental-strip-types scripts/backfill-index.ts",
     "prune:stale": "node --experimental-strip-types scripts/prune-stale.ts",
