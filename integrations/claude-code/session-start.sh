@@ -8,6 +8,12 @@
 # intentionally mirrors the Pi extension's buildSessionBanner(): numbers
 # only, the agent decides for itself when to actually search/read memories.
 #
+# Optional: when ASAKI_MEMORY_STARTUP_INJECT=1, also inject the top
+# ASAKI_MEMORY_STARTUP_TOP_K (default 6) highest-importance active memories
+# once at session start (startup/resume, not compact) — a one-shot seed so
+# the agent doesn't need to search for well-known context immediately. Later
+# turns still rely on on-demand search rather than per-turn auto-inject.
+#
 # Output: plain text injected into the system context.
 set -uo pipefail
 
@@ -57,11 +63,30 @@ if command -v curl >/dev/null 2>&1; then
   [ -n "$REVIEW_RESP" ] && PENDING_REVIEWS=$(echo "$REVIEW_RESP" | jq '(.reviews // []) | length' 2>/dev/null || echo "?")
 fi
 
+TOP_MEMORIES_SECTION=""
+if [ "${ASAKI_MEMORY_STARTUP_INJECT:-0}" = "1" ] && [ "$SOURCE" != "compact" ] && [ -n "${LIST_RESP:-}" ]; then
+  TOP_K="${ASAKI_MEMORY_STARTUP_TOP_K:-6}"
+  TOP_MEMORIES=$(echo "$LIST_RESP" | jq -r --argjson k "$TOP_K" '
+    (.memories // [])
+    | sort_by(-(.importance // 0))
+    | .[0:$k]
+    | map("- [\(.scope)/\(.kind), importance=\(.importance)] \(.content)")
+    | .[]
+  ' 2>/dev/null)
+  if [ -n "$TOP_MEMORIES" ]; then
+    TOP_MEMORIES_SECTION="
+### Top ${TOP_K} memories (highest importance, one-shot seed)
+
+${TOP_MEMORIES}
+"
+  fi
+fi
+
 cat <<BANNER
 ## Asaki Memory Active
 
 \`user=${ASAKI_USER} | project=${ASAKI_PROJECT} | memories=${MEMORY_COUNT} | pendingReviews=${PENDING_REVIEWS} | autoExtract=${AUTO_EXTRACT_STATE}\`
-
+${TOP_MEMORIES_SECTION}
 IMPORTANT: In your FIRST response, display this exact status line as your opening line:
 \`\`\`
 Asaki Memory Active | user=${ASAKI_USER} | project=${ASAKI_PROJECT} | memories=${MEMORY_COUNT} | pendingReviews=${PENDING_REVIEWS} | autoExtract=${AUTO_EXTRACT_STATE}

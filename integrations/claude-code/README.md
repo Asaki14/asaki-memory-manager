@@ -41,7 +41,10 @@ committed). Set them once in `~/.claude/settings.json`:
   `buildSessionBanner()`: a content-bearing digest would re-inject its full
   text on every `compact` within the same session and pile up in the
   transcript, so the agent decides for itself when to actually search/read
-  memories instead.
+  memories instead. Optionally, when `ASAKI_MEMORY_STARTUP_INJECT=1` (default
+  off), it also seeds the banner once at startup/resume (not on `compact`)
+  with the top `ASAKI_MEMORY_STARTUP_TOP_K` (default 6) highest-importance
+  active memories — a one-shot list, not a per-turn injection.
 - `user-prompt.sh` — UserPromptSubmit hook. Unconditionally injects one fixed
   instruction every turn: the agent itself reads user intent and decides
   whether `asaki_memory_search` is needed, and if so picks its own
