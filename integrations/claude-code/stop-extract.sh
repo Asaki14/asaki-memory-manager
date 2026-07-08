@@ -85,10 +85,13 @@ report_and_exit() {
         FLAG=$(echo "$CLASSIFIER_JSON" | jq -r '.flag // false')
         if [ "$FLAG" = "true" ]; then
           SUMMARY=$(echo "$CLASSIFIER_JSON" | jq -r '.summary // ""')
-          jq -cn --arg reason "Asaki memory: possible durable memory detected" --arg summary "$SUMMARY" '
+          # `reason` is the user-visible hook log line (shown after the turn, independent of
+          # what the model sees) — put the classifier's actual verdict there so the summary is
+          # visible even before the forced continuation turn runs.
+          jq -cn --arg summary "$SUMMARY" '
             {
               decision: "block",
-              reason: $reason,
+              reason: ("🧠 Asaki classifier flagged: " + $summary),
               hookSpecificOutput: {
                 hookEventName: "Stop",
                 additionalContext: ("Classifier flagged this candidate: \"" + $summary + "\". Check it against the 6-criteria checklist (durable / actually happened / not noise / not duplicate — asaki_memory_search first / self-contained / right scope) and call asaki_memory_add if it qualifies. If not, say why briefly and move on.")
