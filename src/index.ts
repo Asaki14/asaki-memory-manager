@@ -2,9 +2,9 @@ import { Hono, type Context } from 'hono';
 import type { Env } from './types';
 import { dedupeCandidateBatch, isAutoAddEligible, processMemoryCandidates } from './services/candidates';
 import { extractMemoryCandidates } from './services/extraction';
-import { createMemory, deleteMemory, getMemory, listMemories, searchMemories, updateMemory } from './services/memories';
+import { backfillPendingIndex, createMemory, deleteMemory, getMemory, listMemories, searchMemories, updateMemory } from './services/memories';
 import { createMemoryReviews, listMemoryReviews, resolveMemoryReview } from './services/reviews';
-import { validateCreateMemory, validateCreateMemoryReviews, validateExtractMemories, validateListMemories, validateListMemoryReviews, validateMemoryIdInput, validateProcessCandidates, validateResolveMemoryReview, validateSearchMemories, validateUpdateMemory } from './utils/validation';
+import { validateBackfillIndex, validateCreateMemory, validateCreateMemoryReviews, validateExtractMemories, validateListMemories, validateListMemoryReviews, validateMemoryIdInput, validateProcessCandidates, validateResolveMemoryReview, validateSearchMemories, validateUpdateMemory } from './utils/validation';
 
 type Bindings = Env;
 
@@ -121,6 +121,17 @@ app.post('/v1/memories/list', async (c) => {
 
   const memories = await listMemories(c.env, validation.data);
   return c.json({ memories });
+});
+
+app.post('/v1/memories/backfill-index', async (c) => {
+  const body = await readJson(c);
+  if (!body.ok) return body.response;
+
+  const validation = validateBackfillIndex(body.body);
+  if (!validation.ok) return c.json({ error: validation.error }, 400);
+
+  const result = await backfillPendingIndex(c.env, validation.data.limit);
+  return c.json(result);
 });
 
 app.post('/v1/memories/reviews', async (c) => {

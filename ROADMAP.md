@@ -15,21 +15,16 @@
 
 ## 下一步（按优先级，代码审查发现的真缺陷/清理项，非猜测）
 
-1. Vectorize 索引失败无重试/backfill（真缺陷，优先级最高）
-   - `src/services/memories.ts:21-41` `upsertVector()`：embedding 生成失败或 upsert 失败时，`index_status` 落 `pending`/`failed` 后没有任何代码重试。AGENTS.md 写"Vectorize is a **recoverable** index"，但全仓库搜不到 reindex/backfill 逻辑——`vectorize_failed` 事件写进 `memory_events` 后没人读。
-   - 影响：这条记忆此后只能靠 `fallbackSearch` 的关键词/entity 命中才捞得到（`memories.ts:171-187`），换个说法问就永久搜不到语义相关结果，用户毫无感知。
-   - 待办：加一个手动触发的 backfill 脚本（`scripts/` 下，类似 `shadow-run-extraction.ts` 的风格：读 `index_status IN ('pending','failed')` 的记忆，重新生成 embedding + upsert，成功则更新 `index_status='indexed'`）。先不做成 cron/自动重试——个人规模下手动跑一次就能清空积压，不需要常驻机制。
-
-2. `expires_at` 字段没有被任何查询读取——需要拍板方向
+1. `expires_at` 字段没有被任何查询读取——需要拍板方向
    - 全仓库 grep：`expires_at` 只在写入/更新路径出现（`memories.ts:62,343`），search/list/fallbackSearch 没有一处 `WHERE expires_at ...`。设了过期时间的记忆永远不会真的过期。
    - 两个方向都行，选一个别留着装饰性字段：(a) 补上过滤（list/search 默认排除已过期，`status`可选`expired`地展示）；(b) 如果实际没人用这个字段，直接删掉（列 + migration + 相关类型），别留死字段。
    - 待办：先看有没有人在用 `expires_at` 建过记忆（查 D1 `expires_at IS NOT NULL` 的行数），有就选 (a)，没有就选 (b)。
 
-3. ~~`projects` / `memory_sources` / `api_keys` 三张死表~~ — 已完成
+2. ~~`projects` / `memory_sources` / `api_keys` 三张死表~~ — 已完成
    - `migrations/0003_drop_unused_tables.sql`：`DROP TABLE IF EXISTS` 三张表（这三张表本身没有专属索引需要清理）。本地 `db:migrate:local` 跑过，`sqlite_master` 确认三表已删、`memories`/`memory_events`/`memory_reviews` 还在；本地 `wrangler dev` 跑过一遍 create/delete 回归，行为不受影响。
    - 已推到远程：`npm run db:migrate:remote` 跑过，生产 D1 `sqlite_master` 确认三表已删。
 
-4. ~~README "team agents" 措辞跟实际鉴权模型不符~~ — 已解决（改定位而不是改措辞）
+3. ~~README "team agents" 措辞跟实际鉴权模型不符~~ — 已解决（改定位而不是改措辞）
    - 项目定位已明确改为个人单用户工具，不再服务团队/多用户场景，`README.md`/`AGENTS.md`/`package.json` 的描述已同步去掉"team"相关措辞。鉴权模型（单一共享 `ADMIN_API_KEY`）跟"个人单用户"定位天然一致，不再需要解释信任边界给团队用户。
 
 ## 近期完成（已验证落地）
@@ -46,6 +41,12 @@
 3. ~~Review 工作流增强~~ — 已完成（范围收窄）
    - `POST /v1/memories/reviews/list` 新增可选 `include_suggestions`：为每条 pending review 复用 `findBestMatch`（原 `findActiveDuplicate` 拆出的共享逻辑）算一次 `potential_duplicate: { memory_id, content, action, reason }`，默认关闭不影响现有调用方。Pi/MCP 的 `asaki_memory_review_list` 同步暴露该参数并在输出行里展示。本地 `wrangler dev` 验证过：造一条跟已有记忆高度相似的候选，`include_suggestions=true` 时能正确带出 `potential_duplicate`；不传时字段不出现，行为不变。
    - **没做批量 approve/ignore，主动砍掉**：这个项目里 review 的实际消费者是 agent（`/memory` 审计工作流），不是人工点 UI 复选框——agent 已经能在同一轮里对 `asaki_memory_review_resolve` 循环调用 N 次来达到"批量"效果，专门加一个 batch 端点是给不存在的 UI 交互模式建基础设施，跟"个人规模工具、不要造需求外的灵活性"的调性不符。
+
+4. ~~Vectorize 索引失败无重试/backfill~~ — 已完成
+   - 新增 `POST /v1/memories/backfill-index`（`src/services/memories.ts` 的 `backfillPendingIndex()`，`upsertVector()` 同步导出复用）：查 `index_status IN ('pending','failed')` 的 active 记忆（默认 limit 50，上限 500），逐条重新生成 embedding + upsert，成功则落 `index_status='indexed'`，返回 `{ checked, indexed, remaining, remaining_ids }`。
+   - `scripts/backfill-index.ts`（`npm run backfill:index -- [--limit n] [--max-rounds n]`）：跟 `shadow-run-extraction.ts` 一样走 HTTP 打已部署的 Worker（脚本本身摸不到 D1/Vectorize/AI binding），循环调用直到队列清空或到 `--max-rounds`。
+   - 本地 `wrangler dev` 验证过：endpoint 正确捞出 pending 记忆、脚本正确分轮调用并汇总 checked/indexed 计数、`remaining_ids` 透传正确；受限于本地 dev 没有真实 Workers AI 凭证，`indexed` 计数在本地恒为 0（预期内——生产上跑 `npm run backfill:index` 才会真的重新生成 embedding），逻辑本身（查询条件、状态回写、分页）已核实无误。
+   - 仍是手动触发，不做 cron/自动重试——跟 roadmap 既定方向一致。
 
 ## 持续维护（非新投入，靠 eval 驱动）
 

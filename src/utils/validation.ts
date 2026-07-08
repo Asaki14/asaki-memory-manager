@@ -252,6 +252,13 @@ export function validateListMemoryReviews(value: unknown): { ok: true; data: { u
   };
 }
 
+export function validateBackfillIndex(value: unknown): { ok: true; data: { limit: number } } | { ok: false; error: string } {
+  const input = (value && typeof value === 'object' ? value : {}) as { limit?: unknown };
+  const limit = input.limit == null ? 50 : input.limit;
+  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 500) return { ok: false, error: 'limit must be an integer between 1 and 500.' };
+  return { ok: true, data: { limit } };
+}
+
 export function validateResolveMemoryReview(value: unknown): { ok: true; data: { user_id: string; action: 'add' | 'merge' | 'ignore'; memory_id?: string | null; reason?: string | null } } | { ok: false; error: string } {
   if (!value || typeof value !== 'object') return { ok: false, error: 'Body must be a JSON object.' };
   const input = value as { user_id?: unknown; action?: unknown; memory_id?: unknown; reason?: unknown };

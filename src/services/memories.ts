@@ -18,7 +18,7 @@ function metadataFor(memory: Pick<MemoryRow, 'id' | 'user_id' | 'scope' | 'proje
   };
 }
 
-async function upsertVector(env: Env, memory: MemoryRow, embedding: number[] | null): Promise<'indexed' | 'pending' | 'failed'> {
+export async function upsertVector(env: Env, memory: MemoryRow, embedding: number[] | null): Promise<'indexed' | 'pending' | 'failed'> {
   if (!embedding || !env.VECTORIZE) return 'pending';
   try {
     await (env.VECTORIZE as any).upsert([
@@ -396,6 +396,31 @@ export async function updateMemory(env: Env, id: string, input: UpdateMemoryInpu
   });
 
   return updated;
+}
+
+export async function backfillPendingIndex(env: Env, limit: number): Promise<{ checked: number; indexed: number; remaining: number; remaining_ids: string[] }> {
+  const result = await env.DB.prepare(
+    `SELECT * FROM memories WHERE status = 'active' AND index_status IN ('pending', 'failed') ORDER BY created_at ASC LIMIT ?1`
+  )
+    .bind(limit)
+    .all<MemoryRow>();
+  const rows = result.results ?? [];
+
+  let indexed = 0;
+  const remainingIds: string[] = [];
+  for (const row of rows) {
+    const embedding = await generateEmbedding(env, row.content);
+    const indexStatus = await upsertVector(env, row, embedding);
+    if (indexStatus !== row.index_status) {
+      await env.DB.prepare('UPDATE memories SET index_status = ?1, updated_at = ?2 WHERE id = ?3')
+        .bind(indexStatus, nowIso(), row.id)
+        .run();
+    }
+    if (indexStatus === 'indexed') indexed++;
+    else remainingIds.push(row.id);
+  }
+
+  return { checked: rows.length, indexed, remaining: remainingIds.length, remaining_ids: remainingIds };
 }
 
 export async function deleteMemory(env: Env, id: string, userId: string): Promise<MemoryRow | null> {
