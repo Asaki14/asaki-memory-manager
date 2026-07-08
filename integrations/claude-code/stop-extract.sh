@@ -134,6 +134,17 @@ if [ "${#TEXT}" -lt 60 ]; then
   report_and_exit
 fi
 
+# Sensitive-content gate: never send private keys, bearer tokens, provider API keys, AWS access
+# keys, or key=value secret assignments off-machine. Consume the offset like the length gate
+# above — a slice containing a secret must never be retried, since leaving it queued would just
+# resend the same secret in every future (larger) delta until it scrolls out of the transcript.
+# KEEP IN SYNC with SENSITIVE_RE_LIST in integrations/pi/asaki-memory.ts.
+SENSITIVE_PATTERN='-----BEGIN [A-Z ]*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b|\b(sk|sk-ant|sk-proj|ghp|gho|ghu|ghs|github_pat)_[A-Za-z0-9_=-]{16,}\b|\bAKIA[0-9A-Z]{16}\b|\b(api[_-]?key|token|secret|password|passwd|authorization)\b\s*[:=]\s*"?[^"'"'"' ]{8,}|set\s+-gx\s+[[:alnum:]_]*(KEY|TOKEN|SECRET|PASSWORD)[[:alnum:]_]*\s+[^$[:space:]][^[:space:]]{8,}'
+if echo "$TEXT" | grep -qiE "$SENSITIVE_PATTERN"; then
+  echo "$TOTAL" >"$STATE_FILE"
+  report_and_exit
+fi
+
 # Necessary-but-not-sufficient content gate: only proceed if the delta contains at least one
 # durable-memory signal marker (preference/rule/decision/bug_fix/task_learning/workflow language).
 # This never blocks a call the length gate above would already have allowed through on its own —

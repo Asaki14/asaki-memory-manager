@@ -41,10 +41,10 @@ committed). Set them once in `~/.claude/settings.json`:
   `buildSessionBanner()`: a content-bearing digest would re-inject its full
   text on every `compact` within the same session and pile up in the
   transcript, so the agent decides for itself when to actually search/read
-  memories instead. Optionally, when `ASAKI_MEMORY_STARTUP_INJECT=1` (default
-  off), it also seeds the banner once at startup/resume (not on `compact`)
-  with the top `ASAKI_MEMORY_STARTUP_TOP_K` (default 6) highest-importance
-  active memories — a one-shot list, not a per-turn injection.
+  memories instead. It also seeds the banner once at startup/resume (not on
+  `compact`) with the top `ASAKI_MEMORY_STARTUP_TOP_K` (default 6)
+  highest-importance active memories — a one-shot list, not a per-turn
+  injection. Default on; set `ASAKI_MEMORY_STARTUP_INJECT=0` to disable.
 - `user-prompt.sh` — UserPromptSubmit hook. Unconditionally injects one fixed
   instruction every turn: the agent itself reads user intent and decides
   whether `asaki_memory_search` is needed, and if so picks its own
@@ -66,7 +66,10 @@ committed). Set them once in `~/.claude/settings.json`:
   `/v1/memories/extract` for server-side LLM-based background extraction,
   throttled to at most once per `ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS`
   (default 300) — a throttled turn's text is not dropped, it's carried into
-  the next Stop event's (larger) increment. Extracted candidates are capped at
+  the next Stop event's (larger) increment. A delta matching a private-key/
+  bearer-token/API-key/AWS-key/secret-assignment pattern is never sent (offset
+  is consumed instead, matching the Pi extension's `containsSensitiveText()`
+  gate — see `SENSITIVE_RE_LIST` in `../pi/asaki-memory.ts`). Extracted candidates are capped at
   2 per call; within that, project-scope candidates with importance ≥ 0.6 are
   auto-added (same dedup pipeline as `asaki_memory_add`), and everything else
   (global scope, or importance < 0.6) is queued to `/v1/memories/reviews`

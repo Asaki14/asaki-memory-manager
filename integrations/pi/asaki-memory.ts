@@ -72,7 +72,7 @@ function memoryConfig() {
     defaultScope: normalizeScope(process.env.ASAKI_MEMORY_DEFAULT_SCOPE || stringConfig(fileConfig, "defaultScope", "default_scope")) || DEFAULT_SCOPE,
     autoMinScore: numberConfig(process.env.ASAKI_MEMORY_AUTO_MIN_SCORE, numberConfig(fileConfig.autoMinScore ?? fileConfig.auto_min_score, DEFAULT_AUTO_MIN_SCORE)),
     autoExtract: envFlagEnabledConfig(process.env.ASAKI_MEMORY_AUTO_EXTRACT ?? fileConfig.autoExtract ?? fileConfig.auto_extract, false),
-    startupInject: envFlagEnabledConfig(process.env.ASAKI_MEMORY_STARTUP_INJECT ?? fileConfig.startupInject ?? fileConfig.startup_inject, false),
+    startupInject: envFlagEnabledConfig(process.env.ASAKI_MEMORY_STARTUP_INJECT ?? fileConfig.startupInject ?? fileConfig.startup_inject, true),
     startupTopK: numberConfig(process.env.ASAKI_MEMORY_STARTUP_TOP_K, numberConfig(fileConfig.startupTopK ?? fileConfig.startup_top_k, DEFAULT_STARTUP_TOP_K)),
     extractMinIntervalMs:
       numberConfig(process.env.ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS, numberConfig(fileConfig.extractMinIntervalSeconds ?? fileConfig.extract_min_interval_seconds, DEFAULT_EXTRACT_MIN_INTERVAL_SECONDS)) * 1000,
