@@ -8,12 +8,14 @@
 # intentionally mirrors the Pi extension's buildSessionBanner(): numbers
 # only, the agent decides for itself when to actually search/read memories.
 #
-# Also injects the top ASAKI_MEMORY_STARTUP_TOP_K (default 6)
-# highest-importance active memories once at session start (startup/resume,
-# not compact) — a one-shot seed so the agent doesn't need to search for
-# well-known context immediately. Later turns still rely on on-demand search
-# rather than per-turn auto-inject. Default on; set
-# ASAKI_MEMORY_STARTUP_INJECT=0 to disable.
+# Also injects the top ASAKI_MEMORY_STARTUP_TOP_K (default 6) highest-
+# importance active memories from each of the global and project scopes
+# once at session start (startup/resume, not compact) — a one-shot seed so
+# the agent doesn't need to search for well-known context immediately.
+# Scopes are seeded independently (not pooled-then-sorted) so a scope with
+# many high-importance memories can't crowd the other one out entirely.
+# Later turns still rely on on-demand search rather than per-turn
+# auto-inject. Default on; set ASAKI_MEMORY_STARTUP_INJECT=0 to disable.
 #
 # Output: plain text injected into the system context.
 set -uo pipefail
@@ -65,18 +67,26 @@ if command -v curl >/dev/null 2>&1; then
 fi
 
 TOP_MEMORIES_SECTION=""
-if [ "${ASAKI_MEMORY_STARTUP_INJECT:-1}" = "1" ] && [ "$SOURCE" != "compact" ] && [ -n "${LIST_RESP:-}" ]; then
+if [ "${ASAKI_MEMORY_STARTUP_INJECT:-1}" = "1" ] && [ "$SOURCE" != "compact" ]; then
   TOP_K="${ASAKI_MEMORY_STARTUP_TOP_K:-6}"
-  TOP_MEMORIES=$(echo "$LIST_RESP" | jq -r --argjson k "$TOP_K" '
-    (.memories // [])
-    | sort_by(-(.importance // 0))
-    | .[0:$k]
-    | map("- [\(.scope)/\(.kind), importance=\(.importance)] \(.content)")
-    | .[]
-  ' 2>/dev/null)
+
+  GLOBAL_RESP=$(curl -sf --max-time 4 -X POST "${ASAKI_BASE}/v1/memories/list" \
+    -H "Authorization: Bearer ${ASAKI_MEMORY_API_KEY}" \
+    -H "Content-Type: application/json" \
+    -d "{\"user_id\":\"${ASAKI_USER}\",\"scope\":\"global\",\"status\":\"active\",\"limit\":100}" 2>/dev/null || echo "")
+  PROJECT_RESP=$(curl -sf --max-time 4 -X POST "${ASAKI_BASE}/v1/memories/list" \
+    -H "Authorization: Bearer ${ASAKI_MEMORY_API_KEY}" \
+    -H "Content-Type: application/json" \
+    -d "{\"user_id\":\"${ASAKI_USER}\",\"scope\":\"project\",\"project_id\":\"${ASAKI_PROJECT}\",\"status\":\"active\",\"limit\":100}" 2>/dev/null || echo "")
+
+  TOP_FILTER='(.memories // []) | sort_by(-(.importance // 0)) | .[0:$k] | map("- [\(.scope)/\(.kind), importance=\(.importance)] \(.content)") | .[]'
+  TOP_GLOBAL=$([ -n "$GLOBAL_RESP" ] && echo "$GLOBAL_RESP" | jq -r --argjson k "$TOP_K" "$TOP_FILTER" 2>/dev/null || echo "")
+  TOP_PROJECT=$([ -n "$PROJECT_RESP" ] && echo "$PROJECT_RESP" | jq -r --argjson k "$TOP_K" "$TOP_FILTER" 2>/dev/null || echo "")
+  TOP_MEMORIES=$(printf '%s\n%s' "$TOP_GLOBAL" "$TOP_PROJECT" | sed '/^$/d')
+
   if [ -n "$TOP_MEMORIES" ]; then
     TOP_MEMORIES_SECTION="
-### Top ${TOP_K} memories (highest importance, one-shot seed)
+### Top ${TOP_K} global + top ${TOP_K} project memories (highest importance, one-shot seed)
 
 ${TOP_MEMORIES}
 "

@@ -346,11 +346,22 @@ async function buildSessionBanner(ctx: unknown, signal?: AbortSignal): Promise<s
     const header = `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=${memoryCount} | pendingReviews=${pendingReviews} | autoExtract=${config.autoExtract ? "on" : "off"}`;
 
     if (!config.startupInject || memories.length === 0) return header;
-    const topMemories = [...memories]
-      .sort((a, b) => (typeof b.importance === "number" ? b.importance : 0) - (typeof a.importance === "number" ? a.importance : 0))
-      .slice(0, config.startupTopK)
-      .map((item, index) => formatMemoryLine(item, index));
-    return `${header}\n\nTop ${config.startupTopK} memories (highest importance, one-shot seed):\n${topMemories.join("\n")}`;
+
+    const sortByImportanceDesc = (items: Record<string, unknown>[]) =>
+      [...items].sort((a, b) => (typeof b.importance === "number" ? b.importance : 0) - (typeof a.importance === "number" ? a.importance : 0));
+
+    const [globalData, projectData] = await Promise.all([
+      memoryRequest("/v1/memories/list", { user_id: config.userId, scope: "global", status: "active", limit: 100 }, signal),
+      memoryRequest("/v1/memories/list", { user_id: config.userId, scope: "project", project_id: projectId, status: "active", limit: 100 }, signal),
+    ]);
+    const globalMemories = Array.isArray(globalData?.memories) ? (globalData.memories as Record<string, unknown>[]) : [];
+    const projectMemories = Array.isArray(projectData?.memories) ? (projectData.memories as Record<string, unknown>[]) : [];
+    const topMemories = [
+      ...sortByImportanceDesc(globalMemories).slice(0, config.startupTopK),
+      ...sortByImportanceDesc(projectMemories).slice(0, config.startupTopK),
+    ].map((item, index) => formatMemoryLine(item, index));
+    if (topMemories.length === 0) return header;
+    return `${header}\n\nTop ${config.startupTopK} global + top ${config.startupTopK} project memories (highest importance, one-shot seed):\n${topMemories.join("\n")}`;
   } catch {
     return `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=? | pendingReviews=? | autoExtract=${config.autoExtract ? "on" : "off"}`;
   }
