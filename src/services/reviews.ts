@@ -8,16 +8,11 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-// Catches the gap a review-queue-only dedup (findSimilarPendingReview below) can't: a candidate
-// that duplicates a memory that's already `active` (not merely another pending review). Reuses
-// the exact same search + deterministic-match machinery processMemoryCandidate() uses for the
-// auto-add bucket (searchMemories + findLexicalMatch + bestUsableMatch + heuristicDecision), but
-// deliberately stops at the deterministic heuristic — no LLM dedup call here. Only preempts the
-// review on a heuristic "ignore" (genuine duplicate, nothing new); "merge"/"update"/"delete"
-// verdicts still require human judgment via the normal review path, since auto-mutating an active
-// memory from an unvetted (global/low-importance) candidate would defeat the point of routing it
-// to review in the first place.
-async function findActiveDuplicate(env: Env, candidate: ProcessMemoryCandidateInput) {
+// Shared by findActiveDuplicate (creation-time preemption) and listMemoryReviews'
+// include_suggestions (display-time hint): the same search + deterministic-match machinery
+// processMemoryCandidate() uses for the auto-add bucket (searchMemories + findLexicalMatch +
+// bestUsableMatch), stopping at the deterministic heuristic — no LLM dedup call here.
+async function findBestMatch(env: Env, candidate: ProcessMemoryCandidateInput) {
   const similar = await searchMemories(env, {
     query: candidate.content,
     user_id: candidate.user_id,
@@ -26,7 +21,17 @@ async function findActiveDuplicate(env: Env, candidate: ProcessMemoryCandidateIn
     session_id: candidate.session_id ?? null,
     top_k: 5,
   });
-  const match = bestUsableMatch(candidate, [...similar, await findLexicalMatch(env, candidate)]);
+  return bestUsableMatch(candidate, [...similar, await findLexicalMatch(env, candidate)]);
+}
+
+// Catches the gap a review-queue-only dedup (findSimilarPendingReview below) can't: a candidate
+// that duplicates a memory that's already `active` (not merely another pending review). Only
+// preempts the review on a heuristic "ignore" (genuine duplicate, nothing new); "merge"/"update"/
+// "delete" verdicts still require human judgment via the normal review path, since auto-mutating
+// an active memory from an unvetted (global/low-importance) candidate would defeat the point of
+// routing it to review in the first place.
+async function findActiveDuplicate(env: Env, candidate: ProcessMemoryCandidateInput) {
+  const match = await findBestMatch(env, candidate);
   if (!match) return undefined;
   return heuristicDecision(candidate, match).action === 'ignore' ? match : undefined;
 }
@@ -175,7 +180,7 @@ export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCan
   return reviews;
 }
 
-export async function listMemoryReviews(env: Env, input: { user_id: string; status: 'pending' | 'resolved' | 'all'; project_id?: string | null; session_id?: string | null; source?: string | null; limit: number; offset: number }): Promise<MemoryReviewRow[]> {
+export async function listMemoryReviews(env: Env, input: { user_id: string; status: 'pending' | 'resolved' | 'all'; project_id?: string | null; session_id?: string | null; source?: string | null; limit: number; offset: number; include_suggestions?: boolean }): Promise<MemoryReviewRow[]> {
   const clauses = ['user_id = ?'];
   const bindings: unknown[] = [input.user_id];
 
@@ -205,7 +210,19 @@ export async function listMemoryReviews(env: Env, input: { user_id: string; stat
     .bind(...bindings, input.limit, input.offset)
     .all<MemoryReviewRecord>();
 
-  return (result.results ?? []).map(parseReview);
+  const reviews = (result.results ?? []).map(parseReview);
+  if (!input.include_suggestions) return reviews;
+
+  // Only worth computing for still-pending rows — a resolved review's suggestion is moot.
+  return Promise.all(
+    reviews.map(async (review) => {
+      if (review.status !== 'pending') return review;
+      const match = await findBestMatch(env, review.candidate);
+      if (!match) return { ...review, potential_duplicate: null };
+      const { action, reason } = heuristicDecision(review.candidate, match);
+      return { ...review, potential_duplicate: { memory_id: match.id, content: match.content, action, reason } };
+    })
+  );
 }
 
 export async function resolveMemoryReview(env: Env, id: string, input: { user_id: string; action: 'add' | 'merge' | 'ignore'; memory_id?: string | null; reason?: string | null }): Promise<{ review: MemoryReviewRow; memory?: Awaited<ReturnType<typeof createMemory>> }> {

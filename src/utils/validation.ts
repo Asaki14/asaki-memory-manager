@@ -222,9 +222,9 @@ export function validateProcessCandidates(value: unknown): { ok: true; data: Arr
 
 export const validateCreateMemoryReviews = validateProcessCandidates;
 
-export function validateListMemoryReviews(value: unknown): { ok: true; data: { user_id: string; status: 'pending' | 'resolved' | 'all'; project_id?: string | null; session_id?: string | null; source?: string | null; limit: number; offset: number } } | { ok: false; error: string } {
+export function validateListMemoryReviews(value: unknown): { ok: true; data: { user_id: string; status: 'pending' | 'resolved' | 'all'; project_id?: string | null; session_id?: string | null; source?: string | null; limit: number; offset: number; include_suggestions: boolean } } | { ok: false; error: string } {
   if (!value || typeof value !== 'object') return { ok: false, error: 'Body must be a JSON object.' };
-  const input = value as { user_id?: unknown; status?: unknown; project_id?: unknown; session_id?: unknown; source?: unknown; limit?: unknown; offset?: unknown };
+  const input = value as { user_id?: unknown; status?: unknown; project_id?: unknown; session_id?: unknown; source?: unknown; limit?: unknown; offset?: unknown; include_suggestions?: unknown };
   const userId = validateUserId(input.user_id);
   if (!userId) return { ok: false, error: 'user_id is required.' };
   const status = input.status ?? 'pending';
@@ -236,6 +236,7 @@ export function validateListMemoryReviews(value: unknown): { ok: true; data: { u
   if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 100) return { ok: false, error: 'limit must be an integer between 1 and 100.' };
   const offset = input.offset == null ? 0 : input.offset;
   if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0) return { ok: false, error: 'offset must be a non-negative integer.' };
+  if (input.include_suggestions !== undefined && typeof input.include_suggestions !== 'boolean') return { ok: false, error: 'include_suggestions must be a boolean.' };
   return {
     ok: true,
     data: {
@@ -246,6 +247,7 @@ export function validateListMemoryReviews(value: unknown): { ok: true; data: { u
       source: typeof input.source === 'string' ? input.source.trim() : null,
       limit,
       offset,
+      include_suggestions: input.include_suggestions === true,
     },
   };
 }

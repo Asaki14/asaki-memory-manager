@@ -251,7 +251,7 @@ curl -X POST http://127.0.0.1:8787/v1/memories/reviews/<review-id>/resolve \
   -d '{"user_id":"alice","action":"add","reason":"approved"}'
 ```
 
-Resolve actions: `add`, `merge`, `ignore`. `merge` requires `memory_id`.
+Resolve actions: `add`, `merge`, `ignore`. `merge` requires `memory_id`. Pass `include_suggestions: true` to `/v1/memories/reviews/list` to attach a `potential_duplicate` hint (matched memory + heuristic-suggested action) to each pending review.
 
 ## Claude Code integration
 

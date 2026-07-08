@@ -278,7 +278,10 @@ function formatReviewLine(item: any, index?: number): string {
   const importance = typeof candidate.importance === "number" ? ` importance=${candidate.importance.toFixed(2)}` : "";
   const confidence = typeof candidate.confidence === "number" ? ` confidence=${candidate.confidence.toFixed(2)}` : "";
   const content = candidate.content || JSON.stringify(candidate);
-  return `${prefix}${content}${id}${status}${action}${memoryId}${scope}${kind}${importance}${confidence}${updatedAt}`;
+  const dup = item.potential_duplicate
+    ? ` potential_duplicate=[memory_id=${item.potential_duplicate.memory_id} suggested=${item.potential_duplicate.action} reason="${item.potential_duplicate.reason}"]`
+    : "";
+  return `${prefix}${content}${id}${status}${action}${memoryId}${scope}${kind}${importance}${confidence}${updatedAt}${dup}`;
 }
 
 type AutoInjectMemoryResult = {
@@ -903,6 +906,9 @@ Safety:
       source: Type.Optional(Type.String({ description: "Source filter." })),
       limit: Type.Optional(Type.Integer({ description: "Max reviews to return (1-100, default 50).", minimum: 1, maximum: 100 })),
       offset: Type.Optional(Type.Integer({ description: "Pagination offset (default 0).", minimum: 0 })),
+      include_suggestions: Type.Optional(
+        Type.Boolean({ description: "Attach a potential_duplicate hint (matched memory + suggested add/merge/update/delete/ignore) to each pending review. Default off." }),
+      ),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const config = memoryConfig();
@@ -915,6 +921,7 @@ Safety:
         if (params.source) body.source = params.source;
         if (params.limit != null) body.limit = params.limit;
         if (params.offset != null) body.offset = params.offset;
+        if (params.include_suggestions) body.include_suggestions = true;
         const data = await memoryRequest("/v1/memories/reviews/list", body, signal);
         const reviews = Array.isArray(data?.reviews) ? data.reviews : [];
         if (reviews.length === 0) return { content: [{ type: "text", text: "No Asaki memory reviews found." }], details: { count: 0 } };

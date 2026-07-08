@@ -187,7 +187,11 @@ function formatReviewLine(item: Record<string, unknown>, index?: number): string
   const scope = candidate.scope ? ` scope=${candidate.scope}` : "";
   const kind = candidate.kind ? ` kind=${candidate.kind}` : "";
   const content = candidate.content;
-  return `${prefix}${typeof content === "string" ? content : JSON.stringify(candidate || item)}${id}${status}${action}${memoryId}${scope}${kind}${updatedAt}`;
+  const potentialDuplicate = item.potential_duplicate && typeof item.potential_duplicate === "object" ? (item.potential_duplicate as Record<string, unknown>) : null;
+  const dup = potentialDuplicate
+    ? ` potential_duplicate=[memory_id=${potentialDuplicate.memory_id} suggested=${potentialDuplicate.action} reason="${potentialDuplicate.reason}"]`
+    : "";
+  return `${prefix}${typeof content === "string" ? content : JSON.stringify(candidate || item)}${id}${status}${action}${memoryId}${scope}${kind}${updatedAt}${dup}`;
 }
 
 const server = new McpServer({ name: "asaki-memory", version: "0.1.0" });
@@ -380,8 +384,9 @@ server.tool(
     source: z.string().optional(),
     limit: z.number().int().min(1).max(100).optional(),
     offset: z.number().int().min(0).optional(),
+    include_suggestions: z.boolean().optional().describe("Attach a potential_duplicate hint (matched memory + suggested add/merge/update/delete/ignore) to each pending review. Default off."),
   },
-  async ({ status, project_id, session_id, source, limit, offset }) => {
+  async ({ status, project_id, session_id, source, limit, offset, include_suggestions }) => {
     const cfg = memoryConfig();
     const body: Record<string, unknown> = { user_id: cfg.userId, project_id: resolveProjectId(project_id) };
     if (session_id || cfg.sessionId) body.session_id = session_id || cfg.sessionId;
@@ -389,6 +394,7 @@ server.tool(
     if (source) body.source = source;
     if (limit != null) body.limit = limit;
     if (offset != null) body.offset = offset;
+    if (include_suggestions) body.include_suggestions = true;
     const data = await apiRequest("/v1/memories/reviews/list", body);
     const reviews = Array.isArray(data.reviews) ? (data.reviews as Record<string, unknown>[]) : [];
     if (reviews.length === 0) return { content: [{ type: "text" as const, text: "No Asaki memory reviews found." }] };

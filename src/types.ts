@@ -127,4 +127,10 @@ export interface MemoryReviewRecord {
 
 export interface MemoryReviewRow extends Omit<MemoryReviewRecord, 'candidate_json'> {
   candidate: import('./services/candidateDecision').ProcessMemoryCandidateInput;
+  potential_duplicate?: {
+    memory_id: string;
+    content: string;
+    action: import('./services/candidateDecision').CandidateAction;
+    reason: string;
+  } | null;
 }
