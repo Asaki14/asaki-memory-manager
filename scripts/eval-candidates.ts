@@ -32,7 +32,6 @@ function candidate(input: MemoryFixture): ProcessMemoryCandidateInput {
     importance: 0.5,
     confidence: 0.9,
     source: 'eval',
-    expires_at: null,
   };
 }
 
@@ -53,7 +52,6 @@ function existing(input: MemoryFixture, index: number): SearchResult {
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z',
     last_accessed_at: null,
-    expires_at: null,
     similarity: input.similarity ?? 0,
     score: input.similarity ?? 0,
     score_details: { semantic: input.similarity ?? 0, keyword: 0, entity: 0, metadata: 0, source: 'vector' },

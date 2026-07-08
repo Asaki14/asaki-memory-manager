@@ -51,7 +51,6 @@ function memory(input: MemoryFixture, item: SearchCase): MemoryRow {
     created_at: '2026-07-01T00:00:00.000Z',
     updated_at: '2026-07-01T00:00:00.000Z',
     last_accessed_at: null,
-    expires_at: null,
   };
 }
 

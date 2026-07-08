@@ -41,7 +41,6 @@ function processCandidate(input: CandidateFixture): ProcessMemoryCandidateInput 
     importance: input.importance ?? 0.5,
     confidence: input.confidence ?? 0.7,
     source: 'eval',
-    expires_at: null,
   };
 }
 
