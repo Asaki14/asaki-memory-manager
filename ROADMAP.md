@@ -15,10 +15,10 @@
 
 ## 下一步（按顺序）
 
-1. 云端抽取降级为 shadow-run 校准工具
-   - 规划见 `0a577d0`：定期拿最近 transcript 跑一遍抽取 pipeline 但不写库，把云端候选跟 agent 同期实际 `add` 的记忆做 diff，差异大的进 review 队列或出报告。
-   - 只读 diff、不写库，延续既定方向（把云端 LLM 从"生产写手"降级为"事后阅卷"），直接可做。
-   - 待办：脚本落地在 `scripts/` 下，先跑起来攒校准数据，再评估是否默认关闭 `ASAKI_MEMORY_AUTO_EXTRACT`。
+1. ~~云端抽取降级为 shadow-run 校准工具~~ — 已完成
+   - `scripts/shadow-run-extraction.ts`（`npm run shadow-run:extraction -- <transcript.jsonl> --user <id> --project <id>`）：读取 Claude Code transcript，调 `/v1/memories/extract`（新增 `dry_run` 参数，见 `src/index.ts`）拿云端候选但不写库，再跟同窗口内 agent 直接 `asaki_memory_add` 的记忆做 `lexicalSimilarity` diff，只读输出 covered/gap 报告；`--create-reviews` 可选择把 gap 候选推进 review 队列（默认不推，只报告）。
+   - 已用本地 `wrangler dev` 验证：dry_run 不写库、直接 add 的记忆能被正确识别为窗口内的 direct add；diff 算法单独验证过 covered/gap 判定正确。
+   - 待办（用起来之后才知道）：先手动跑几次攒数据，看 gap 量级，再决定要不要默认关闭 `ASAKI_MEMORY_AUTO_EXTRACT`。
 
 2. 观测补字段（低成本）
    - 现状：`search` 事件已记录 `query`/`top_k`/`min_score`/`result_count`（`src/services/memories.ts:222-226`）。

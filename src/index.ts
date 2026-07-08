@@ -76,7 +76,7 @@ app.post('/v1/memories/extract', async (c) => {
   const validation = validateExtractMemories(body.body);
   if (!validation.ok) return c.json({ error: validation.error }, 400);
 
-  const { text, user_id, scope, project_id, session_id, source } = validation.data;
+  const { text, user_id, scope, project_id, session_id, source, dry_run } = validation.data;
   const extracted = await extractMemoryCandidates(c.env, text, user_id);
   const candidates = extracted.map((item) => {
     // An explicit request-level scope forces every candidate into it. Otherwise each candidate
@@ -99,6 +99,13 @@ app.post('/v1/memories/extract', async (c) => {
   const deduped = dedupeCandidateBatch(candidates);
   const autoBucket = deduped.filter((item) => isAutoAddEligible(item));
   const reviewBucket = deduped.filter((item) => !isAutoAddEligible(item));
+
+  // Calibration mode: report what the pipeline would extract and how it would bucket without
+  // writing anything (no processMemoryCandidates, no createMemoryReviews). Used by the
+  // shadow-run script to diff cloud extraction against real agent-side adds.
+  if (dry_run) {
+    return c.json({ extracted_count: extracted.length, auto_eligible: autoBucket, review_eligible: reviewBucket });
+  }
 
   const decisions = autoBucket.length > 0 ? await processMemoryCandidates(c.env, autoBucket) : [];
   const reviews = reviewBucket.length > 0 ? await createMemoryReviews(c.env, reviewBucket) : [];

@@ -10,6 +10,7 @@
     "eval:search": "node --experimental-strip-types scripts/eval-search-scoring.ts",
     "eval:extraction": "bash scripts/eval-extraction.sh",
     "eval:extraction-guardrails": "node --experimental-strip-types scripts/eval-extraction-guardrails.ts",
+    "shadow-run:extraction": "node --experimental-strip-types scripts/shadow-run-extraction.ts",
     "smoke:management": "bash scripts/smoke-management-api.sh",
     "deploy": "wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply asaki-memory-manager --local",

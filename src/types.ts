@@ -33,6 +33,7 @@ export interface ExtractMemoriesInput {
   project_id?: string | null;
   session_id?: string | null;
   source?: string | null;
+  dry_run?: boolean;
 }
 
 export interface SearchMemoriesInput {
