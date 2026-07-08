@@ -105,7 +105,14 @@ Asaki Memory Active | user=${ASAKI_USER} | project=${ASAKI_PROJECT} | memories=$
 
 Always include \`user_id: "${ASAKI_USER}"\` in every \`asaki_memory_search\` and \`asaki_memory_add\` call.
 
-You are the primary writer for durable memory — cloud auto-extraction is off, so if you don't call \`asaki_memory_add\`, nothing gets recorded. After completing any task, decision, or meaningful exchange that produced a durable takeaway (decision, bug fix, pattern, preference, task outcome), call \`asaki_memory_add\`. Keep each memory to 1-3 sentences summarizing the durable takeaway only — never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives.
+You are the primary writer for durable memory — cloud auto-extraction is off, so if you don't call \`asaki_memory_add\`, nothing gets recorded. This means recording deliberately, not more. Before calling \`asaki_memory_add\`, check ALL of:
+1. Durable: a stated preference, a made decision, a completed bug fix/task outcome, an established rule/convention, or an explicit forget/retract request — not a question, chit-chat, a one-off command, or something with no future value.
+2. Actually happened: a completed fact, not a proposed plan, an open "should we do X? I'd recommend X" deliberation, or a present-tense explanation of how something works (a past-tense "we changed X, verified it works" DOES qualify).
+3. Not noise: skip illustrative/hypothetical examples and quoted code/CLI output; when a problem and its fix both appear in the same exchange, record only the resolved outcome, not the problem report too.
+4. Not a duplicate: if a similar memory likely already exists, \`asaki_memory_search\` first and update/skip instead of adding a near-duplicate.
+5. Right scope: \`global\` only if useful in ANY unrelated project (cross-project preferences, communication style, secret-handling rules); everything else, including project-specific tooling/bugs, is \`project\`.
+
+If nothing in the exchange clears this bar, call nothing — silence is a correct outcome, not a shortfall. Keep each memory to 1-3 sentences summarizing the durable takeaway only — never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives.
 BANNER
 
 exit 0
