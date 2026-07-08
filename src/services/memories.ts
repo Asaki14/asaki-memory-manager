@@ -59,7 +59,6 @@ export async function createMemory(env: Env, input: Required<Pick<CreateMemoryIn
     created_at: timestamp,
     updated_at: timestamp,
     last_accessed_at: null,
-    expires_at: input.expires_at ?? null,
   };
 
   const embedding = await generateEmbedding(env, input.content);
@@ -67,8 +66,8 @@ export async function createMemory(env: Env, input: Required<Pick<CreateMemoryIn
   await env.DB.prepare(
     `INSERT INTO memories (
       id, user_id, scope, project_id, session_id, content, kind, importance, confidence,
-      status, source, index_status, created_at, updated_at, expires_at
-    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)`
+      status, source, index_status, created_at, updated_at
+    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`
   )
     .bind(
       baseMemory.id,
@@ -84,8 +83,7 @@ export async function createMemory(env: Env, input: Required<Pick<CreateMemoryIn
       baseMemory.source,
       baseMemory.index_status,
       baseMemory.created_at,
-      baseMemory.updated_at,
-      baseMemory.expires_at
+      baseMemory.updated_at
     )
     .run();
 
@@ -340,7 +338,6 @@ export async function updateMemory(env: Env, id: string, input: UpdateMemoryInpu
     confidence: input.confidence ?? existing.confidence,
     status: input.status ?? existing.status,
     source: input.source !== undefined ? input.source : existing.source,
-    expires_at: input.expires_at !== undefined ? input.expires_at : existing.expires_at,
     updated_at: nowIso(),
   };
 
@@ -367,8 +364,8 @@ export async function updateMemory(env: Env, id: string, input: UpdateMemoryInpu
     `UPDATE memories
      SET scope = ?1, project_id = ?2, session_id = ?3, content = ?4, kind = ?5,
          importance = ?6, confidence = ?7, status = ?8, source = ?9, index_status = ?10,
-         updated_at = ?11, expires_at = ?12
-     WHERE id = ?13 AND user_id = ?14`
+         updated_at = ?11
+     WHERE id = ?12 AND user_id = ?13`
   )
     .bind(
       updated.scope,
@@ -382,7 +379,6 @@ export async function updateMemory(env: Env, id: string, input: UpdateMemoryInpu
       updated.source,
       updated.index_status,
       updated.updated_at,
-      updated.expires_at,
       updated.id,
       updated.user_id
     )

@@ -49,7 +49,6 @@ export function validateCreateMemory(value: unknown): { ok: true; data: Required
       importance,
       confidence,
       source: input.source ?? null,
-      expires_at: input.expires_at ?? null,
     },
   };
 }
@@ -162,10 +161,6 @@ export function validateUpdateMemory(value: unknown): { ok: true; data: UpdateMe
   if (input.source !== undefined) {
     if (input.source !== null && (typeof input.source !== 'string' || input.source.trim().length === 0)) return { ok: false, error: 'source must be a non-empty string when provided.' };
     data.source = input.source?.trim() ?? null;
-  }
-  if (input.expires_at !== undefined) {
-    if (input.expires_at !== null && (typeof input.expires_at !== 'string' || input.expires_at.trim().length === 0)) return { ok: false, error: 'expires_at must be a non-empty string when provided.' };
-    data.expires_at = input.expires_at?.trim() ?? null;
   }
   if (Object.keys(data).length === 1) return { ok: false, error: 'At least one update field is required.' };
 

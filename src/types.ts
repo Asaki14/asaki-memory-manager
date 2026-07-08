@@ -23,7 +23,6 @@ export interface CreateMemoryInput {
   importance?: number;
   confidence?: number;
   source?: string | null;
-  expires_at?: string | null;
 }
 
 export interface ExtractMemoriesInput {
@@ -69,7 +68,6 @@ export interface UpdateMemoryInput {
   confidence?: number;
   status?: MemoryStatus;
   source?: string | null;
-  expires_at?: string | null;
 }
 
 export interface MemoryIdInput {
@@ -92,7 +90,6 @@ export interface MemoryRow {
   created_at: string;
   updated_at: string;
   last_accessed_at: string | null;
-  expires_at: string | null;
 }
 
 export interface SearchScoreDetails {

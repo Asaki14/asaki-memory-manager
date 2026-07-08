@@ -6,7 +6,6 @@ export interface ProcessMemoryCandidateInput extends Required<Pick<CreateMemoryI
   project_id?: string | null;
   session_id?: string | null;
   source?: string | null;
-  expires_at?: string | null;
 }
 
 function normalizeText(value: string): string {

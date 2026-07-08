@@ -15,10 +15,12 @@
 
 ## 下一步（按优先级，代码审查发现的真缺陷/清理项，非猜测）
 
-1. `expires_at` 字段没有被任何查询读取——需要拍板方向
-   - 全仓库 grep：`expires_at` 只在写入/更新路径出现（`memories.ts:62,343`），search/list/fallbackSearch 没有一处 `WHERE expires_at ...`。设了过期时间的记忆永远不会真的过期。
-   - 两个方向都行，选一个别留着装饰性字段：(a) 补上过滤（list/search 默认排除已过期，`status`可选`expired`地展示）；(b) 如果实际没人用这个字段，直接删掉（列 + migration + 相关类型），别留死字段。
-   - 待办：先看有没有人在用 `expires_at` 建过记忆（查 D1 `expires_at IS NOT NULL` 的行数），有就选 (a)，没有就选 (b)。
+当前没有排队中的下一步；有新发现再补。
+
+1. ~~`expires_at` 字段没有被任何查询读取~~ — 已完成（选方向 b：删掉）
+   - 生产 D1 核实过 `expires_at IS NOT NULL` 行数为 0（402 条记忆全没设过），装饰性死字段，直接删。
+   - `migrations/0004_drop_expires_at.sql`：`ALTER TABLE memories DROP COLUMN expires_at`（`0001_init.sql` 保留原样不改历史迁移）。`src/types.ts`（`MemoryRow`/`CreateMemoryInput`/`UpdateMemoryInput`）、`src/services/candidateDecision.ts`、`src/utils/validation.ts`、`src/services/memories.ts` 的读写路径、`scripts/eval-*.ts` 里的 fixture 一并清掉。
+   - 本地 `db:migrate:local` 跑过，`PRAGMA table_info(memories)` 确认列已删；`npm run smoke:management` 全绿。
 
 2. ~~`projects` / `memory_sources` / `api_keys` 三张死表~~ — 已完成
    - `migrations/0003_drop_unused_tables.sql`：`DROP TABLE IF EXISTS` 三张表（这三张表本身没有专属索引需要清理）。本地 `db:migrate:local` 跑过，`sqlite_master` 确认三表已删、`memories`/`memory_events`/`memory_reviews` 还在；本地 `wrangler dev` 跑过一遍 create/delete 回归，行为不受影响。
