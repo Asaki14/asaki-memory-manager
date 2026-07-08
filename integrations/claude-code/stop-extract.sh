@@ -72,9 +72,11 @@ report_and_exit() {
     CLASSIFIER_LOG_LINES=$(wc -l <"$CLASSIFIER_LOG_FILE" | tr -d ' ')
     if [ "$CLASSIFIER_LOG_LINES" -gt "$CLASSIFIER_LAST_REPORTED" ]; then
       CLASSIFIER_RESP="$(tail -n 1 "$CLASSIFIER_LOG_FILE" | sed -E 's/^[^ ]+ //')"
-      # Defensively strip a markdown code fence in case the model wraps its JSON despite being
-      # told not to.
-      CLASSIFIER_JSON=$(echo "$CLASSIFIER_RESP" | sed -E '/^```/d')
+      # Strip markdown code fence markers wherever they land in the line (not just at the start)
+      # — the background job below collapses the model's response to a single log line, so a
+      # multi-line ```json ... ``` wrapper survives as fence tokens embedded mid-line, not as
+      # separate lines.
+      CLASSIFIER_JSON=$(echo "$CLASSIFIER_RESP" | sed -E 's/```(json)?//g')
       # Only advance CLASSIFIER_REPORTED_FILE once this parses as valid JSON — same reasoning as
       # the cloud path below: a still-in-flight or failed background job must not be marked
       # reported, or the next Stop event silently skips checking it forever.
@@ -188,7 +190,7 @@ process.stdin.on("end", () => {
 # KEEP IN SYNC with SENSITIVE_RE_LIST in integrations/pi/asaki-memory.ts and
 # scripts/shadow-run-extraction.ts.
 SENSITIVE_PATTERN='-----BEGIN [A-Z ]*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b|\b(sk|sk-ant|sk-proj|ghp|gho|ghu|ghs|github_pat)_[A-Za-z0-9_=-]{16,}\b|\bAKIA[0-9A-Z]{16}\b|\b(api[_-]?key|token|secret|password|passwd|authorization)\b\s*[:=]\s*"?[^"'"'"' ]{8,}|set\s+-gx\s+[[:alnum:]_]*(KEY|TOKEN|SECRET|PASSWORD)[[:alnum:]_]*\s+[^$[:space:]][^[:space:]]{8,}'
-if echo "$TEXT" | grep -qiE "$SENSITIVE_PATTERN"; then
+if echo "$TEXT" | grep -qiE -e "$SENSITIVE_PATTERN"; then
   echo "$TOTAL" >"$STATE_FILE"
   report_and_exit
 fi
@@ -243,7 +245,11 @@ else
 
   (
     RESP=$(claude -p --safe-mode --model "$CLASSIFIER_MODEL" "$CLASSIFIER_PROMPT" 2>>"$CLASSIFIER_LOG_FILE")
-    echo "$(date -u +%FT%TZ) ${RESP}" >>"$CLASSIFIER_LOG_FILE"
+    # Collapse to one line before appending — the model reliably wraps its JSON in a multi-line
+    # ```json ... ``` fence despite being told not to, and report_and_exit's `tail -n 1` can only
+    # ever recover a whole response if each run is exactly one log line.
+    RESP_SINGLE_LINE=$(echo "$RESP" | tr '\n' ' ')
+    echo "$(date -u +%FT%TZ) ${RESP_SINGLE_LINE}" >>"$CLASSIFIER_LOG_FILE"
   ) >/dev/null 2>&1 &
   disown
 fi
