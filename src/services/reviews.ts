@@ -1,5 +1,5 @@
 import type { Env, MemoryReviewRecord, MemoryReviewRow } from '../types';
-import { createMemory, getMemory, searchMemories, updateMemoryContent } from './memories';
+import { createMemory, deleteMemory, getMemory, searchMemories, updateMemoryContent } from './memories';
 import { writeMemoryEvent } from './memoryEvents';
 import { BATCH_DEDUP_SIMILARITY_THRESHOLD, bestUsableMatch, heuristicDecision, lexicalSimilarity, mergeContent, type ProcessMemoryCandidateInput } from './candidateDecision';
 import { findLexicalMatch } from './candidates';
@@ -225,7 +225,7 @@ export async function listMemoryReviews(env: Env, input: { user_id: string; stat
   );
 }
 
-export async function resolveMemoryReview(env: Env, id: string, input: { user_id: string; action: 'add' | 'merge' | 'ignore'; memory_id?: string | null; reason?: string | null }): Promise<{ review: MemoryReviewRow; memory?: Awaited<ReturnType<typeof createMemory>> }> {
+export async function resolveMemoryReview(env: Env, id: string, input: { user_id: string; action: 'add' | 'merge' | 'update' | 'delete' | 'ignore'; memory_id?: string | null; reason?: string | null }): Promise<{ review: MemoryReviewRow; memory?: Awaited<ReturnType<typeof createMemory>> }> {
   const existing = await env.DB.prepare('SELECT * FROM memory_reviews WHERE id = ?1 AND user_id = ?2').bind(id, input.user_id).first<MemoryReviewRecord>();
   if (!existing) throw new Error('Review not found.');
   if (existing.status !== 'pending') throw new Error('Review is already resolved.');
@@ -246,6 +246,24 @@ export async function resolveMemoryReview(env: Env, id: string, input: { user_id
       importance: Math.max(target.importance, review.candidate.importance),
       confidence: Math.max(target.confidence, review.candidate.confidence),
     });
+  }
+
+  if (input.action === 'update') {
+    if (!input.memory_id) throw new Error('memory_id is required when action is update.');
+    const target = await getMemory(env, input.memory_id, input.user_id);
+    if (!target) throw new Error('Target memory not found.');
+    memory = await updateMemoryContent(env, target, {
+      content: review.candidate.content,
+      importance: review.candidate.importance,
+      confidence: review.candidate.confidence,
+    });
+  }
+
+  if (input.action === 'delete') {
+    if (!input.memory_id) throw new Error('memory_id is required when action is delete.');
+    const deleted = await deleteMemory(env, input.memory_id, input.user_id);
+    if (!deleted) throw new Error('Target memory not found.');
+    memory = deleted;
   }
 
   const timestamp = nowIso();

@@ -4,7 +4,7 @@ const scopes = new Set<MemoryScope>(['global', 'project', 'session']);
 const kinds = new Set<MemoryKind>(['preference', 'rule', 'fact', 'decision', 'task_learning', 'bug_fix', 'workflow']);
 const statuses = new Set<MemoryStatus>(['active', 'archived', 'deleted']);
 const reviewStatuses = new Set(['pending', 'resolved']);
-const reviewActions = new Set(['add', 'merge', 'ignore']);
+const reviewActions = new Set(['add', 'merge', 'update', 'delete', 'ignore']);
 
 function validateUserId(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
@@ -264,14 +264,14 @@ export function validatePruneStale(value: unknown): { ok: true; data: { days: nu
   return { ok: true, data: { days, limit, apply: input.apply === true } };
 }
 
-export function validateResolveMemoryReview(value: unknown): { ok: true; data: { user_id: string; action: 'add' | 'merge' | 'ignore'; memory_id?: string | null; reason?: string | null } } | { ok: false; error: string } {
+export function validateResolveMemoryReview(value: unknown): { ok: true; data: { user_id: string; action: 'add' | 'merge' | 'update' | 'delete' | 'ignore'; memory_id?: string | null; reason?: string | null } } | { ok: false; error: string } {
   if (!value || typeof value !== 'object') return { ok: false, error: 'Body must be a JSON object.' };
   const input = value as { user_id?: unknown; action?: unknown; memory_id?: unknown; reason?: unknown };
   const userId = validateUserId(input.user_id);
   if (!userId) return { ok: false, error: 'user_id is required.' };
-  if (typeof input.action !== 'string' || !reviewActions.has(input.action)) return { ok: false, error: 'action must be add, merge, or ignore.' };
+  if (typeof input.action !== 'string' || !reviewActions.has(input.action)) return { ok: false, error: 'action must be add, merge, update, delete, or ignore.' };
   if (input.memory_id != null && (typeof input.memory_id !== 'string' || input.memory_id.trim().length === 0)) return { ok: false, error: 'memory_id must be a non-empty string when provided.' };
   if (input.reason != null && (typeof input.reason !== 'string' || input.reason.trim().length === 0)) return { ok: false, error: 'reason must be a non-empty string when provided.' };
-  if (input.action === 'merge' && !input.memory_id) return { ok: false, error: 'memory_id is required when action is merge.' };
-  return { ok: true, data: { user_id: userId, action: input.action as 'add' | 'merge' | 'ignore', memory_id: input.memory_id?.trim() ?? null, reason: input.reason?.trim() ?? null } };
+  if ((input.action === 'merge' || input.action === 'update' || input.action === 'delete') && !input.memory_id) return { ok: false, error: 'memory_id is required when action is merge, update, or delete.' };
+  return { ok: true, data: { user_id: userId, action: input.action as 'add' | 'merge' | 'update' | 'delete' | 'ignore', memory_id: input.memory_id?.trim() ?? null, reason: input.reason?.trim() ?? null } };
 }

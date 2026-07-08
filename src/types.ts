@@ -111,7 +111,7 @@ export interface MemoryReviewRecord {
   user_id: string;
   status: MemoryReviewStatus;
   candidate_json: string;
-  resolved_action: 'add' | 'merge' | 'ignore' | null;
+  resolved_action: 'add' | 'merge' | 'update' | 'delete' | 'ignore' | null;
   memory_id: string | null;
   project_id: string | null;
   session_id: string | null;
