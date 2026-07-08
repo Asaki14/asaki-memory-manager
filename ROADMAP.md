@@ -20,9 +20,9 @@
    - 已用本地 `wrangler dev` 验证：dry_run 不写库、直接 add 的记忆能被正确识别为窗口内的 direct add；diff 算法单独验证过 covered/gap 判定正确。
    - 待办（用起来之后才知道）：先手动跑几次攒数据，看 gap 量级，再决定要不要默认关闭 `ASAKI_MEMORY_AUTO_EXTRACT`。
 
-2. 观测补字段（低成本）
-   - 现状：`search` 事件已记录 `query`/`top_k`/`min_score`/`result_count`（`src/services/memories.ts:222-226`）。
-   - 待办：再加 returned memory IDs、`score_details`、是否被 auto-inject 采用——都是往已有事件 payload 加字段，不新建系统。
+2. ~~观测补字段~~ — 部分完成
+   - `search` 事件（`src/services/memories.ts:223-233`）现在记录 `query`/`top_k`/`min_score`/`result_count`/`result_ids`/`score_details`。本地 `wrangler dev` + 直接查 D1 `memory_events` 表验证过字段真落地。
+   - 未做："是否被 auto-inject 采用"——这个判断发生在客户端（Pi/hook 收到 search 结果后自己按 autoMinScore 过滤），服务端 search 事件那一刻并不知道。要记这个得让客户端回调一次，不是"加字段"这么便宜了，先不做，等真需要复盘 auto-inject 效果再评估。
 
 3. Review 工作流增强（不急，等队列真的堆积再做）
    - 现状：`src/services/reviews.ts` 的 `resolveMemoryReview` 只支持单条 resolve；`listMemoryReviews` 不返回 potential duplicate / suggested action。

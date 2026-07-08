@@ -223,7 +223,14 @@ export async function searchMemories(env: Env, input: Required<Pick<SearchMemori
   await writeMemoryEvent(env, {
     userId: input.user_id,
     eventType: 'search',
-    payload: { query: input.query, top_k: input.top_k, min_score: input.min_score, result_count: results.length },
+    payload: {
+      query: input.query,
+      top_k: input.top_k,
+      min_score: input.min_score,
+      result_count: results.length,
+      result_ids: results.map((result) => result.id),
+      score_details: results.map((result) => result.score_details),
+    },
   });
 
   return results;
