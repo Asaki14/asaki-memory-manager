@@ -25,9 +25,9 @@
    - 两个方向都行，选一个别留着装饰性字段：(a) 补上过滤（list/search 默认排除已过期，`status`可选`expired`地展示）；(b) 如果实际没人用这个字段，直接删掉（列 + migration + 相关类型），别留死字段。
    - 待办：先看有没有人在用 `expires_at` 建过记忆（查 D1 `expires_at IS NOT NULL` 的行数），有就选 (a)，没有就选 (b)。
 
-3. `projects` / `memory_sources` / `api_keys` 三张表是死 schema
-   - `migrations/0001_init.sql` 建了但 `src/` 里零引用。`api_keys`（带 `key_hash`）说明当初想做 per-user 鉴权——现在项目已明确定位为个人单用户工具，不再需要 per-user 鉴权，这三张表没有存在理由。
-   - 待办：写一条新 migration 删掉这三张表 + 对应索引，不再留占位。
+3. ~~`projects` / `memory_sources` / `api_keys` 三张死表~~ — 已完成
+   - `migrations/0003_drop_unused_tables.sql`：`DROP TABLE IF EXISTS` 三张表（这三张表本身没有专属索引需要清理）。本地 `db:migrate:local` 跑过，`sqlite_master` 确认三表已删、`memories`/`memory_events`/`memory_reviews` 还在；本地 `wrangler dev` 跑过一遍 create/delete 回归，行为不受影响。
+   - **待办：还没推到远程** —— 记得找时机跑 `npm run db:migrate:remote`（会影响生产 D1，先跟主公确认再执行）。
 
 4. ~~README "team agents" 措辞跟实际鉴权模型不符~~ — 已解决（改定位而不是改措辞）
    - 项目定位已明确改为个人单用户工具，不再服务团队/多用户场景，`README.md`/`AGENTS.md`/`package.json` 的描述已同步去掉"team"相关措辞。鉴权模型（单一共享 `ADMIN_API_KEY`）跟"个人单用户"定位天然一致，不再需要解释信任边界给团队用户。
