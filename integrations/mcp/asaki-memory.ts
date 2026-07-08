@@ -131,17 +131,27 @@ async function apiRequest(path: string, body: unknown, signal?: AbortSignal, met
   return response.json() as Promise<Record<string, unknown>>;
 }
 
-function joinWithinBudget(lines: string[], maxChars: number = MAX_TOOL_OUTPUT_CHARS): string {
+type BudgetedJoin = { text: string; shown: number; total: number };
+
+function joinWithinBudget(lines: string[], maxChars: number = MAX_TOOL_OUTPUT_CHARS): BudgetedJoin {
   let text = "";
   let included = 0;
-  for (const line of lines) {
+  for (const rawLine of lines) {
+    // Clamp each line to the full budget first so one oversized item (content can be up to
+    // 8000 chars) can never blow past maxChars on its own — only ever exactly reach it.
+    const line = rawLine.length > maxChars ? `${rawLine.slice(0, maxChars)}…` : rawLine;
     const next = text ? `${text}\n${line}` : line;
     if (next.length > maxChars && included > 0) break;
     text = next;
     included += 1;
   }
-  if (included < lines.length) text += `\n...(showing ${included}/${lines.length}, output budget reached)`;
-  return text;
+  return { text, shown: included, total: lines.length };
+}
+
+function withBudgetFooter(budget: BudgetedJoin, continueOffset?: number): string {
+  if (budget.shown >= budget.total) return budget.text;
+  const hint = continueOffset == null ? "" : ` — call again with offset=${continueOffset} to continue`;
+  return `${budget.text}\n...(showing ${budget.shown}/${budget.total}, output budget reached${hint})`;
 }
 
 function formatLine(item: Record<string, unknown>, index?: number): string {
@@ -202,7 +212,7 @@ server.tool(
       const similarity = typeof item.similarity === "number" ? ` similarity=${item.similarity.toFixed(3)}` : "";
       return `${formatLine(item, index)}${score}${similarity}`;
     });
-    return { content: [{ type: "text" as const, text: joinWithinBudget(lines) }] };
+    return { content: [{ type: "text" as const, text: withBudgetFooter(joinWithinBudget(lines)) }] };
   },
 );
 
@@ -304,7 +314,8 @@ server.tool(
     const data = await apiRequest("/v1/memories/list", body);
     const memories = Array.isArray(data.memories) ? (data.memories as Record<string, unknown>[]) : [];
     if (memories.length === 0) return { content: [{ type: "text" as const, text: "No Asaki memories found." }] };
-    return { content: [{ type: "text" as const, text: joinWithinBudget(memories.map((item, index) => formatLine(item, index))) }] };
+    const listBudget = joinWithinBudget(memories.map((item, index) => formatLine(item, index)));
+    return { content: [{ type: "text" as const, text: withBudgetFooter(listBudget, (offset ?? 0) + listBudget.shown) }] };
   },
 );
 
@@ -369,7 +380,8 @@ server.tool(
     const data = await apiRequest("/v1/memories/reviews/list", body);
     const reviews = Array.isArray(data.reviews) ? (data.reviews as Record<string, unknown>[]) : [];
     if (reviews.length === 0) return { content: [{ type: "text" as const, text: "No Asaki memory reviews found." }] };
-    return { content: [{ type: "text" as const, text: joinWithinBudget(reviews.map((item, index) => formatReviewLine(item, index))) }] };
+    const reviewBudget = joinWithinBudget(reviews.map((item, index) => formatReviewLine(item, index)));
+    return { content: [{ type: "text" as const, text: withBudgetFooter(reviewBudget, (offset ?? 0) + reviewBudget.shown) }] };
   },
 );
 
