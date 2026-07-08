@@ -27,7 +27,7 @@
 
 3. ~~`projects` / `memory_sources` / `api_keys` 三张死表~~ — 已完成
    - `migrations/0003_drop_unused_tables.sql`：`DROP TABLE IF EXISTS` 三张表（这三张表本身没有专属索引需要清理）。本地 `db:migrate:local` 跑过，`sqlite_master` 确认三表已删、`memories`/`memory_events`/`memory_reviews` 还在；本地 `wrangler dev` 跑过一遍 create/delete 回归，行为不受影响。
-   - **待办：还没推到远程** —— 记得找时机跑 `npm run db:migrate:remote`（会影响生产 D1，先跟主公确认再执行）。
+   - 已推到远程：`npm run db:migrate:remote` 跑过，生产 D1 `sqlite_master` 确认三表已删。
 
 4. ~~README "team agents" 措辞跟实际鉴权模型不符~~ — 已解决（改定位而不是改措辞）
    - 项目定位已明确改为个人单用户工具，不再服务团队/多用户场景，`README.md`/`AGENTS.md`/`package.json` 的描述已同步去掉"team"相关措辞。鉴权模型（单一共享 `ADMIN_API_KEY`）跟"个人单用户"定位天然一致，不再需要解释信任边界给团队用户。
