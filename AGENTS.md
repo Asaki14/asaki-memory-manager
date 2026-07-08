@@ -12,6 +12,13 @@ Stack:
 - REST API first
 - Optional Pi integration in `integrations/pi/asaki-memory.ts`
 
+## Integration install/update
+
+Both the Claude Code plugin and the Pi extension are consumed straight from this repo — no separate build/publish step. After changing anything under `integrations/`, `commands/memory.md`, or `.claude-plugin/`, push to `main` and re-sync however each side expects (do NOT hand-copy files into either agent's install dir — that's what caused both to drift stale before this was set up):
+
+- **Claude Code**: `.claude-plugin/plugin.json` intentionally has no `version` field — with a git-backed marketplace source, Claude Code derives the plugin version from the commit SHA, so every push is a new version. This only works because the marketplace source is registered as `{"source": "github", "repo": "Asaki14/asaki-memory-manager"}` (see `~/.claude/settings.json`'s `extraKnownMarketplaces.asaki-memory`), not `directory` — a `directory` source has no commit SHA and never re-syncs on its own. `autoUpdate: true` on that marketplace entry refreshes it on every Claude Code startup; to sync without restarting, run `claude plugin marketplace update asaki-memory && claude plugin update asaki-memory@asaki-memory` (restart still required for an already-running session to pick it up).
+- **Pi**: `package.json`'s `"pi": { "extensions": [...] }` field is Pi's own package manifest, declaring `integrations/pi/asaki-memory.ts` as the extension entry point (Pi looks for a `pi` key in `package.json`, same convention as an npm package). Locally it's installed via `pi install <this-repo-path>` — a `local`-type source, which Pi resolves live from the directory every session, so local edits need no re-sync at all. A machine that isn't this working copy should install from `git:github.com/Asaki14/asaki-memory-manager` instead and run `pi update <source>` after upstream pushes.
+
 ## Documentation roles
 
 - `README.md`: public overview, setup, API, integration docs.
