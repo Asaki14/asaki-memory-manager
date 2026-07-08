@@ -55,7 +55,7 @@ committed). Set them once in `~/.claude/settings.json`:
   memory-related keyword regex (or unconditionally with
   `ASAKI_MEMORY_AUTO_INJECT_ALWAYS=1`) and isn't flagged as containing
   secrets, it runs one `/v1/memories/search` call (top_k=6), keeps only
-  results scoring at or above `ASAKI_MEMORY_AUTO_MIN_SCORE` (default 0.5),
+  results scoring at or above `ASAKI_MEMORY_AUTO_MIN_SCORE` (default 0.67),
   and injects those into context before the agent starts — so memory recall
   doesn't depend solely on the agent proactively calling the tool. Output is
   capped at a fixed character budget regardless of result count.

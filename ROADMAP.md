@@ -12,10 +12,9 @@
 
 ## P0 — 先修一致性问题，再谈新功能
 
-1. 统一 auto-inject / search 的 score 阈值（发现的真实 bug）
-   - 现状矛盾：`integrations/pi/asaki-memory.ts:11` 和 `integrations/claude-code/user-prompt.sh:31` 默认 `0.5`；`.env.example:14` 写的是 `0.70`；`npm run eval:search` 基于 50 条 eval 给出的建议是 `search_min_score=0.65`、`auto_inject_min_score=0.67`。三个数字互相矛盾，没人真按 eval 结果校准过。
-   - 待办：跑 `npm run eval:search` 核对当前建议值，选定一个数字，同步改掉 `.env.example`、`integrations/pi/asaki-memory.ts`、`integrations/claude-code/user-prompt.sh` 的默认值，以及 `README.md`/`AGENTS.md` 里的文档描述。
-   - 待办：`POST /v1/memories/search`（`src/services/memories.ts`）目前不做任何 min_score 过滤，只有 auto-inject 侧（Pi/hook）在过滤。评估是否要在 search 接口也加一个可选 `min_score` 参数，而不是把过滤逻辑全部留在客户端。
+1. ~~统一 auto-inject 的 score 阈值~~ — 已完成
+   - 三处默认值（`integrations/pi/asaki-memory.ts`、`integrations/claude-code/user-prompt.sh`、`.env.example`）及 `README.md`/`AGENTS.md`/`integrations/claude-code/README.md` 文档已统一为 `npm run eval:search` 建议的 `auto_inject_min_score=0.67`。
+   - 剩余子任务（未做）：`POST /v1/memories/search`（`src/services/memories.ts`）目前不做任何 min_score 过滤，只有 auto-inject 侧在过滤。评估是否要在 search 接口也加一个可选 `min_score` 参数（eval 建议 `search_min_score=0.65`），而不是把过滤逻辑全部留在客户端。
 
 2. `score_details` 调试展示（未做）
    - `src/services/searchScoring.ts` 已经算出 `score_details`（semantic/keyword/entity/metadata），但 Pi/MCP 的 search 结果没有暴露它。

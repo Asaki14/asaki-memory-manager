@@ -8,7 +8,7 @@ import { Type } from "typebox";
 const API_BASE = "https://asaki-memory-manager.YOUR_SUBDOMAIN.workers.dev";
 const DEFAULT_USER_ID = "asaki";
 const DEFAULT_SCOPE = "project";
-const DEFAULT_AUTO_MIN_SCORE = 0.5;
+const DEFAULT_AUTO_MIN_SCORE = 0.67;
 const AUTO_INJECT_TOP_K = 6;
 const DEFAULT_STARTUP_TOP_K = 6;
 const AUTO_EXTRACT_MAX_CHARS = 20_000;

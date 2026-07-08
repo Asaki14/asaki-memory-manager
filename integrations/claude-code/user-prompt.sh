@@ -28,7 +28,7 @@ PRECHECK="Asaki memory precheck: analyze the user's intent for this turn and dec
 
 AUTO_INJECT_TOP_K=6
 MAX_INJECT_CHARS=6000
-DEFAULT_AUTO_MIN_SCORE=0.5
+DEFAULT_AUTO_MIN_SCORE=0.67
 MEMORY_NEEDED_RE='记忆|记得|回忆|想起|以前|之前|上次|过往|历史|偏好|习惯|约定|惯例|决策|背景|上下文|继续|延续|remember|recall|memory|previous|before|last time|preference|convention|decision|context|continue'
 # Requires an actual 8+ char value after the label (not just the bare label) and adds the
 # fish `set -gx *KEY|TOKEN|SECRET|PASSWORD* value` exporter pattern — keep both in parity
