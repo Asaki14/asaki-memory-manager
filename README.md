@@ -280,8 +280,11 @@ What it does: injects a real project-history digest at session start (no
 the agent decides for itself whether to call `asaki_memory_search`, a
 visible `🧠 Asaki memory ...` line whenever a memory tool actually runs, and a
 `/memory` slash command (`/memory status` checks backend connectivity; any
-other args run a full audit) — same audit workflow as the Pi extension.
-Full details: [`integrations/claude-code/README.md`](integrations/claude-code/README.md).
+other args run a full audit) — same audit workflow as the Pi extension. Set
+`ASAKI_MEMORY_AUTO_INJECT=1` to also mirror the Pi extension's deterministic
+keyword-triggered auto-inject before the agent starts (same
+`ASAKI_MEMORY_AUTO_INJECT_ALWAYS`/`ASAKI_MEMORY_AUTO_MIN_SCORE` knobs as
+above). Full details: [`integrations/claude-code/README.md`](integrations/claude-code/README.md).
 
 ## Pi integration
 

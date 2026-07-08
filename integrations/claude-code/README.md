@@ -43,12 +43,19 @@ committed). Set them once in `~/.claude/settings.json`:
   transcript, so the agent decides for itself when to actually search/read
   memories instead.
 - `user-prompt.sh` — UserPromptSubmit hook. Unconditionally injects one fixed
-  instruction every turn (no keyword regex, no scripted API call): the agent
-  itself reads user intent and decides whether `asaki_memory_search` is
-  needed, and if so picks its own query/scope/top_k — same as the Pi
-  extension's `memoryPrecheckInstruction()` (`../pi/asaki-memory.ts`). What's
-  "stable" here is the instruction always firing, not a deterministic search;
-  the actual search/add decision is the agent's judgment call.
+  instruction every turn: the agent itself reads user intent and decides
+  whether `asaki_memory_search` is needed, and if so picks its own
+  query/scope/top_k — same as the Pi extension's
+  `memoryPrecheckInstruction()` (`../pi/asaki-memory.ts`). Additionally, when
+  `ASAKI_MEMORY_AUTO_INJECT=1` (default off), it mirrors the Pi extension's
+  `before_agent_start`/`autoInjectMemory()`: on turns whose prompt matches a
+  memory-related keyword regex (or unconditionally with
+  `ASAKI_MEMORY_AUTO_INJECT_ALWAYS=1`) and isn't flagged as containing
+  secrets, it runs one `/v1/memories/search` call (top_k=6), keeps only
+  results scoring at or above `ASAKI_MEMORY_AUTO_MIN_SCORE` (default 0.5),
+  and injects those into context before the agent starts — so memory recall
+  doesn't depend solely on the agent proactively calling the tool. Output is
+  capped at a fixed character budget regardless of result count.
 - `stop-extract.sh` — Stop hook, runs after every assistant turn but only
   actually fires when `ASAKI_MEMORY_AUTO_EXTRACT=1` is set (default off,
   matching the Pi extension). When enabled, sends the plain-text user/assistant

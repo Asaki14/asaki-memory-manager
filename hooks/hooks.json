@@ -18,7 +18,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/integrations/claude-code/user-prompt.sh\"",
-            "timeout": 5,
+            "timeout": 8,
             "statusMessage": "Checking memory relevance..."
           }
         ]
