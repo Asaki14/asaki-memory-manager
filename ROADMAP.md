@@ -16,9 +16,8 @@
    - 三处默认值（`integrations/pi/asaki-memory.ts`、`integrations/claude-code/user-prompt.sh`、`.env.example`）及 `README.md`/`AGENTS.md`/`integrations/claude-code/README.md` 文档已统一为 `npm run eval:search` 建议的 `auto_inject_min_score=0.67`。
    - 剩余子任务（未做）：`POST /v1/memories/search`（`src/services/memories.ts`）目前不做任何 min_score 过滤，只有 auto-inject 侧在过滤。评估是否要在 search 接口也加一个可选 `min_score` 参数（eval 建议 `search_min_score=0.65`），而不是把过滤逻辑全部留在客户端。
 
-2. `score_details` 调试展示（未做）
-   - `src/services/searchScoring.ts` 已经算出 `score_details`（semantic/keyword/entity/metadata），但 Pi/MCP 的 search 结果没有暴露它。
-   - 待办：加一个 debug 开关按需展开 `score_details`，默认保持简洁输出。
+2. ~~`score_details` 调试展示~~ — 已完成
+   - `asaki_memory_search`（Pi `integrations/pi/asaki-memory.ts` 和 MCP `integrations/mcp/asaki-memory.ts`）新增可选 `debug` 参数，开启后每条结果附加 `[semantic=.. keyword=.. entity=.. metadata=.. source=..]`，默认关闭保持简洁。
 
 ## P1 — 提升检索召回/排序
 

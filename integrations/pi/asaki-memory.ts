@@ -254,6 +254,15 @@ function formatMemoryLine(item: any, index?: number): string {
   return `${prefix}${item.content || item.memory || item.text || JSON.stringify(item)}${id}${scope}${kind}${status}${importance}${confidence}${updatedAt}`;
 }
 
+function formatScoreDetails(details: any): string {
+  if (!details || typeof details !== "object") return "";
+  const parts = ["semantic", "keyword", "entity", "metadata"]
+    .filter((key) => typeof details[key] === "number")
+    .map((key) => `${key}=${(details[key] as number).toFixed(3)}`);
+  if (details.source) parts.push(`source=${details.source}`);
+  return parts.length ? ` [${parts.join(" ")}]` : "";
+}
+
 function formatReviewLine(item: any, index?: number): string {
   const prefix = index == null ? "" : `${index + 1}. `;
   const id = item.id ? ` id=${item.id}` : "";
@@ -594,6 +603,11 @@ Safety:
           description: "Optional session id override.",
         }),
       ),
+      debug: Type.Optional(
+        Type.Boolean({
+          description: "Include score_details (semantic/keyword/entity/metadata breakdown) per result. Default off.",
+        }),
+      ),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const config = memoryConfig();
@@ -629,7 +643,8 @@ Safety:
           results.map((item: any, index: number) => {
             const score = typeof item.score === "number" ? ` score=${item.score.toFixed(3)}` : "";
             const similarity = typeof item.similarity === "number" ? ` similarity=${item.similarity.toFixed(3)}` : "";
-            return `${formatMemoryLine(item, index)}${score}${similarity}`;
+            const debug = params.debug ? formatScoreDetails(item.score_details) : "";
+            return `${formatMemoryLine(item, index)}${score}${similarity}${debug}`;
           }),
         );
 
