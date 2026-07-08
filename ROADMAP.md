@@ -27,9 +27,9 @@
 4. Rank fusion 升级（未做）
    - 从 `searchScoring.ts` 手写加权公式升级到 reciprocal rank fusion 或 normalized rank fusion，保留 `semantic/keyword/entity/metadata` 明细供调试。
 
-5. 增强 entity extraction（部分完成）
-   - 现状：`searchScoring.ts` 的 `entityTokens()` 已能识别 env var（`UPPER_CASE`）、带前导 `/` 的路径（如 `/v1/memories/search`）、连字符/下划线复合词。
-   - 缺口：裸相对路径（如 `src/services/memories.ts`，无前导 `/`、无连字符）识别不到。待办：补这类模式，并把新案例加进 `eval/search-cases.json`。
+5. ~~增强 entity extraction（裸相对路径）~~ — 已完成
+   - `searchScoring.ts` 的 `entityTokens()` 新增 `[\w.-]+(?:\/[\w.-]+)+` 分支，识别裸相对路径（如 `src/services/memories.ts`），不再依赖前导 `/` 或连字符。`eval/search-cases.json` 新增 case 验证（51/51 通过）。
+   - 仍有余量：还没覆盖更多实体形态（如 npm 包名 `@scope/pkg`、纯数字版本号）；等实际误召再补，不预先扩规则。
 
 ## P2 — 提升写入质量
 

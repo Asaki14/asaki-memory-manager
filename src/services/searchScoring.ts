@@ -76,7 +76,7 @@ function searchTokens(value: string): Set<string> {
 
 function entityTokens(value: string): Set<string> {
   const entities = new Set<string>();
-  for (const raw of value.match(/\/[a-z0-9][a-z0-9/_-]*|[A-Z][A-Z0-9_]{2,}|[a-zA-Z0-9]+(?:[-_][a-zA-Z0-9]+)+/g) ?? []) {
+  for (const raw of value.match(/\/[a-z0-9][a-z0-9/_-]*|[A-Z][A-Z0-9_]{2,}|[a-zA-Z0-9]+(?:[-_][a-zA-Z0-9]+)+|[\w.-]+(?:\/[\w.-]+)+/g) ?? []) {
     entities.add(raw.toLowerCase().replace(/[^a-z0-9/_-]+$/g, ''));
   }
   return entities;

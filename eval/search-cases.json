@@ -1421,5 +1421,33 @@
         "semantic": 0.82
       }
     ]
+  },
+  {
+    "name": "bare relative path entity outranks higher-semantic sibling file",
+    "query": "where is searchMemories defined, src/services/memories.ts",
+    "project_id": "asaki-memory-manager",
+    "top_k": 3,
+    "expected_top_ids": [
+      "memories-ts-location"
+    ],
+    "bad_result_ids": [
+      "candidate-decision-ts-location"
+    ],
+    "memories": [
+      {
+        "id": "memories-ts-location",
+        "content": "searchMemories, createMemory, and updateMemoryContent all live in src/services/memories.ts.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.80
+      },
+      {
+        "id": "candidate-decision-ts-location",
+        "content": "processMemoryCandidate and heuristicDecision live in src/services/candidateDecision.ts.",
+        "project_id": "asaki-memory-manager",
+        "kind": "fact",
+        "semantic": 0.83
+      }
+    ]
   }
 ]
