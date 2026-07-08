@@ -98,6 +98,12 @@ report_and_exit() {
               }
             }'
           exit 0
+        else
+          # Visible even on a negative verdict — lets you see the classifier actually ran and
+          # what it concluded, instead of only ever seeing output when something gets flagged.
+          SUMMARY=$(echo "$CLASSIFIER_JSON" | jq -r '.summary // ""')
+          jq -cn --arg summary "$SUMMARY" '{systemMessage: ("🧠 Asaki classifier (prev turn): no candidate" + (if $summary == "" then "" else " — " + $summary end))}'
+          exit 0
         fi
       fi
     fi
