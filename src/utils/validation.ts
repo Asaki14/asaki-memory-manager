@@ -183,6 +183,7 @@ export function validateExtractMemories(value: unknown): { ok: true; data: Extra
   const scopeError = validateScopeIds(input);
   if (scopeError) return { ok: false, error: scopeError };
   if (input.source != null && (typeof input.source !== 'string' || input.source.trim().length === 0)) return { ok: false, error: 'source must be a non-empty string when provided.' };
+  if (input.dry_run !== undefined && typeof input.dry_run !== 'boolean') return { ok: false, error: 'dry_run must be a boolean.' };
 
   return {
     ok: true,
@@ -193,6 +194,7 @@ export function validateExtractMemories(value: unknown): { ok: true; data: Extra
       project_id: input.project_id ?? null,
       session_id: input.session_id ?? null,
       source: input.source?.trim() ?? null,
+      dry_run: input.dry_run ?? false,
     },
   };
 }

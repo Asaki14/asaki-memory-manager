@@ -37,6 +37,7 @@ Stack:
 - `src/services/extraction.ts`: LLM extraction prompt (`SYSTEM_PROMPT`) + deterministic noise pre-filter.
 - `integrations/pi/asaki-memory.ts`: optional Pi extension.
 - `commands/memory.md`: Claude Code plugin `/memory` slash command (audit workflow; mirrors the Pi extension's `registerCommand("memory", ...)`).
+- `scripts/shadow-run-extraction.ts`: shadow-run calibration tool — runs `/v1/memories/extract` in `dry_run` mode against a transcript and diffs cloud candidates against real agent-added memories, without writing anything.
 - The "Global scope discipline" text lives in three places that must stay in sync: `commands/memory.md`, `integrations/pi/asaki-memory.ts`'s `/memory` command, and (condensed) `src/services/extraction.ts`'s `SYSTEM_PROMPT` — the first two apply it at audit time, the third applies it at extraction time.
 
 ## Commands
@@ -46,6 +47,7 @@ npm install
 npm run typecheck
 npm run eval:candidates
 npm run eval:extraction
+npm run shadow-run:extraction -- <transcript.jsonl> --user <id> --project <id>
 npm run smoke:management
 npm run db:migrate:local
 npm run dev

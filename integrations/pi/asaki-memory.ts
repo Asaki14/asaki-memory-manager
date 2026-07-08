@@ -28,6 +28,8 @@ const MEMORY_NEEDED_RE =
 // KEEP IN SYNC with EXTRACT_SIGNAL_PATTERN in integrations/claude-code/stop-extract.sh.
 const EXTRACT_SIGNAL_RE =
   /以后都|以后就|不要再|别再|记住|记得|规则是|统一用|统一使用|根因是|已验证|已修复|已确认|踩坑|决定用|决定是|改用|换成|约定是|复盘|经验是|remember|always|never|from now on|going forward|decided to|decision is|decision was|root cause is|root cause was|already fixed|now fixed|now verified|already verified|learned that|instead of|switch to|switched to|switching to|convention is|the rule is/i;
+// KEEP IN SYNC with SENSITIVE_PATTERN in integrations/claude-code/stop-extract.sh and
+// SENSITIVE_RE_LIST in scripts/shadow-run-extraction.ts.
 const SENSITIVE_RE_LIST = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/i,
   /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b/i,
