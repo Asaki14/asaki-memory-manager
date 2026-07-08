@@ -34,7 +34,7 @@
 1. ~~云端抽取降级为 shadow-run 校准工具~~ — 已完成
    - `scripts/shadow-run-extraction.ts`（`npm run shadow-run:extraction -- <transcript.jsonl> --user <id> --project <id>`）：读取 Claude Code transcript，调 `/v1/memories/extract`（新增 `dry_run` 参数，见 `src/index.ts`）拿云端候选但不写库，再跟同窗口内 agent 直接 `asaki_memory_add` 的记忆做 `lexicalSimilarity` diff，只读输出 covered/gap 报告；`--create-reviews` 可选择把 gap 候选推进 review 队列（默认不推，只报告）。
    - 已用本地 `wrangler dev` 验证：dry_run 不写库、直接 add 的记忆能被正确识别为窗口内的 direct add；diff 算法单独验证过 covered/gap 判定正确。
-   - 待办（用起来之后才知道）：先手动跑几次攒数据，看 gap 量级，再决定要不要默认关闭 `ASAKI_MEMORY_AUTO_EXTRACT`。
+   - 待办的"跑几次攒数据再决定"从没被执行，`ASAKI_MEMORY_AUTO_EXTRACT` 一直开着，实际统计显示云端 auto-extract 已经变成主要记忆来源（163 条 vs. 本地 Agent 直接 `asaki_memory_add` 27 小时无调用），跟"云端是事后审计、本地 Agent 是主要写手"的设计意图相反。已决定：`ASAKI_MEMORY_AUTO_EXTRACT` 默认关闭（`~/.claude/settings.json` 和 `~/.pi/agent/asaki-memory.json` 均已改为 off），`session-start.sh` 和 Pi 的 `asaki_memory_add` 提示语气从"decide yourself"改为"你是主要写手，不写就没有记录"。`shadow-run-extraction.ts` 保留作为周期性手动审计工具，不再是默认自动通路。
 
 2. ~~观测补字段~~ — 部分完成
    - `search` 事件（`src/services/memories.ts:223-233`）现在记录 `query`/`top_k`/`min_score`/`result_count`/`result_ids`/`score_details`。本地 `wrangler dev` + 直接查 D1 `memory_events` 表验证过字段真落地。

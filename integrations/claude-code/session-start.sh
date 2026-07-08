@@ -105,7 +105,7 @@ Asaki Memory Active | user=${ASAKI_USER} | project=${ASAKI_PROJECT} | memories=$
 
 Always include \`user_id: "${ASAKI_USER}"\` in every \`asaki_memory_search\` and \`asaki_memory_add\` call.
 
-After completing any task, decision, or meaningful exchange, decide yourself whether it is worth storing durably via \`asaki_memory_add\` (decisions, bug fixes, patterns, preferences, task outcomes). Keep each memory to 1-3 sentences summarizing the durable takeaway only — never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives.
+You are the primary writer for durable memory — cloud auto-extraction is off, so if you don't call \`asaki_memory_add\`, nothing gets recorded. After completing any task, decision, or meaningful exchange that produced a durable takeaway (decision, bug fix, pattern, preference, task outcome), call \`asaki_memory_add\`. Keep each memory to 1-3 sentences summarizing the durable takeaway only — never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives.
 BANNER
 
 exit 0

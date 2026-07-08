@@ -682,8 +682,8 @@ Safety:
     description: "Store a durable memory in Asaki personal memory via the Cloudflare Worker backend.",
     promptSnippet: "Save durable task outcomes and decisions to Asaki personal memory after significant work.",
     promptGuidelines: [
-      "The current conversation agent decides what is worth remembering; do not send full conversation transcripts to the Worker for extraction.",
-      "Use asaki_memory_add after completing meaningful work, recording decisions, bug fixes, conventions, or user preferences.",
+      "The current conversation agent is the primary writer for durable memory; cloud auto-extraction is off by default, so if you don't call this tool, nothing gets recorded — do not send full conversation transcripts to the Worker for extraction.",
+      "Call asaki_memory_add after completing meaningful work, recording decisions, bug fixes, conventions, or user preferences.",
       "Keep each memory to 1-3 sentences summarizing the durable takeaway only — never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives.",
       "Do not store secrets, raw credentials, private tokens, or sensitive transient data with asaki_memory_add.",
       "For asaki_memory_add, use scope=global only for user-wide preferences/rules; use scope=project for project conventions, decisions, workflows, task learnings, and bug fixes.",
