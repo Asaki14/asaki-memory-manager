@@ -39,6 +39,7 @@ Stack:
 - `commands/memory.md`: Claude Code plugin `/memory` slash command (audit workflow; mirrors the Pi extension's `registerCommand("memory", ...)`).
 - `scripts/shadow-run-extraction.ts`: shadow-run calibration tool — runs `/v1/memories/extract` in `dry_run` mode against a transcript and diffs cloud candidates against real agent-added memories, without writing anything.
 - `scripts/backfill-index.ts`: manual Vectorize backfill trigger — calls `POST /v1/memories/backfill-index` (`backfillPendingIndex()` in `src/services/memories.ts`) in a loop to re-embed and re-upsert memories stuck at `index_status` `pending`/`failed`.
+- `scripts/prune-stale.ts`: manual stale-memory cleanup — calls `POST /v1/memories/prune-stale` (`pruneStaleMemories()` in `src/services/memories.ts`) to soft-delete memories not accessed in N days. Defaults to dry-run; `--apply` is required to actually delete.
 - The "Global scope discipline" text lives in three places that must stay in sync: `commands/memory.md`, `integrations/pi/asaki-memory.ts`'s `/memory` command, and (condensed) `src/services/extraction.ts`'s `SYSTEM_PROMPT` — the first two apply it at audit time, the third applies it at extraction time.
 
 ## Commands
@@ -50,6 +51,7 @@ npm run eval:candidates
 npm run eval:extraction
 npm run shadow-run:extraction -- <transcript.jsonl> --user <id> --project <id>
 npm run backfill:index -- --limit 50
+npm run prune:stale -- --days 90
 npm run smoke:management
 npm run db:migrate:local
 npm run dev

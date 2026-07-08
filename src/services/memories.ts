@@ -423,33 +423,66 @@ export async function backfillPendingIndex(env: Env, limit: number): Promise<{ c
   return { checked: rows.length, indexed, remaining: remainingIds.length, remaining_ids: remainingIds };
 }
 
-export async function deleteMemory(env: Env, id: string, userId: string): Promise<MemoryRow | null> {
-  const existing = await getMemory(env, id, userId);
-  if (!existing) return null;
+async function softDeleteMemory(env: Env, memory: MemoryRow, eventType: string, payload: unknown): Promise<string> {
   const updatedAt = nowIso();
-
-  await env.DB.prepare(`UPDATE memories SET status = 'deleted', updated_at = ?1 WHERE id = ?2 AND user_id = ?3`).bind(updatedAt, id, userId).run();
+  await env.DB.prepare(`UPDATE memories SET status = 'deleted', updated_at = ?1 WHERE id = ?2`).bind(updatedAt, memory.id).run();
 
   if (env.VECTORIZE) {
     try {
-      await (env.VECTORIZE as any).deleteByIds([id]);
+      await (env.VECTORIZE as any).deleteByIds([memory.id]);
     } catch (error) {
       await writeMemoryEvent(env, {
-        memoryId: id,
-        userId,
+        memoryId: memory.id,
+        userId: memory.user_id,
         eventType: 'vectorize_delete_failed',
         payload: { message: error instanceof Error ? error.message : String(error) },
       });
     }
   }
 
-  const deleted: MemoryRow = { ...existing, status: 'deleted', updated_at: updatedAt };
-  await writeMemoryEvent(env, {
-    memoryId: id,
-    userId,
-    eventType: 'delete',
-    payload: { before: existing },
-  });
+  await writeMemoryEvent(env, { memoryId: memory.id, userId: memory.user_id, eventType, payload });
+  return updatedAt;
+}
 
-  return deleted;
+export async function deleteMemory(env: Env, id: string, userId: string): Promise<MemoryRow | null> {
+  const existing = await getMemory(env, id, userId);
+  if (!existing) return null;
+  const updatedAt = await softDeleteMemory(env, existing, 'delete', { before: existing });
+  return { ...existing, status: 'deleted', updated_at: updatedAt };
+}
+
+export type StaleMemoryCandidate = Pick<MemoryRow, 'id' | 'user_id' | 'scope' | 'content' | 'kind' | 'importance' | 'last_accessed_at' | 'created_at'>;
+
+export async function pruneStaleMemories(env: Env, params: { days: number; limit: number; apply: boolean }): Promise<{ checked: number; deleted: number; candidates: StaleMemoryCandidate[] }> {
+  const cutoff = new Date(Date.now() - params.days * 86_400_000).toISOString();
+  const result = await env.DB.prepare(
+    `SELECT * FROM memories
+     WHERE status = 'active' AND COALESCE(last_accessed_at, created_at) < ?1
+     ORDER BY COALESCE(last_accessed_at, created_at) ASC
+     LIMIT ?2`
+  )
+    .bind(cutoff, params.limit)
+    .all<MemoryRow>();
+  const rows = result.results ?? [];
+
+  if (params.apply) {
+    for (const row of rows) {
+      await softDeleteMemory(env, row, 'prune_stale', { last_accessed_at: row.last_accessed_at, created_at: row.created_at, days: params.days });
+    }
+  }
+
+  return {
+    checked: rows.length,
+    deleted: params.apply ? rows.length : 0,
+    candidates: rows.map((row) => ({
+      id: row.id,
+      user_id: row.user_id,
+      scope: row.scope,
+      content: row.content,
+      kind: row.kind,
+      importance: row.importance,
+      last_accessed_at: row.last_accessed_at,
+      created_at: row.created_at,
+    })),
+  };
 }
