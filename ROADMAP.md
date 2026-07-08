@@ -48,17 +48,27 @@
    - review list 显示 potential duplicate / suggested action。
    - 支持批量 approve/ignore。
 
+10. 云端抽取降级为校准工具（shadow-run）
+    - 现状：agent 主动 `asaki_memory_add` 为主，Stop hook 云端 raw-text extract
+      (`ASAKI_MEMORY_AUTO_EXTRACT`) 只做被动兜底（信号词门槛 + 敏感词门槛 + 节流），
+      这一层维持不动。
+    - 待办：加一个 shadow-run 校准脚本，定期（比如改 extraction prompt 后，或按周）
+      拿最近一段 transcript 跑一遍抽取 pipeline，但不真写入——把云端候选跟 agent
+      同期实际 `add` 的记忆做 diff，差异大的进 review 队列或出报告，而不是自动写库。
+    - 目的：把云端 LLM 从"生产写手"降级成"事后阅卷"，攒够校准数据后再评估要不要把
+      `ASAKI_MEMORY_AUTO_EXTRACT` 默认关掉。
+
 ## P3 — 长期维护能力
 
-10. 记忆压缩与冲突治理
+11. 记忆压缩与冲突治理
     - 同一主题多条旧记忆可归并成 summary。
     - 冲突记忆不直接覆盖，标记 conflict。
 
-11. 生命周期策略
+12. 生命周期策略
     - 支持 stale / archived 建议。
     - 低 confidence 或长期未命中的记忆降权。
 
-12. 观测与回放
+13. 观测与回放
     - 记录 search query、返回 IDs、score_details、是否注入。
     - 支持离线 replay，用真实日志跑新 scoring。
 
