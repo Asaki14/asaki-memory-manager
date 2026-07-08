@@ -166,6 +166,16 @@ function formatLine(item: Record<string, unknown>, index?: number): string {
   return `${prefix}${typeof content === "string" ? content : JSON.stringify(item)}${id}${scope}${kind}${status}${importance}${updatedAt}`;
 }
 
+function formatScoreDetails(details: unknown): string {
+  if (!details || typeof details !== "object") return "";
+  const d = details as Record<string, unknown>;
+  const parts = ["semantic", "keyword", "entity", "metadata"]
+    .filter((key) => typeof d[key] === "number")
+    .map((key) => `${key}=${(d[key] as number).toFixed(3)}`);
+  if (d.source) parts.push(`source=${d.source}`);
+  return parts.length ? ` [${parts.join(" ")}]` : "";
+}
+
 function formatReviewLine(item: Record<string, unknown>, index?: number): string {
   const prefix = index == null ? "" : `${index + 1}. `;
   const id = item.id ? ` id=${item.id}` : "";
@@ -191,8 +201,9 @@ server.tool(
     scope: z.enum(["global", "project", "session"]).optional().describe("Optional scope filter."),
     project_id: z.string().optional().describe("Project id override."),
     session_id: z.string().optional().describe("Session id override."),
+    debug: z.boolean().optional().describe("Include score_details (semantic/keyword/entity/metadata breakdown) per result. Default off."),
   },
-  async ({ query, top_k, scope, project_id, session_id }) => {
+  async ({ query, top_k, scope, project_id, session_id, debug }) => {
     const cfg = memoryConfig();
     const body: Record<string, unknown> = {
       query,
@@ -210,7 +221,8 @@ server.tool(
     const lines = results.map((item, index) => {
       const score = typeof item.score === "number" ? ` score=${item.score.toFixed(3)}` : "";
       const similarity = typeof item.similarity === "number" ? ` similarity=${item.similarity.toFixed(3)}` : "";
-      return `${formatLine(item, index)}${score}${similarity}`;
+      const scoreDetails = debug ? formatScoreDetails(item.score_details) : "";
+      return `${formatLine(item, index)}${score}${similarity}${scoreDetails}`;
     });
     return { content: [{ type: "text" as const, text: withBudgetFooter(joinWithinBudget(lines)) }] };
   },
