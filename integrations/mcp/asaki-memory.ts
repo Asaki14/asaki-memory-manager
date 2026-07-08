@@ -18,6 +18,11 @@ const API_BASE = "https://asaki-memory-manager.YOUR_SUBDOMAIN.workers.dev";
 const DEFAULT_USER_ID = "asaki";
 const DEFAULT_SCOPE = "project" as const;
 const SOURCE_TAG = process.env.ASAKI_MEMORY_SOURCE || "mcp";
+// Caps how much text a single tool call can inject into the agent's context, independent of
+// how many memories/reviews are returned (a memory's content can be up to 8000 chars, and
+// search/list can return up to 50/100 items). KEEP IN SYNC with the same constant in
+// integrations/pi/asaki-memory.ts and integrations/claude-code/user-prompt.sh.
+const MAX_TOOL_OUTPUT_CHARS = 6000;
 
 const SCOPES = ["global", "project", "session"] as const;
 const KINDS = ["preference", "rule", "fact", "decision", "task_learning", "bug_fix", "workflow"] as const;
@@ -126,6 +131,19 @@ async function apiRequest(path: string, body: unknown, signal?: AbortSignal, met
   return response.json() as Promise<Record<string, unknown>>;
 }
 
+function joinWithinBudget(lines: string[], maxChars: number = MAX_TOOL_OUTPUT_CHARS): string {
+  let text = "";
+  let included = 0;
+  for (const line of lines) {
+    const next = text ? `${text}\n${line}` : line;
+    if (next.length > maxChars && included > 0) break;
+    text = next;
+    included += 1;
+  }
+  if (included < lines.length) text += `\n...(showing ${included}/${lines.length}, output budget reached)`;
+  return text;
+}
+
 function formatLine(item: Record<string, unknown>, index?: number): string {
   const prefix = index == null ? "" : `${index + 1}. `;
   const id = item.id ? ` id=${item.id}` : "";
@@ -179,14 +197,12 @@ server.tool(
     const results = Array.isArray(data.results) ? (data.results as Record<string, unknown>[]) : [];
     if (results.length === 0) return { content: [{ type: "text" as const, text: "No matching Asaki memories found." }] };
 
-    const text = results
-      .map((item, index) => {
-        const score = typeof item.score === "number" ? ` score=${item.score.toFixed(3)}` : "";
-        const similarity = typeof item.similarity === "number" ? ` similarity=${item.similarity.toFixed(3)}` : "";
-        return `${formatLine(item, index)}${score}${similarity}`;
-      })
-      .join("\n");
-    return { content: [{ type: "text" as const, text }] };
+    const lines = results.map((item, index) => {
+      const score = typeof item.score === "number" ? ` score=${item.score.toFixed(3)}` : "";
+      const similarity = typeof item.similarity === "number" ? ` similarity=${item.similarity.toFixed(3)}` : "";
+      return `${formatLine(item, index)}${score}${similarity}`;
+    });
+    return { content: [{ type: "text" as const, text: joinWithinBudget(lines) }] };
   },
 );
 
@@ -288,7 +304,7 @@ server.tool(
     const data = await apiRequest("/v1/memories/list", body);
     const memories = Array.isArray(data.memories) ? (data.memories as Record<string, unknown>[]) : [];
     if (memories.length === 0) return { content: [{ type: "text" as const, text: "No Asaki memories found." }] };
-    return { content: [{ type: "text" as const, text: memories.map((item, index) => formatLine(item, index)).join("\n") }] };
+    return { content: [{ type: "text" as const, text: joinWithinBudget(memories.map((item, index) => formatLine(item, index))) }] };
   },
 );
 
@@ -353,7 +369,7 @@ server.tool(
     const data = await apiRequest("/v1/memories/reviews/list", body);
     const reviews = Array.isArray(data.reviews) ? (data.reviews as Record<string, unknown>[]) : [];
     if (reviews.length === 0) return { content: [{ type: "text" as const, text: "No Asaki memory reviews found." }] };
-    return { content: [{ type: "text" as const, text: reviews.map((item, index) => formatReviewLine(item, index)).join("\n") }] };
+    return { content: [{ type: "text" as const, text: joinWithinBudget(reviews.map((item, index) => formatReviewLine(item, index))) }] };
   },
 );
 
