@@ -676,6 +676,11 @@ Safety:
     },
   });
 
+  // The judgment checklist in promptGuidelines below (durable / actually happened / not noise /
+  // not a duplicate) is KEEP IN SYNC with the equivalent checklist in
+  // integrations/claude-code/session-start.sh's banner text — both exist because cloud
+  // auto-extraction is off by default, so the conversation agent is the only place this
+  // judgment happens.
   pi.registerTool({
     name: "asaki_memory_add",
     label: "Asaki Memory Add",

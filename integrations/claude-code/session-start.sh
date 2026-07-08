@@ -17,6 +17,13 @@
 # Later turns still rely on on-demand search rather than per-turn
 # auto-inject. Default on; set ASAKI_MEMORY_STARTUP_INJECT=0 to disable.
 #
+# The "primary writer" durable-memory judgment checklist below (durable /
+# actually happened / not noise / not a duplicate / right scope) is
+# KEEP IN SYNC with the asaki_memory_add promptGuidelines in
+# integrations/pi/asaki-memory.ts — both exist because cloud auto-extraction
+# is off by default, so the conversation agent is the only place this
+# judgment happens.
+#
 # Output: plain text injected into the system context.
 set -uo pipefail
 
