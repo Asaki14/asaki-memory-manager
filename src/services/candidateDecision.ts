@@ -169,21 +169,29 @@ function hasForgetSignal(text: string): boolean {
   return FORGET_SIGNALS.test(text);
 }
 
-export function chooseDecision(candidate: ProcessMemoryCandidateInput, match: SearchResult | undefined, llm: { action: CandidateAction; reason: string } | null): { action: CandidateAction; reason: string } {
-  const heuristic = heuristicDecision(candidate, match);
-  if (!match || !llm) return heuristic;
+// Whether chooseDecision() would actually use an LLM decision if given one — callers use this to
+// skip the LLM call entirely when the deterministic heuristic already has the answer, instead of
+// paying for a decision that would just be discarded.
+export function needsLlmDecision(candidate: ProcessMemoryCandidateInput, match?: SearchResult): boolean {
+  if (!match) return false;
 
   const existing = normalizeText(match.content);
   const incoming = normalizeText(candidate.content);
-  if (incoming === existing) return heuristic;
+  if (incoming === existing) return false;
 
   // Substring/token-superset/char-similarity heuristics all assume "candidate extends existing"
   // without contradicting it. Phrasing like "X instead of Y" or "switched to X" defeats that
   // assumption (it's a superset of characters/tokens while actually superseding the old fact) —
   // defer those to the LLM, which can tell "update" apart from "merge", instead of auto-merging.
   // "Forget/retract" phrasing is the same story but for deletion — never auto-merge those either.
-  if (hasContradictionSignal(candidate.content) || hasForgetSignal(candidate.content)) return llm;
+  if (hasContradictionSignal(candidate.content) || hasForgetSignal(candidate.content)) return true;
 
   const deterministic = incoming.includes(existing) || existing.includes(incoming) || tokenDecision(candidate.content, match.content) !== null || matchSimilarity(candidate, match) >= 0.95;
-  return deterministic ? heuristic : llm;
+  return !deterministic;
+}
+
+export function chooseDecision(candidate: ProcessMemoryCandidateInput, match: SearchResult | undefined, llm: { action: CandidateAction; reason: string } | null): { action: CandidateAction; reason: string } {
+  const heuristic = heuristicDecision(candidate, match);
+  if (!match || !llm) return heuristic;
+  return needsLlmDecision(candidate, match) ? llm : heuristic;
 }
