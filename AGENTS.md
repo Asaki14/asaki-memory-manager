@@ -2,7 +2,7 @@
 
 ## Project
 
-Asaki Memory Manager is a Cloudflare-native memory layer for AI agents.
+Asaki Memory Manager is a Cloudflare-native personal memory layer for AI agents — single-operator, not a multi-tenant/team product.
 
 Stack:
 - Cloudflare Workers + TypeScript + Hono

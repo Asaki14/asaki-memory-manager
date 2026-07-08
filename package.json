@@ -27,7 +27,7 @@
     "typescript": "^5.9.3",
     "wrangler": "^4.105.0"
   },
-  "description": "Cloudflare-native memory layer for AI agents: D1, Vectorize, Workers AI, REST, and Pi integration.",
+  "description": "Cloudflare-native personal memory layer for AI agents: D1, Vectorize, Workers AI, REST, and Pi integration.",
   "license": "MIT",
   "keywords": [
     "ai-memory",

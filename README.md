@@ -15,7 +15,7 @@ Self-host long-term memory with Workers, D1, Vectorize, REST APIs, Workers AI as
 
 ## Why
 
-AI coding agents are better when they remember durable facts: user preferences, project conventions, architectural decisions, bug fixes, and workflows. Asaki Memory Manager provides a small self-hosted memory service designed for personal and team agents without running a Docker stack or external vector database.
+AI coding agents are better when they remember durable facts: user preferences, project conventions, architectural decisions, bug fixes, and workflows. Asaki Memory Manager provides a small self-hosted personal memory service — a single-operator agent memory layer without running a Docker stack or external vector database.
 
 ## Features
 
