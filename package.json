@@ -23,6 +23,9 @@
   "dependencies": {
     "hono": "^4.10.7"
   },
+  "pi": {
+    "extensions": ["./integrations/pi/asaki-memory.ts"]
+  },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20251224.0",
     "esbuild": "^0.25.12",
