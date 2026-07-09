@@ -21,6 +21,7 @@ const CLASSIFIER_TIMEOUT_MS = 120_000;
 // return up to 50/100 items). KEEP IN SYNC with the same constant in
 // integrations/mcp/asaki-memory.ts and integrations/claude-code/user-prompt.sh.
 const MAX_TOOL_OUTPUT_CHARS = 6000;
+const MEMORY_CONTEXT_CONTENT_CHARS = 280;
 const MEMORY_NEEDED_RE =
   /(记忆|记得|回忆|想起|以前|之前|上次|过往|历史|偏好|习惯|约定|惯例|决策|背景|上下文|继续|延续|remember|recall|memory|previous|before|last time|preference|convention|decision|context|continue)/i;
 // Necessary-but-not-sufficient content gate for auto-extraction: the delta must contain at least
@@ -194,9 +195,14 @@ function resultScore(item: Record<string, unknown>): number | null {
   return score != null && Number.isFinite(score) ? score : null;
 }
 
-function resultText(item: Record<string, unknown>): string {
+function truncateText(text: string, maxChars: number): string {
+  return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+}
+
+function resultText(item: Record<string, unknown>, maxChars = MEMORY_CONTEXT_CONTENT_CHARS): string {
   const content = item.content ?? item.memory ?? item.text;
-  return typeof content === "string" ? cleanMemoryText(content) : cleanMemoryText(JSON.stringify(content ?? item));
+  const text = typeof content === "string" ? cleanMemoryText(content) : cleanMemoryText(JSON.stringify(content ?? item));
+  return truncateText(text, maxChars);
 }
 
 type BudgetedJoin = { text: string; shown: number; total: number };
@@ -252,7 +258,7 @@ function formatAutoMemoryDisplay(results: Record<string, unknown>[], minScore: n
   return `Asaki memory search: injected ${lines.length}/${results.length} memories (autoMinScore=${minScore.toFixed(2)})\n${lines.join("\n")}`;
 }
 
-function formatMemoryLine(item: any, index?: number): string {
+function formatMemoryLine(item: any, index?: number, maxContentChars?: number): string {
   const prefix = index == null ? "" : `${index + 1}. `;
   const id = item.id ? ` id=${item.id}` : "";
   const scope = item.scope ? ` scope=${item.scope}` : "";
@@ -261,7 +267,9 @@ function formatMemoryLine(item: any, index?: number): string {
   const importance = typeof item.importance === "number" ? ` importance=${item.importance.toFixed(2)}` : "";
   const confidence = typeof item.confidence === "number" ? ` confidence=${item.confidence.toFixed(2)}` : "";
   const updatedAt = item.updated_at ? ` updated_at=${item.updated_at}` : "";
-  return `${prefix}${item.content || item.memory || item.text || JSON.stringify(item)}${id}${scope}${kind}${status}${importance}${confidence}${updatedAt}`;
+  const rawContent = item.content || item.memory || item.text || JSON.stringify(item);
+  const content = maxContentChars == null ? rawContent : truncateText(String(rawContent), maxContentChars);
+  return `${prefix}${content}${id}${scope}${kind}${status}${importance}${confidence}${updatedAt}`;
 }
 
 function formatScoreDetails(details: any): string {
@@ -372,9 +380,9 @@ async function buildSessionBanner(ctx: unknown, signal?: AbortSignal): Promise<s
     const topMemories = [
       ...sortByImportanceDesc(globalMemories).slice(0, config.startupTopK),
       ...sortByImportanceDesc(projectMemories).slice(0, config.startupTopK),
-    ].map((item, index) => formatMemoryLine(item, index));
+    ].map((item, index) => formatMemoryLine(item, index, MEMORY_CONTEXT_CONTENT_CHARS));
     if (topMemories.length === 0) return header;
-    return `${header}\n\nTop ${config.startupTopK} global + top ${config.startupTopK} project memories (highest importance, one-shot seed):\n${topMemories.join("\n")}`;
+    return `${header}\n\nTop ${config.startupTopK} global + top ${config.startupTopK} project memories (highest importance, one-shot seed; content capped at ${MEMORY_CONTEXT_CONTENT_CHARS} chars/item):\n${topMemories.join("\n")}`;
   } catch {
     return `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=? | pendingReviews=? | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${classifier}`;
   }
@@ -462,17 +470,21 @@ const CLASSIFIER_SYSTEM_PROMPT = `You are a memory-candidate detector, not a wri
 Apply this checklist:
 1. Durable — will this still matter later, not just for the current task.
 2. Actually happened — a completed decision/fact/fix, not a proposal, question, or hypothetical.
-3. Not noise — not chit-chat, a one-off command, or quoted code/CLI output/prompt text used only to explain how something works.
+3. Not noise — not chit-chat, a one-off command, or quoted code/CLI output/prompt text used only to explain how something works (even if the quoted text itself sounds like a preference/rule).
 4. Self-contained — understandable on its own, without the rest of the conversation.
 5. Right scope — see scope rule below.
 
-Do NOT flag: an in-progress/undecided plan, or a routine implementation-progress update within ongoing work.
+Do NOT flag: an in-progress/undecided plan, a problem report that ends by asking whether to fix it, routine implementation-progress update within ongoing work, or prompt/eval calibration notes that quote hypothetical user inputs. Actual user forget/retract requests are durable and should be flag=true.
 
 Two contrastive examples:
 - "解决了内存泄漏问题，已验证生效" -> flag=true (a previously-existing problem is now resolved).
 - "加了个测试用例，跑了一下全过了" -> flag=false (a routine step of ongoing work, no prior problem being resolved, nothing durable to recall later).
+- "这条需要改。要不要现在改？" -> flag=false (problem identified but fix/decision is still pending).
+- "FORGET_SIGNALS 正则用于识别类似 \"forget that I prefer dark mode\" 这种表达" -> flag=false (documentation-style explanation of code/prompt behavior, not an actual forget request).
+- User says "forget that I prefer dark mode" -> flag=true (actual forget/retract request).
+- "prompt 里加了 few-shot 正例，比如 User: 以后都用 pnpm" -> flag=false (prompt/eval calibration quoting a hypothetical user input).
 
-If flag=true, distill exactly ONE self-contained sentence for text, roughly 40-160 characters, same language as the source. No bullet lists. One fact per memory. Never paste raw code, CLI output, or a multi-paragraph narrative.
+If flag=true, distill exactly ONE self-contained sentence for text, same language as the source. Preference/rule should be roughly 40-160 characters; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 characters. No bullet lists. One fact per memory. Never paste raw code, CLI output, or a multi-paragraph narrative.
 
 Classify only when flag=true:
 - type: preference | rule | fact | decision | task_learning | bug_fix | workflow
@@ -722,7 +734,7 @@ Global scope discipline (the recurring failure mode this exists to catch): globa
 Workflow:
 1. Use asaki_memory_review_list to inspect pending reviews. For any review with created_at older than 14 days, flag it explicitly in your output as "stale — pending review needs a decision" rather than treating it identically to a fresh review.
 2. Use asaki_memory_list to list global memories and current project memories.
-3. Analyze duplicates, stale items, noisy items, wrong scope/kind (see Global scope discipline above), low-value items, pending reviews, and missing durable memories.
+3. Analyze duplicates, stale items, noisy items, overlong items (>300 Chinese chars or ~600 ASCII chars; propose compression/splitting/doc-linking), wrong scope/kind (see Global scope discipline above), low-value items, pending reviews, and missing durable memories.
 4. Propose REVIEW_RESOLVE/DELETE/UPDATE(rescope)/MERGE/ADD/KEEP changes with reasons and affected ids.
 5. Use questionnaire before any write. Offer options like apply all high-confidence changes, resolve selected reviews, only deletes, only updates/additions, or skip.
 6. Execute approved changes using asaki_memory_review_resolve, asaki_memory_update, asaki_memory_delete, and asaki_memory_add.
@@ -815,7 +827,7 @@ Safety:
             const score = typeof item.score === "number" ? ` score=${item.score.toFixed(3)}` : "";
             const similarity = typeof item.similarity === "number" ? ` similarity=${item.similarity.toFixed(3)}` : "";
             const scoreDetails = params.debug ? formatScoreDetails(item.score_details) : "";
-            return `${formatMemoryLine(item, index)}${score}${similarity}${scoreDetails}`;
+            return `${formatMemoryLine(item, index, MEMORY_CONTEXT_CONTENT_CHARS)}${score}${similarity}${scoreDetails}`;
           }),
         );
 
@@ -844,14 +856,14 @@ Safety:
       "The current conversation agent is the primary writer for durable memory; cloud auto-extraction is off by default, so if you don't call this tool, nothing gets recorded — do not send full conversation transcripts to the Worker for extraction.",
       "This means recording deliberately, not more. Before calling, check ALL of: (1) durable — a stated preference, a made decision, a completed bug fix/task outcome, an established rule/convention, or an explicit forget/retract request, not a question, chit-chat, a one-off command, or something with no future value; (2) actually happened — a completed fact, not a proposed plan, an open 'should we do X? I'd recommend X' deliberation, or a present-tense explanation of how something works (a past-tense 'we changed X, verified it' DOES qualify); (3) not noise — skip illustrative/hypothetical examples and quoted code/CLI output, and when a problem and its fix both appear in the same exchange, record only the resolved outcome; (4) not a duplicate or stale-making — asaki_memory_search first: update/skip a near-duplicate, and separately, if this change makes an OLDER differently-worded memory factually wrong (e.g. you just disabled a mechanism an old memory still describes as active), update that old memory too; (5) self-contained — no pronoun or bare reference (this/that/该/这个/主公) whose target isn't named in the same sentence, understandable with zero conversation context.",
       "If nothing in the exchange clears this bar, call nothing — silence is a correct outcome, not a shortfall.",
-      "Keep each memory to 1-3 sentences summarizing the durable takeaway only — never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives.",
+      "Keep each memory concise: preference/rule should be roughly 40-160 chars; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 chars. Summarize the durable takeaway only — never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives.",
       "Do not store secrets, raw credentials, private tokens, or sensitive transient data with asaki_memory_add.",
       "For asaki_memory_add, use scope=global only for user-wide preferences/rules useful in ANY unrelated project (cross-project preferences, communication style, secret-handling rules); use scope=project for everything else, including project-specific tooling/bugs, conventions, decisions, workflows, task learnings, and bug fixes AND product/business decisions (metric definitions, customer-facing features) even when they feel foundational — importance and scope are independent. When genuinely ambiguous, default to scope=project; rescoping later is cheap, a wrongly-global memory pollutes every future project's context immediately.",
     ],
     parameters: Type.Object({
       text: Type.String({
         description:
-          "Concise, self-contained memory text to store (1-3 sentences, roughly 40-300 chars). Summarize the durable takeaway only — never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives.",
+          "Concise, self-contained memory text to store. Preference/rule: roughly 40-160 chars. Decision/workflow/bug_fix/task_learning: 1-2 sentences, at most roughly 200-300 chars. Summarize the durable takeaway only.",
       }),
       type: Type.Optional(
         Type.String({

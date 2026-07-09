@@ -27,7 +27,7 @@ Global scope discipline (the recurring failure mode this section exists to catch
 Workflow:
 1. Use `asaki_memory_review_list` to inspect pending reviews. For any review with `created_at` older than 14 days, flag it explicitly in your output as "stale — pending review needs a decision" rather than treating it identically to a fresh review.
 2. Use `asaki_memory_list` to list global memories and current project memories.
-3. Analyze duplicates, stale items, noisy items, wrong scope/kind (see Global scope discipline above), low-value items, pending reviews, and missing durable memories.
+3. Analyze duplicates, stale items, noisy items, overlong items (>300 Chinese chars or ~600 ASCII chars; propose compression/splitting/doc-linking), wrong scope/kind (see Global scope discipline above), low-value items, pending reviews, and missing durable memories.
 4. Propose REVIEW_RESOLVE/DELETE/UPDATE(rescope)/MERGE/ADD/KEEP changes with reasons and affected ids.
 5. Ask the user before any write. Offer options like: apply all high-confidence changes, resolve selected reviews, only deletes, only updates/additions, or skip.
 6. Execute approved changes using `asaki_memory_review_resolve`, `asaki_memory_update`, `asaki_memory_delete`, and `asaki_memory_add`.

@@ -38,17 +38,21 @@ for i in $(seq 0 $((CASE_COUNT - 1))); do
 Apply this checklist:
 1. Durable — will this still matter later, not just for the current task.
 2. Actually happened — a completed decision/fact/fix, not a proposal, question, or hypothetical.
-3. Not noise — not chit-chat, a one-off command, or quoted code/CLI output/prompt text used only to explain how something works (even if the quoted text itself sounds like a preference).
+3. Not noise — not chit-chat, a one-off command, or quoted code/CLI output/prompt text used only to explain how something works (even if the quoted text itself sounds like a preference/rule).
 4. Self-contained — understandable on its own, without the rest of the conversation.
 5. Right scope — see scope rule below.
 
-Do NOT flag: an in-progress/undecided plan, or a routine implementation-progress update within ongoing work.
+Do NOT flag: an in-progress/undecided plan, a problem report that ends by asking whether to fix it, routine implementation-progress update within ongoing work, or prompt/eval calibration notes that quote hypothetical user inputs. Actual user forget/retract requests are durable and should be flag=true.
 
 Two contrastive examples:
 - "解决了内存泄漏问题，已验证生效" -> flag=true (a previously-existing problem is now resolved).
 - "加了个测试用例，跑了一下全过了" -> flag=false (a routine step of ongoing work, no prior problem being resolved, nothing durable to recall later).
+- "这条需要改。要不要现在改？" -> flag=false (problem identified but fix/decision is still pending).
+- "FORGET_SIGNALS 正则用于识别类似 \"forget that I prefer dark mode\" 这种表达" -> flag=false (documentation-style explanation of code/prompt behavior, not an actual forget request).
+- User says "forget that I prefer dark mode" -> flag=true (actual forget/retract request).
+- "prompt 里加了 few-shot 正例，比如 User: 以后都用 pnpm" -> flag=false (prompt/eval calibration quoting a hypothetical user input).
 
-If flag=true, distill: compress the candidate into exactly ONE self-contained sentence for `text`, roughly 40-160 characters, same language as the source. No bullet lists. One fact per memory — never chain multiple facts with semicolons/commas. Never paste raw code, CLI output, or a multi-paragraph narrative.
+If flag=true, distill: compress the candidate into exactly ONE self-contained sentence for `text`, same language as the source. Preference/rule should be roughly 40-160 characters; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 characters. No bullet lists. One fact per memory — never chain multiple facts with semicolons/commas. Never paste raw code, CLI output, or a multi-paragraph narrative.
 
 Classify (only meaningful when flag=true):
 - type: preference | rule | fact | decision | task_learning | bug_fix | workflow
