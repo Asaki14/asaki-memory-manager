@@ -103,13 +103,8 @@ fi
 cat <<BANNER
 ## Asaki Memory Active
 
-\`user=${ASAKI_USER} | project=${ASAKI_PROJECT} | memories=${MEMORY_COUNT} | pendingReviews=${PENDING_REVIEWS} | autoExtract=${AUTO_EXTRACT_STATE}\`
+Open your first reply with: \`Asaki Memory Active | user=${ASAKI_USER} | project=${ASAKI_PROJECT} | memories=${MEMORY_COUNT} | pendingReviews=${PENDING_REVIEWS} | autoExtract=${AUTO_EXTRACT_STATE}\`
 ${TOP_MEMORIES_SECTION}
-IMPORTANT: In your FIRST response, display this exact status line as your opening line:
-\`\`\`
-Asaki Memory Active | user=${ASAKI_USER} | project=${ASAKI_PROJECT} | memories=${MEMORY_COUNT} | pendingReviews=${PENDING_REVIEWS} | autoExtract=${AUTO_EXTRACT_STATE}
-\`\`\`
-
 Always include \`user_id: "${ASAKI_USER}"\` in every \`asaki_memory_search\` and \`asaki_memory_add\` call.
 
 You are the primary writer for durable memory — cloud auto-extraction is off, so if you don't call \`asaki_memory_add\`, nothing gets recorded. This means recording deliberately, not more. Before calling \`asaki_memory_add\`, check ALL of:
