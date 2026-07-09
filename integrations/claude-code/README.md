@@ -37,7 +37,8 @@ committed). Set them once in `~/.claude/settings.json`:
 
 - `session-start.sh` — SessionStart hook, fires on startup/resume/compact.
   Injects a compact counts-only status banner (`memories=N | pendingReviews=N
-  | autoExtract=on|off`) — no memory content. Mirrors the Pi extension's
+  | autoExtract=on|off`) — no memory content. Pi additionally shows its
+  local classifier state in the native extension banner. Mirrors the Pi extension's
   `buildSessionBanner()`: a content-bearing digest would re-inject its full
   text on every `compact` within the same session and pile up in the
   transcript, so the agent decides for itself when to actually search/read
