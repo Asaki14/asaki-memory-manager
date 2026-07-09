@@ -66,14 +66,18 @@ committed). Set them once in `~/.claude/settings.json`:
     `/v1/memories/extract` for server-side LLM-based background extraction.
     This intentionally sends conversation text off-machine to the Worker.
   - default `ASAKI_MEMORY_AUTO_EXTRACT=0`: cloud auto-extract stays off, but the
-    hook runs a local, no-write-access classifier via `claude -p --safe-mode`
-    in the background. This still sends the conversation delta to the Claude
-    CLI/model provider, but it cannot write memory directly. It judges the
-    delta against the 6-criteria checklist and, if it qualifies, pre-distills
-    it into ready-to-write fields (one-sentence `text`, `type`, `scope`). The
-    next Stop event then returns `decision:"block"` to force one more agent
-    turn whose only job is to execute `asaki_memory_add` with those fields —
-    not to re-review the checklist, since the classifier already did.
+    hook runs a local classifier via `claude -p --safe-mode` (no tools) in the
+    background. This still sends the conversation delta to the Claude
+    CLI/model provider for judgment only. It judges the delta against the
+    6-criteria checklist and, if it qualifies, pre-distills it into
+    ready-to-write fields (one-sentence `text`, `type`, `scope`). The same
+    background job then executes the write itself over plain HTTP — `POST
+    /v1/memories/candidates`, the same endpoint the `asaki_memory_add` MCP
+    tool calls under the hood, so it gets the same server-side dedup/merge
+    pipeline — with no Claude/MCP involved in that step. The main
+    conversation agent is never forced into an extra turn for this path; the
+    next Stop event just reports the real outcome as a one-line
+    `systemMessage`.
 
   Both modes are throttled to at most once per
   `ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS` (default 300) — a throttled
