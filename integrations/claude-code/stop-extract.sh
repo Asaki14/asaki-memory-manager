@@ -10,23 +10,31 @@
 # NOTE: this deliberately sends conversation text off-machine to the Worker.
 #
 # When ASAKI_MEMORY_AUTO_EXTRACT is unset/0 (the default), cloud auto-extract is permanently
-# off and the conversation agent is the sole writer of durable memory. Instead of doing nothing,
-# this hook runs a local, no-write-access classifier (`claude -p --safe-mode`) in the background
-# to judge the delta against the 6-criteria checklist and, if it qualifies, distill it into one
-# ready-to-write sentence (text/type/scope). If the previous turn's classifier run flagged
-# something, this Stop event forces one more agent turn (decision:block) whose only job is to
-# *execute* asaki_memory_add with those pre-distilled fields — not to re-review the criteria,
-# since the classifier already did that. The classifier itself has no MCP/tool access, so a
-# misjudgment costs one wasted turn, never a bad write.
+# off. Instead of doing nothing, this hook runs a local classifier (`claude -p --safe-mode`, no
+# tools) in the background to judge the delta against the 6-criteria checklist and, if it
+# qualifies, distill it into one ready-to-write sentence (text/type/scope). If it qualifies, the
+# same background job then executes the write itself via plain HTTP — POST
+# /v1/memories/candidates, the identical server endpoint the asaki_memory_add MCP tool calls
+# under the hood (integrations/mcp/asaki-memory.ts), so it gets the same server-side dedup/merge
+# pipeline. No Claude/MCP/claude-p in that second step at all, so there's nothing for a model to
+# fabricate — the result is whatever the server actually decided. The next Stop event just
+# reports the outcome as a one-line systemMessage; the main conversation agent is never forced
+# into an extra turn for this path.
 #
-# An earlier version of this hook gave the classifier direct asaki_memory_add access (scoped MCP
-# tool, no --safe-mode) so it could write asynchronously with no forced continuation at all. That
-# was reverted after live testing showed MCP tool registration inside a single-shot `claude -p`
-# call is not reliably ready by the time the model decides whether to call it — in multiple runs
-# the model reported "no such tool," and in one run it fabricated a plausible-looking
-# `{"action":"added",...}` result for a write that never actually reached the server. Silent
-# false-success reports are worse than the friction this hook is trying to remove, so classifier
-# write access was dropped; see git history for the reverted implementation if revisiting this.
+# Two earlier designs were tried and reverted for this branch:
+# 1. Giving the classifier direct asaki_memory_add access via a scoped MCP tool (no --safe-mode)
+#    so it could write asynchronously itself. Reverted after live testing showed MCP tool
+#    registration inside a single-shot `claude -p` call is not reliably ready by the time the
+#    model decides whether to call it — in multiple runs the model reported "no such tool," and
+#    in one run it fabricated a plausible-looking `{"action":"added",...}` result for a write
+#    that never actually reached the server. Silent false-success reports are unacceptable.
+# 2. Forcing a `decision:"block"` continuation so the main agent executes asaki_memory_add with
+#    the classifier's pre-distilled fields (no re-review). This worked correctly but still cost
+#    one forced extra agent turn per qualifying candidate, and Claude Code's CLI renders any
+#    decision:block as "Stop hook error/feedback" regardless of content — confusing even for a
+#    non-error nudge, with no documented way to change that rendering.
+# The current plain-HTTP-write design avoids both problems: no MCP involved (nothing to register
+# late), no model self-report to trust (a real HTTP response), and no forced continuation.
 set -uo pipefail
 
 INPUT=$(cat)
@@ -74,50 +82,43 @@ CLASSIFIER_REPORTED_FILE="$STATE_DIR/${SESSION_ID}.classifier.reported"
 # the *previous* invocation's response landed in one of the log files since it was last
 # reported, and surfaces it — one turn of delay, but visible without blocking Stop every time.
 report_and_exit() {
-  # Classifier result takes priority: it's the structural trigger (decision:block), not just an
-  # FYI systemMessage. The two paths are mutually exclusive in practice (a session runs with
-  # AUTO_EXTRACT either on or off for its lifetime), so there's no real conflict to merge.
+  # Classifier result takes priority over the cloud-extraction counts below. The two paths are
+  # mutually exclusive in practice (a session runs with AUTO_EXTRACT either on or off for its
+  # lifetime), so there's no real conflict to merge. No decision:block here — the classifier's
+  # background job already executed the write itself via plain HTTP (see the dispatch branch
+  # below), so this just reports what actually happened, one turn later.
   if [ -f "$CLASSIFIER_LOG_FILE" ]; then
     CLASSIFIER_LAST_REPORTED=0
     [ -f "$CLASSIFIER_REPORTED_FILE" ] && CLASSIFIER_LAST_REPORTED=$(cat "$CLASSIFIER_REPORTED_FILE" 2>/dev/null || echo 0)
     CLASSIFIER_LOG_LINES=$(wc -l <"$CLASSIFIER_LOG_FILE" | tr -d ' ')
     if [ "$CLASSIFIER_LOG_LINES" -gt "$CLASSIFIER_LAST_REPORTED" ]; then
       CLASSIFIER_RESP="$(tail -n 1 "$CLASSIFIER_LOG_FILE" | sed -E 's/^[^ ]+ //')"
-      # Strip markdown code fence markers wherever they land in the line (not just at the start)
-      # — the background job below collapses the model's response to a single log line, so a
-      # multi-line ```json ... ``` wrapper survives as fence tokens embedded mid-line, not as
-      # separate lines.
-      CLASSIFIER_JSON=$(echo "$CLASSIFIER_RESP" | sed -E 's/```(json)?//g')
       # Only advance CLASSIFIER_REPORTED_FILE once this parses as valid JSON — a still-in-flight
-      # or failed background job must not be marked reported, or the next Stop event silently
-      # skips checking it forever.
-      if echo "$CLASSIFIER_JSON" | jq -e . >/dev/null 2>&1; then
+      # or failed background job (classifier crash, curl failure) must not be marked reported,
+      # or the next Stop event silently skips checking it forever. A failure here is silent by
+      # design (no message, no retry) — the offset was already consumed.
+      if echo "$CLASSIFIER_RESP" | jq -e . >/dev/null 2>&1; then
         echo "$CLASSIFIER_LOG_LINES" >"$CLASSIFIER_REPORTED_FILE"
-        FLAG=$(echo "$CLASSIFIER_JSON" | jq -r '.flag // false')
-        if [ "$FLAG" = "true" ]; then
-          TEXT_FIELD=$(echo "$CLASSIFIER_JSON" | jq -r '.text // ""')
-          TYPE_FIELD=$(echo "$CLASSIFIER_JSON" | jq -r '.type // "fact"')
-          SCOPE_FIELD=$(echo "$CLASSIFIER_JSON" | jq -r '.scope // "project"')
-          # `reason` here is the user-visible hook log line (shown after the turn, independent
-          # of what the model sees) — a one-line preview of what's about to be written, so the
-          # verdict is visible even before the forced continuation turn runs.
-          jq -cn --arg text "$TEXT_FIELD" --arg type "$TYPE_FIELD" --arg scope "$SCOPE_FIELD" '
-            {
-              decision: "block",
-              reason: ("🧠 Asaki classifier: 建议 add \"" + ($text | .[0:100]) + "\""),
-              hookSpecificOutput: {
-                hookEventName: "Stop",
-                additionalContext: ("The classifier already judged this candidate against the 6-criteria checklist — call asaki_memory_add(text=" + ($text | @json) + ", type=" + ($type | @json) + ", scope=" + ($scope | @json) + ") directly, no re-review needed. Only skip if you spot something clearly wrong, and say why briefly.")
-              }
-            }'
-          exit 0
-        else
-          # Visible even on a negative verdict — lets you see the classifier actually ran and
-          # what it concluded, instead of only ever seeing output when something gets flagged.
-          REASON=$(echo "$CLASSIFIER_JSON" | jq -r '.reason // ""')
-          jq -cn --arg reason "$REASON" '{systemMessage: ("🧠 Asaki classifier (prev turn): no candidate" + (if $reason == "" then "" else " — " + $reason end))}'
-          exit 0
+        ACTION=$(echo "$CLASSIFIER_RESP" | jq -r '.action // "failed"')
+        MEMORY=$(echo "$CLASSIFIER_RESP" | jq -r '.memory // ""')
+        case "$ACTION" in
+          add) VERB="add" ;;
+          merge) VERB="merge into existing" ;;
+          update) VERB="update existing with" ;;
+          delete) VERB="delete stale memory for" ;;
+          ignore) VERB="ignore (duplicate)" ;;
+          review) VERB="queue for review" ;;
+          skipped)
+            REASON=$(echo "$CLASSIFIER_RESP" | jq -r '.reason // ""')
+            jq -cn --arg r "$REASON" '{systemMessage: ("🧠 Asaki-memory (prev turn): skip" + (if $r == "" then "" else " — " + $r end))}'
+            exit 0
+            ;;
+          *) VERB="" ;;
+        esac
+        if [ -n "$VERB" ]; then
+          jq -cn --arg verb "$VERB" --arg m "$MEMORY" '{systemMessage: ("🧠 Asaki-memory: " + $verb + " \"" + ($m | .[0:120]) + "\"")}'
         fi
+        exit 0
       fi
     fi
   fi
@@ -303,10 +304,35 @@ Output your FINAL answer as compact JSON only, no other prose before or after it
 
   (
     RESP=$(claude -p --safe-mode --tools "" --model "$CLASSIFIER_MODEL" --system-prompt "$CLASSIFIER_SYSTEM_PROMPT" --json-schema "$CLASSIFIER_SCHEMA" "$CLASSIFIER_PROMPT" 2>>"$CLASSIFIER_LOG_FILE")
+    RESP_SINGLE_LINE=$(echo "$RESP" | tr '\n' ' ' | sed -E 's/```(json)?//g')
+    FLAG=$(echo "$RESP_SINGLE_LINE" | jq -r '.flag // false' 2>/dev/null)
+    if [ "$FLAG" = "true" ]; then
+      TEXT_FIELD=$(echo "$RESP_SINGLE_LINE" | jq -r '.text // ""')
+      TYPE_FIELD=$(echo "$RESP_SINGLE_LINE" | jq -r '.type // "fact"')
+      SCOPE_FIELD=$(echo "$RESP_SINGLE_LINE" | jq -r '.scope // "project"')
+      # Execute the write ourselves via plain HTTP — the same server endpoint the
+      # asaki_memory_add MCP tool calls under the hood (integrations/mcp/asaki-memory.ts), so it
+      # gets the identical server-side dedup/merge pipeline (src/services/candidates.ts). No
+      # Claude/MCP/claude-p involved in this step at all — a real HTTP round trip, so the result
+      # is whatever the server actually decided, never a model's unverifiable self-report.
+      CANDIDATE_BODY=$(jq -cn --arg content "$TEXT_FIELD" --arg kind "$TYPE_FIELD" --arg scope "$SCOPE_FIELD" \
+        --arg user "$ASAKI_USER" --arg project "$ASAKI_PROJECT" '
+        {user_id: $user, source: "claude-code:stop-classifier",
+         candidates: [{content: $content, kind: $kind, scope: $scope} + (if $scope == "project" then {project_id: $project} else {} end)]}')
+      ADD_RESP=$(curl -sf --max-time 20 -X POST "${ASAKI_BASE}/v1/memories/candidates" \
+        -H "Authorization: Bearer ${ASAKI_MEMORY_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "$CANDIDATE_BODY" 2>>"$CLASSIFIER_LOG_FILE")
+      ACTION=$(echo "$ADD_RESP" | jq -r '.decisions[0].action // "failed"' 2>/dev/null)
+      [ -z "$ACTION" ] && ACTION="failed"
+      FINAL_JSON=$(jq -cn --arg action "$ACTION" --arg memory "$TEXT_FIELD" '{action: $action, memory: $memory, reason: ""}')
+    else
+      REASON_FIELD=$(echo "$RESP_SINGLE_LINE" | jq -r '.reason // ""' 2>/dev/null)
+      FINAL_JSON=$(jq -cn --arg reason "$REASON_FIELD" '{action: "skipped", memory: "", reason: $reason}')
+    fi
     # Collapse to one line defensively before appending — report_and_exit's `tail -n 1` can only
     # ever recover a whole response if each run is exactly one log line.
-    RESP_SINGLE_LINE=$(echo "$RESP" | tr '\n' ' ')
-    echo "$(date -u +%FT%TZ) ${RESP_SINGLE_LINE}" >>"$CLASSIFIER_LOG_FILE"
+    echo "$(date -u +%FT%TZ) ${FINAL_JSON}" >>"$CLASSIFIER_LOG_FILE"
   ) >/dev/null 2>&1 &
   disown
 fi
