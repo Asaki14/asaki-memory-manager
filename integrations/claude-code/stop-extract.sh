@@ -88,17 +88,33 @@ report_and_exit() {
   # background job already executed the write itself via plain HTTP (see the dispatch branch
   # below), so this just reports what actually happened, one turn later.
   if [ -f "$CLASSIFIER_LOG_FILE" ]; then
-    CLASSIFIER_LAST_REPORTED=0
-    [ -f "$CLASSIFIER_REPORTED_FILE" ] && CLASSIFIER_LAST_REPORTED=$(cat "$CLASSIFIER_REPORTED_FILE" 2>/dev/null || echo 0)
     CLASSIFIER_LOG_LINES=$(wc -l <"$CLASSIFIER_LOG_FILE" | tr -d ' ')
-    if [ "$CLASSIFIER_LOG_LINES" -gt "$CLASSIFIER_LAST_REPORTED" ]; then
+    CLASSIFIER_LAST_LINES=0
+    CLASSIFIER_RETRIES=0
+    if [ -f "$CLASSIFIER_REPORTED_FILE" ]; then
+      read -r CLASSIFIER_LAST_LINES CLASSIFIER_RETRIES <"$CLASSIFIER_REPORTED_FILE" 2>/dev/null
+    fi
+    CLASSIFIER_LAST_LINES=${CLASSIFIER_LAST_LINES:-0}
+    CLASSIFIER_RETRIES=${CLASSIFIER_RETRIES:-0}
+    # Sticky report: this systemMessage can be silently squeezed out of the visible transcript
+    # when another Stop hook (e.g. a personal atomic-commit hook) finishes after this one —
+    # Claude Code surfaces only the last-finishing Stop hook's systemMessage for the turn, not
+    # every hook's. Re-emit the same unseen result for a few more Stop events instead of marking
+    # it consumed the instant it merely parses as valid JSON, so a single lost race doesn't mean
+    # the result is gone forever.
+    CLASSIFIER_MAX_RETRIES=3
+    if [ "$CLASSIFIER_LOG_LINES" -gt "$CLASSIFIER_LAST_LINES" ] || [ "$CLASSIFIER_RETRIES" -lt "$CLASSIFIER_MAX_RETRIES" ]; then
       CLASSIFIER_RESP="$(tail -n 1 "$CLASSIFIER_LOG_FILE" | sed -E 's/^[^ ]+ //')"
       # Only advance CLASSIFIER_REPORTED_FILE once this parses as valid JSON — a still-in-flight
       # or failed background job (classifier crash, curl failure) must not be marked reported,
       # or the next Stop event silently skips checking it forever. A failure here is silent by
       # design (no message, no retry) — the offset was already consumed.
       if echo "$CLASSIFIER_RESP" | jq -e . >/dev/null 2>&1; then
-        echo "$CLASSIFIER_LOG_LINES" >"$CLASSIFIER_REPORTED_FILE"
+        if [ "$CLASSIFIER_LOG_LINES" -gt "$CLASSIFIER_LAST_LINES" ]; then
+          echo "$CLASSIFIER_LOG_LINES 1" >"$CLASSIFIER_REPORTED_FILE"
+        else
+          echo "$CLASSIFIER_LOG_LINES $((CLASSIFIER_RETRIES + 1))" >"$CLASSIFIER_REPORTED_FILE"
+        fi
         ACTION=$(echo "$CLASSIFIER_RESP" | jq -r '.action // "failed"')
         MEMORY=$(echo "$CLASSIFIER_RESP" | jq -r '.memory // ""')
         case "$ACTION" in
