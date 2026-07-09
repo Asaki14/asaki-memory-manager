@@ -15,7 +15,13 @@
 
 ## 下一步（按优先级，代码审查发现的真缺陷/清理项，非猜测）
 
-当前没有排队中的下一步；有新发现再补。
+1. 控制注入记忆的上下文负担与注意力噪音
+   - 背景：长记忆存库本身不占当前 context，但 startup top memories、auto-inject/search 命中后会进入上下文；长条目会增加 token 成本，也会把旧实现细节/过程日志带进模型注意力。
+   - 方向：对 startup/search 输出增加单条字符上限或摘要化格式，优先保留稳定结论、scope/kind/importance/id，避免整段长因果链直接注入。
+   - `/memory` 审计增加“过长记忆”检查：例如 >300 中文字符建议压缩、拆分或改成指向文档路径；一条只保留一个稳定结论。
+   - 调整 classifier/agent 写入约束：preference/rule 目标 40-160 字，decision/workflow/bug_fix 目标 1-2 句、最多约 200-300 字。
+   - 验证：改输出截断/格式后跑 `npm run typecheck`，并用真实长记忆手动检查 Pi startup 隐藏注入与 `asaki_memory_search` 输出不会淹没其他上下文。
+
 
 1. ~~`expires_at` 字段没有被任何查询读取~~ — 已完成（选方向 b：删掉）
    - 生产 D1 核实过 `expires_at IS NOT NULL` 行数为 0（402 条记忆全没设过），装饰性死字段，直接删。
