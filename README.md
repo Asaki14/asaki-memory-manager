@@ -39,7 +39,7 @@ Cloudflare Worker (Hono + REST)
         |
         +--> Workers AI embedding: @cf/baai/bge-m3
         +--> Workers AI chat model: candidate decisions
-        +--> D1: source of truth for memories, events, projects, API keys
+        +--> D1: source of truth for memories, events, reviews
         +--> Vectorize: semantic index with metadata filters
 ```
 
@@ -251,7 +251,7 @@ curl -X POST http://127.0.0.1:8787/v1/memories/reviews/<review-id>/resolve \
   -d '{"user_id":"alice","action":"add","reason":"approved"}'
 ```
 
-Resolve actions: `add`, `merge`, `ignore`. `merge` requires `memory_id`. Pass `include_suggestions: true` to `/v1/memories/reviews/list` to attach a `potential_duplicate` hint (matched memory + heuristic-suggested action) to each pending review.
+Resolve actions: `add`, `merge`, `update`, `delete`, `ignore`. `merge`/`update`/`delete` require `memory_id`. Pass `include_suggestions: true` to `/v1/memories/reviews/list` to attach a `potential_duplicate` hint (matched memory + heuristic-suggested action) to each pending review.
 
 ## Claude Code integration
 
@@ -280,7 +280,13 @@ What it does: injects a real project-history digest at session start (no
 the agent decides for itself whether to call `asaki_memory_search`, a
 visible `🧠 Asaki memory ...` line whenever a memory tool actually runs, and a
 `/memory` slash command (`/memory status` checks backend connectivity; any
-other args run a full audit) — same audit workflow as the Pi extension. Set
+other args run a full audit) — same audit workflow as the Pi extension. A
+Stop hook also runs a local classifier in the background on every turn: with
+cloud auto-extract off (the default), it judges the conversation delta
+against a 6-criteria checklist and, for a qualifying candidate, writes it
+itself over plain HTTP (same server-side dedup/merge pipeline as
+`asaki_memory_add`) — no forced extra turn for the main agent, just a
+one-line `🧠 Asaki-memory: add "..."` report on the next turn. Set
 `ASAKI_MEMORY_AUTO_INJECT=1` to also mirror the Pi extension's deterministic
 keyword-triggered auto-inject before the agent starts (same
 `ASAKI_MEMORY_AUTO_INJECT_ALWAYS`/`ASAKI_MEMORY_AUTO_MIN_SCORE` knobs as
@@ -377,9 +383,6 @@ Core tables:
 - `memories`: memory body, scope, project/session metadata, kind, importance, confidence, status, index state.
 - `memory_events`: append-only operational events.
 - `memory_reviews`: pending and resolved candidate review queue.
-- `memory_sources`: optional source references.
-- `projects`: project metadata.
-- `api_keys`: reserved for table-driven auth.
 
 Memory kinds:
 
@@ -401,17 +404,20 @@ preference | rule | fact | decision | task_learning | bug_fix | workflow
 ```bash
 npm run typecheck
 npm run eval:candidates
+npm run eval:extraction
+npm run eval:classifier
 npm run smoke:management
 npm run db:migrate:local
 npm run dev
 ```
 
+Other maintenance scripts: `shadow-run:extraction`, `backfill:index`,
+`prune:stale` — see [`AGENTS.md`](AGENTS.md#commands) for full command
+reference and when to run each.
+
 ## Roadmap
 
-- Pending embedding retry cron.
-- Expiring session memory cleanup.
-- Import/export and lightweight management UI.
-- Table-driven API keys.
+See [`ROADMAP.md`](ROADMAP.md) for current priorities and deferred work.
 
 ## License
 
