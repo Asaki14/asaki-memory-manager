@@ -68,10 +68,12 @@ committed). Set them once in `~/.claude/settings.json`:
   - default `ASAKI_MEMORY_AUTO_EXTRACT=0`: cloud auto-extract stays off, but the
     hook runs a local, no-write-access classifier via `claude -p --safe-mode`
     in the background. This still sends the conversation delta to the Claude
-    CLI/model provider, but it cannot write memory directly. If it flags a
-    durable-memory candidate, the next Stop event returns `decision:"block"` to
-    force one more agent turn; the main agent must then check the 6-criteria
-    checklist and decide whether to call `asaki_memory_add`.
+    CLI/model provider, but it cannot write memory directly. It judges the
+    delta against the 6-criteria checklist and, if it qualifies, pre-distills
+    it into ready-to-write fields (one-sentence `text`, `type`, `scope`). The
+    next Stop event then returns `decision:"block"` to force one more agent
+    turn whose only job is to execute `asaki_memory_add` with those fields —
+    not to re-review the checklist, since the classifier already did.
 
   Both modes are throttled to at most once per
   `ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS` (default 300) — a throttled
