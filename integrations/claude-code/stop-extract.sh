@@ -12,19 +12,22 @@
 # When ASAKI_MEMORY_AUTO_EXTRACT is unset/0 (the default), cloud auto-extract is permanently
 # off and the conversation agent is the sole writer of durable memory. Instead of doing nothing,
 # this hook runs a local, no-write-access classifier (`claude -p --safe-mode`) in the background
-# to flag whether the delta looks like it contains a durable-memory candidate. If the previous
-# turn's classifier run flagged something, this Stop event forces one more agent turn
-# (decision:block) to check it against the 6-criteria checklist and decide whether to call
-# asaki_memory_add — the classifier itself has no asaki_memory_add access, it can only nudge.
+# to judge the delta against the 6-criteria checklist and, if it qualifies, distill it into one
+# ready-to-write sentence (text/type/scope). If the previous turn's classifier run flagged
+# something, this Stop event forces one more agent turn (decision:block) whose only job is to
+# *execute* asaki_memory_add with those pre-distilled fields — not to re-review the criteria,
+# since the classifier already did that. The classifier itself has no MCP/tool access, so a
+# misjudgment costs one wasted turn, never a bad write.
+#
+# An earlier version of this hook gave the classifier direct asaki_memory_add access (scoped MCP
+# tool, no --safe-mode) so it could write asynchronously with no forced continuation at all. That
+# was reverted after live testing showed MCP tool registration inside a single-shot `claude -p`
+# call is not reliably ready by the time the model decides whether to call it — in multiple runs
+# the model reported "no such tool," and in one run it fabricated a plausible-looking
+# `{"action":"added",...}` result for a write that never actually reached the server. Silent
+# false-success reports are worse than the friction this hook is trying to remove, so classifier
+# write access was dropped; see git history for the reverted implementation if revisiting this.
 set -uo pipefail
-
-# Guard against the classifier's own `claude -p` subprocess re-triggering this same Stop hook:
-# if it loads the asaki-memory plugin (needed for MCP tool access), it also loads this hook's
-# own hooks.json, and its Stop event would spawn *another* classifier subprocess with a fresh
-# session_id — the stop_hook_active guard below cannot catch this since that flag only covers
-# Claude Code's own block/continue mechanism, not an independently spawned child process tree.
-# This must be checked before anything else in the script, unconditionally.
-[ -n "${ASAKI_MEMORY_CLASSIFIER_CHILD:-}" ] && exit 0
 
 INPUT=$(cat)
 
@@ -85,32 +88,34 @@ report_and_exit() {
       # multi-line ```json ... ``` wrapper survives as fence tokens embedded mid-line, not as
       # separate lines.
       CLASSIFIER_JSON=$(echo "$CLASSIFIER_RESP" | sed -E 's/```(json)?//g')
-      # Only advance CLASSIFIER_REPORTED_FILE once this parses as valid JSON — same reasoning as
-      # the cloud path below: a still-in-flight or failed background job must not be marked
-      # reported, or the next Stop event silently skips checking it forever.
+      # Only advance CLASSIFIER_REPORTED_FILE once this parses as valid JSON — a still-in-flight
+      # or failed background job must not be marked reported, or the next Stop event silently
+      # skips checking it forever.
       if echo "$CLASSIFIER_JSON" | jq -e . >/dev/null 2>&1; then
         echo "$CLASSIFIER_LOG_LINES" >"$CLASSIFIER_REPORTED_FILE"
         FLAG=$(echo "$CLASSIFIER_JSON" | jq -r '.flag // false')
         if [ "$FLAG" = "true" ]; then
-          SUMMARY=$(echo "$CLASSIFIER_JSON" | jq -r '.summary // ""')
-          # `reason` is the user-visible hook log line (shown after the turn, independent of
-          # what the model sees) — put the classifier's actual verdict there so the summary is
-          # visible even before the forced continuation turn runs.
-          jq -cn --arg summary "$SUMMARY" '
+          TEXT_FIELD=$(echo "$CLASSIFIER_JSON" | jq -r '.text // ""')
+          TYPE_FIELD=$(echo "$CLASSIFIER_JSON" | jq -r '.type // "fact"')
+          SCOPE_FIELD=$(echo "$CLASSIFIER_JSON" | jq -r '.scope // "project"')
+          # `reason` here is the user-visible hook log line (shown after the turn, independent
+          # of what the model sees) — a one-line preview of what's about to be written, so the
+          # verdict is visible even before the forced continuation turn runs.
+          jq -cn --arg text "$TEXT_FIELD" --arg type "$TYPE_FIELD" --arg scope "$SCOPE_FIELD" '
             {
               decision: "block",
-              reason: ("🧠 Asaki classifier flagged: " + $summary),
+              reason: ("🧠 Asaki classifier: 建议 add \"" + ($text | .[0:100]) + "\""),
               hookSpecificOutput: {
                 hookEventName: "Stop",
-                additionalContext: ("Classifier flagged this candidate: \"" + $summary + "\". Check it against the 6-criteria checklist (durable / actually happened / not noise / not duplicate — asaki_memory_search first / self-contained / right scope) and call asaki_memory_add if it qualifies. If not, say why briefly and move on.")
+                additionalContext: ("The classifier already judged this candidate against the 6-criteria checklist — call asaki_memory_add(text=" + ($text | @json) + ", type=" + ($type | @json) + ", scope=" + ($scope | @json) + ") directly, no re-review needed. Only skip if you spot something clearly wrong, and say why briefly.")
               }
             }'
           exit 0
         else
           # Visible even on a negative verdict — lets you see the classifier actually ran and
           # what it concluded, instead of only ever seeing output when something gets flagged.
-          SUMMARY=$(echo "$CLASSIFIER_JSON" | jq -r '.summary // ""')
-          jq -cn --arg summary "$SUMMARY" '{systemMessage: ("🧠 Asaki classifier (prev turn): no candidate" + (if $summary == "" then "" else " — " + $summary end))}'
+          REASON=$(echo "$CLASSIFIER_JSON" | jq -r '.reason // ""')
+          jq -cn --arg reason "$REASON" '{systemMessage: ("🧠 Asaki classifier (prev turn): no candidate" + (if $reason == "" then "" else " — " + $reason end))}'
           exit 0
         fi
       fi
@@ -260,20 +265,38 @@ else
   # that discuss this very classifier/memory mechanism) reliably pull the model into "continuing
   # the conversation" instead of classifying it, producing prose instead of JSON. Confirmed via
   # two real production failures before this flag was added.
-  CLASSIFIER_SCHEMA='{"type":"object","properties":{"flag":{"type":"boolean"},"summary":{"type":"string"}},"required":["flag","summary"],"additionalProperties":false}'
+  CLASSIFIER_SCHEMA='{"type":"object","properties":{"flag":{"type":"boolean"},"text":{"type":"string"},"type":{"type":"string"},"scope":{"type":"string"},"reason":{"type":"string"}},"required":["flag","text","type","scope","reason"],"additionalProperties":false}'
   # --system-prompt fully replaces Claude Code's default system prompt (which otherwise leaks
   # ambient cwd/git-status context into every call) — confirmed via direct test. It also cleanly
   # separates role/instructions from the delta content itself (system turn vs. user turn),
   # instead of concatenating both into one prompt string.
-  # KEEP IN SYNC with the prompt template in scripts/eval-classifier.sh.
-  CLASSIFIER_SYSTEM_PROMPT='You are a memory-candidate detector, not a writer. Given a conversation delta, decide if it contains something worth flagging for the main agent to consider saving as a durable memory: a stated preference, a made decision, a completed bug fix or verified task outcome (look for cues like 已验证/已修复/已确认/根因是/verified/fixed/root cause is), an established rule/convention (以后都/统一用/from now on), or an explicit forget/retract request.
-Do NOT flag: questions, chit-chat, one-off commands, hypothetical/illustrative examples or quoted text used only to explain how something works (even if the quoted text itself sounds like a preference), an in-progress/undecided plan, or a routine implementation-progress update within ongoing work.
+  # KEEP IN SYNC with the judgment/distill/scope-rule prompt template in scripts/eval-classifier.sh,
+  # and (scope rule wording) with src/services/extraction.ts's SYSTEM_PROMPT / commands/memory.md /
+  # integrations/pi/asaki-memory.ts.
+  CLASSIFIER_SYSTEM_PROMPT='You are a memory-candidate detector, not a writer. Given a conversation delta, decide if it contains something worth saving as a durable memory, and if so pre-distill it into ready-to-write fields — the main agent will execute the write, not re-review your judgment, so make the call carefully here.
+
+Apply this checklist:
+1. Durable — will this still matter later, not just for the current task.
+2. Actually happened — a completed decision/fact/fix, not a proposal, question, or hypothetical.
+3. Not noise — not chit-chat, a one-off command, or quoted code/CLI output/prompt text used only to explain how something works (even if the quoted text itself sounds like a preference).
+4. Self-contained — understandable on its own, without the rest of the conversation.
+5. Right scope — see scope rule below.
+
+Do NOT flag: an in-progress/undecided plan, or a routine implementation-progress update within ongoing work.
 
 Two contrastive examples:
 - "解决了内存泄漏问题，已验证生效" -> flag=true (a previously-existing problem is now resolved).
 - "加了个测试用例，跑了一下全过了" -> flag=false (a routine step of ongoing work, no prior problem being resolved, nothing durable to recall later).
 
-Be conservative: when genuinely unsure, prefer flag=false — a missed candidate falls back to the existing prompt-based reminder, a false alarm costs the main agent one wasted turn.'
+If flag=true, distill: compress the candidate into exactly ONE self-contained sentence for `text`, roughly 40-160 characters, same language as the source. No bullet lists. One fact per memory — never chain multiple facts with semicolons/commas. Never paste raw code, CLI output, or a multi-paragraph narrative.
+
+Classify (only meaningful when flag=true):
+- type: preference | rule | fact | decision | task_learning | bug_fix | workflow
+- scope rule: "global" only if the statement would genuinely help in ANY unrelated project (cross-project dev preferences, communication/output style, secret-handling rules, durable personal/identity facts), and "project" for everything else, including system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs, OS-level fixes) even when it was not said inside a recognizable project. When ambiguous, prefer "project".
+
+Be conservative: when genuinely unsure, prefer flag=false — a missed candidate falls back to the existing prompt-based reminder, a false alarm costs the main agent one wasted turn.
+
+Output your FINAL answer as compact JSON only, no other prose before or after it: {"flag":true|false,"text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","reason":"<short reason, especially when flag=false>"}'
   CLASSIFIER_PROMPT=$(printf 'Delta:\n%s' "$TEXT")
 
   echo "$NOW_EPOCH" >"$LAST_EXTRACT_FILE"
