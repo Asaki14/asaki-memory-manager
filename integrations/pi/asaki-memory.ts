@@ -653,14 +653,17 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_end", async (event, ctx) => {
+    const hasUI = ctx.hasUI;
+    const notify = hasUI ? ctx.ui.notify.bind(ctx.ui) : null;
+
     void autoExtractMemory(event.messages, ctx, pi)
       .then((summary) => {
-        if (summary && ctx.hasUI) ctx.ui.notify(`🧠 Asaki memory: ${summary}`, "info");
+        if (summary && notify) notify(`🧠 Asaki memory: ${summary}`, "info");
       })
       .catch((error) => {
-        if (envFlagEnabled("ASAKI_MEMORY_DEBUG", false) && ctx.hasUI) {
+        if (envFlagEnabled("ASAKI_MEMORY_DEBUG", false) && notify) {
           const message = error instanceof Error ? error.message : String(error);
-          ctx.ui.notify(`Asaki auto-extract failed: ${message}`, "warning");
+          notify(`Asaki auto-extract failed: ${message}`, "warning");
         }
       });
   });
