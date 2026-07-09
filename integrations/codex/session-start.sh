@@ -48,12 +48,7 @@ fi
 cat <<BANNER
 ## Asaki Memory Active
 
-\`user=${ASAKI_USER} | project=${ASAKI_PROJECT} | memories=${MEMORY_COUNT}\`
-
-IMPORTANT: In your FIRST response, display this exact status line as your opening line:
-\`\`\`
-Asaki Memory Active | user=${ASAKI_USER} | project=${ASAKI_PROJECT} | memories=${MEMORY_COUNT}
-\`\`\`
+Open your first reply with: \`Asaki Memory Active | user=${ASAKI_USER} | project=${ASAKI_PROJECT} | memories=${MEMORY_COUNT}\`
 
 Always include \`user_id: "${ASAKI_USER}"\` in every \`asaki_memory_search\` and \`asaki_memory_add\` call.
 
