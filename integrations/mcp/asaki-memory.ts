@@ -23,6 +23,7 @@ const SOURCE_TAG = process.env.ASAKI_MEMORY_SOURCE || "mcp";
 // search/list can return up to 50/100 items). KEEP IN SYNC with the same constant in
 // integrations/pi/asaki-memory.ts and integrations/claude-code/user-prompt.sh.
 const MAX_TOOL_OUTPUT_CHARS = 6000;
+const MEMORY_CONTEXT_CONTENT_CHARS = 280;
 
 const SCOPES = ["global", "project", "session"] as const;
 const KINDS = ["preference", "rule", "fact", "decision", "task_learning", "bug_fix", "workflow"] as const;
@@ -154,7 +155,11 @@ function withBudgetFooter(budget: BudgetedJoin, continueOffset?: number): string
   return `${budget.text}\n...(showing ${budget.shown}/${budget.total}, output budget reached${hint})`;
 }
 
-function formatLine(item: Record<string, unknown>, index?: number): string {
+function truncateText(text: string, maxChars: number): string {
+  return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+}
+
+function formatLine(item: Record<string, unknown>, index?: number, maxContentChars?: number): string {
   const prefix = index == null ? "" : `${index + 1}. `;
   const id = item.id ? ` id=${item.id}` : "";
   const scope = item.scope ? ` scope=${item.scope}` : "";
@@ -163,7 +168,9 @@ function formatLine(item: Record<string, unknown>, index?: number): string {
   const importance = typeof item.importance === "number" ? ` importance=${item.importance.toFixed(2)}` : "";
   const updatedAt = item.updated_at ? ` updated_at=${item.updated_at}` : "";
   const content = item.content ?? item.memory ?? item.text;
-  return `${prefix}${typeof content === "string" ? content : JSON.stringify(item)}${id}${scope}${kind}${status}${importance}${updatedAt}`;
+  const text = typeof content === "string" ? content : JSON.stringify(item);
+  const shown = maxContentChars == null ? text : truncateText(text, maxContentChars);
+  return `${prefix}${shown}${id}${scope}${kind}${status}${importance}${updatedAt}`;
 }
 
 function formatScoreDetails(details: unknown): string {
@@ -226,7 +233,7 @@ server.tool(
       const score = typeof item.score === "number" ? ` score=${item.score.toFixed(3)}` : "";
       const similarity = typeof item.similarity === "number" ? ` similarity=${item.similarity.toFixed(3)}` : "";
       const scoreDetails = debug ? formatScoreDetails(item.score_details) : "";
-      return `${formatLine(item, index)}${score}${similarity}${scoreDetails}`;
+      return `${formatLine(item, index, MEMORY_CONTEXT_CONTENT_CHARS)}${score}${similarity}${scoreDetails}`;
     });
     return { content: [{ type: "text" as const, text: withBudgetFooter(joinWithinBudget(lines)) }] };
   },
@@ -236,7 +243,7 @@ server.tool(
   "asaki_memory_add",
   "Store a durable memory in Asaki personal memory. Do not store secrets or sensitive transient data.",
   {
-    text: z.string().describe("Concise, self-contained memory text to store (1-3 sentences, roughly 40-300 chars). Summarize the durable takeaway only — never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives."),
+    text: z.string().describe("Concise, self-contained memory text to store. Preference/rule: roughly 40-160 chars. Decision/workflow/bug_fix/task_learning: 1-2 sentences, at most roughly 200-300 chars. Summarize the durable takeaway only."),
     type: z.string().optional().describe("Memory kind."),
     scope: z.enum(["global", "project", "session"]).optional().describe("Memory scope."),
     project_id: z.string().optional().describe("Project id override."),

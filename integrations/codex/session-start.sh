@@ -52,7 +52,7 @@ Open your first reply with: \`Asaki Memory Active | user=${ASAKI_USER} | project
 
 Always include \`user_id: "${ASAKI_USER}"\` in every \`asaki_memory_search\` and \`asaki_memory_add\` call.
 
-After completing any task, decision, or meaningful exchange, proactively store learnings via \`asaki_memory_add\`. Do NOT wait — store incrementally. Focus on: decisions made, bugs fixed, patterns discovered, user preferences, task outcomes. Aim for 1–3 memories per substantial interaction. Keep each memory to 1-3 sentences summarizing the durable takeaway only — never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives.
+After completing any task, decision, or meaningful exchange, proactively store learnings via \`asaki_memory_add\`. Do NOT wait — store incrementally. Focus on: decisions made, bugs fixed, patterns discovered, user preferences, task outcomes. Aim for 1–3 memories per substantial interaction. Keep each memory concise: preference/rule should be roughly 40-160 chars; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 chars. Summarize the durable takeaway only — never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives.
 BANNER
 
 if [ "$SOURCE" = "startup" ]; then
