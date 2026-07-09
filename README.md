@@ -317,17 +317,11 @@ export ASAKI_MEMORY_AUTO_EXTRACT="0"
 export ASAKI_MEMORY_AUTO_CLASSIFIER="1"
 export ASAKI_MEMORY_CLASSIFIER_MODEL="opencode/deepseek-v4-flash-free"
 export ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS="300"
-export ASAKI_MEMORY_STARTUP_INJECT="1"
-export ASAKI_MEMORY_STARTUP_TOP_K="6"
 ```
 
 On every `session_start` (new/resume/fork, not plain extension `reload`), the
 next turn's `before_agent_start` injects a compact status banner with user,
-project, memory count, pending review count, auto-extract state, and classifier state, plus
-(default on; set `ASAKI_MEMORY_STARTUP_INJECT=0` or `startupInject: false` in
-the local config file to disable) the top `ASAKI_MEMORY_STARTUP_TOP_K`
-(default 6) highest-importance active memories as a one-shot seed — not a
-per-turn injection. A fixed memory-precheck instruction also fires every turn so the
+project, memory count, pending review count, auto-extract state, and classifier state — no memory content. A fixed memory-precheck instruction also fires every turn so the
 agent decides for itself whether to call `asaki_memory_search`/`asaki_memory_add`.
 `ASAKI_MEMORY_AUTO_INJECT` (default off) additionally does a deterministic
 keyword-triggered search on top of that judgment call.

@@ -10,7 +10,6 @@ const DEFAULT_USER_ID = "asaki";
 const DEFAULT_SCOPE = "project";
 const DEFAULT_AUTO_MIN_SCORE = 0.67;
 const AUTO_INJECT_TOP_K = 6;
-const DEFAULT_STARTUP_TOP_K = 6;
 const AUTO_EXTRACT_MAX_CHARS = 20_000;
 const AUTO_EXTRACT_TIMEOUT_MS = 20_000;
 const DEFAULT_EXTRACT_MIN_INTERVAL_SECONDS = 300;
@@ -76,8 +75,6 @@ function memoryConfig() {
     autoMinScore: numberConfig(process.env.ASAKI_MEMORY_AUTO_MIN_SCORE, numberConfig(fileConfig.autoMinScore ?? fileConfig.auto_min_score, DEFAULT_AUTO_MIN_SCORE)),
     autoExtract: envFlagEnabledConfig(process.env.ASAKI_MEMORY_AUTO_EXTRACT ?? fileConfig.autoExtract ?? fileConfig.auto_extract, false),
     autoClassifier: envFlagEnabledConfig(process.env.ASAKI_MEMORY_AUTO_CLASSIFIER ?? fileConfig.autoClassifier ?? fileConfig.auto_classifier, true),
-    startupInject: envFlagEnabledConfig(process.env.ASAKI_MEMORY_STARTUP_INJECT ?? fileConfig.startupInject ?? fileConfig.startup_inject, true),
-    startupTopK: numberConfig(process.env.ASAKI_MEMORY_STARTUP_TOP_K, numberConfig(fileConfig.startupTopK ?? fileConfig.startup_top_k, DEFAULT_STARTUP_TOP_K)),
     extractMinIntervalMs:
       numberConfig(process.env.ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS, numberConfig(fileConfig.extractMinIntervalSeconds ?? fileConfig.extract_min_interval_seconds, DEFAULT_EXTRACT_MIN_INTERVAL_SECONDS)) * 1000,
     classifierModel:
@@ -356,25 +353,7 @@ async function buildSessionBanner(ctx: unknown, signal?: AbortSignal): Promise<s
     const memories = Array.isArray(memoryData?.memories) ? (memoryData.memories as Record<string, unknown>[]) : [];
     const memoryCount = Array.isArray(memoryData?.memories) ? `${memories.length}${memories.length === 100 ? "+" : ""}` : "?";
     const pendingReviews = Array.isArray(reviewData?.reviews) ? `${reviewData.reviews.length}${reviewData.reviews.length === 100 ? "+" : ""}` : "?";
-    const header = `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=${memoryCount} | pendingReviews=${pendingReviews} | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${classifier}`;
-
-    if (!config.startupInject || memories.length === 0) return header;
-
-    const sortByImportanceDesc = (items: Record<string, unknown>[]) =>
-      [...items].sort((a, b) => (typeof b.importance === "number" ? b.importance : 0) - (typeof a.importance === "number" ? a.importance : 0));
-
-    const [globalData, projectData] = await Promise.all([
-      memoryRequest("/v1/memories/list", { user_id: config.userId, scope: "global", status: "active", limit: 100 }, signal),
-      memoryRequest("/v1/memories/list", { user_id: config.userId, scope: "project", project_id: projectId, status: "active", limit: 100 }, signal),
-    ]);
-    const globalMemories = Array.isArray(globalData?.memories) ? (globalData.memories as Record<string, unknown>[]) : [];
-    const projectMemories = Array.isArray(projectData?.memories) ? (projectData.memories as Record<string, unknown>[]) : [];
-    const topMemories = [
-      ...sortByImportanceDesc(globalMemories).slice(0, config.startupTopK),
-      ...sortByImportanceDesc(projectMemories).slice(0, config.startupTopK),
-    ].map((item, index) => formatMemoryLine(item, index));
-    if (topMemories.length === 0) return header;
-    return `${header}\n\nTop ${config.startupTopK} global + top ${config.startupTopK} project memories (highest importance, one-shot seed):\n${topMemories.join("\n")}`;
+    return `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=${memoryCount} | pendingReviews=${pendingReviews} | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${classifier}`;
   } catch {
     return `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=? | pendingReviews=? | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${classifier}`;
   }

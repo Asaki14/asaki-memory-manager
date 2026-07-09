@@ -8,15 +8,6 @@
 # intentionally mirrors the Pi extension's buildSessionBanner(): numbers
 # only, the agent decides for itself when to actually search/read memories.
 #
-# Also injects the top ASAKI_MEMORY_STARTUP_TOP_K (default 6) highest-
-# importance active memories from each of the global and project scopes
-# once at session start (startup/resume, not compact) — a one-shot seed so
-# the agent doesn't need to search for well-known context immediately.
-# Scopes are seeded independently (not pooled-then-sorted) so a scope with
-# many high-importance memories can't crowd the other one out entirely.
-# Later turns still rely on on-demand search rather than per-turn
-# auto-inject. Default on; set ASAKI_MEMORY_STARTUP_INJECT=0 to disable.
-#
 # The "primary writer" durable-memory judgment checklist below (durable /
 # actually happened / not noise / not a duplicate / right scope) is
 # KEEP IN SYNC with the asaki_memory_add promptGuidelines in
@@ -73,38 +64,10 @@ if command -v curl >/dev/null 2>&1; then
   [ -n "$REVIEW_RESP" ] && PENDING_REVIEWS=$(echo "$REVIEW_RESP" | jq '(.reviews // []) | length' 2>/dev/null || echo "?")
 fi
 
-TOP_MEMORIES_SECTION=""
-if [ "${ASAKI_MEMORY_STARTUP_INJECT:-1}" = "1" ] && [ "$SOURCE" != "compact" ]; then
-  TOP_K="${ASAKI_MEMORY_STARTUP_TOP_K:-6}"
-
-  GLOBAL_RESP=$(curl -sf --max-time 4 -X POST "${ASAKI_BASE}/v1/memories/list" \
-    -H "Authorization: Bearer ${ASAKI_MEMORY_API_KEY}" \
-    -H "Content-Type: application/json" \
-    -d "{\"user_id\":\"${ASAKI_USER}\",\"scope\":\"global\",\"status\":\"active\",\"limit\":100}" 2>/dev/null || echo "")
-  PROJECT_RESP=$(curl -sf --max-time 4 -X POST "${ASAKI_BASE}/v1/memories/list" \
-    -H "Authorization: Bearer ${ASAKI_MEMORY_API_KEY}" \
-    -H "Content-Type: application/json" \
-    -d "{\"user_id\":\"${ASAKI_USER}\",\"scope\":\"project\",\"project_id\":\"${ASAKI_PROJECT}\",\"status\":\"active\",\"limit\":100}" 2>/dev/null || echo "")
-
-  TOP_FILTER='(.memories // []) | sort_by(-(.importance // 0)) | .[0:$k] | map("- [\(.scope)/\(.kind), importance=\(.importance)] \(.content)") | .[]'
-  TOP_GLOBAL=$([ -n "$GLOBAL_RESP" ] && echo "$GLOBAL_RESP" | jq -r --argjson k "$TOP_K" "$TOP_FILTER" 2>/dev/null || echo "")
-  TOP_PROJECT=$([ -n "$PROJECT_RESP" ] && echo "$PROJECT_RESP" | jq -r --argjson k "$TOP_K" "$TOP_FILTER" 2>/dev/null || echo "")
-  TOP_MEMORIES=$(printf '%s\n%s' "$TOP_GLOBAL" "$TOP_PROJECT" | sed '/^$/d')
-
-  if [ -n "$TOP_MEMORIES" ]; then
-    TOP_MEMORIES_SECTION="
-### Top ${TOP_K} global + top ${TOP_K} project memories (highest importance, one-shot seed)
-
-${TOP_MEMORIES}
-"
-  fi
-fi
-
 cat <<BANNER
 ## Asaki Memory Active
 
 Open your first reply with: \`Asaki Memory Active | user=${ASAKI_USER} | project=${ASAKI_PROJECT} | memories=${MEMORY_COUNT} | pendingReviews=${PENDING_REVIEWS} | autoExtract=${AUTO_EXTRACT_STATE}\`
-${TOP_MEMORIES_SECTION}
 Always include \`user_id: "${ASAKI_USER}"\` in every \`asaki_memory_search\` and \`asaki_memory_add\` call.
 
 You are the primary writer for durable memory — cloud auto-extraction is off, so if you don't call \`asaki_memory_add\`, nothing gets recorded. This means recording deliberately, not more. Before calling \`asaki_memory_add\`, check ALL of:
