@@ -335,12 +335,17 @@ function isRealProject(ctx: unknown): boolean {
   return findGitRoot(cwdFromContext(ctx)) !== null;
 }
 
+function classifierBanner(config: ReturnType<typeof memoryConfig>): string {
+  return !config.autoExtract && config.autoClassifier ? `on model=${config.classifierModel}` : "off";
+}
+
 async function buildSessionBanner(ctx: unknown, signal?: AbortSignal): Promise<string | null> {
   const config = memoryConfig();
   const projectId = resolveProjectId(ctx) || "unknown";
   const project = isRealProject(ctx) ? projectId : "none";
+  const classifier = classifierBanner(config);
   if (!config.apiKey) {
-    return `Asaki Memory — setup required\nuser=${config.userId} | project=${project} | auth=missing | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${!config.autoExtract && config.autoClassifier ? "on" : "off"}`;
+    return `Asaki Memory — setup required\nuser=${config.userId} | project=${project} | auth=missing | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${classifier}`;
   }
 
   try {
@@ -351,7 +356,7 @@ async function buildSessionBanner(ctx: unknown, signal?: AbortSignal): Promise<s
     const memories = Array.isArray(memoryData?.memories) ? (memoryData.memories as Record<string, unknown>[]) : [];
     const memoryCount = Array.isArray(memoryData?.memories) ? `${memories.length}${memories.length === 100 ? "+" : ""}` : "?";
     const pendingReviews = Array.isArray(reviewData?.reviews) ? `${reviewData.reviews.length}${reviewData.reviews.length === 100 ? "+" : ""}` : "?";
-    const header = `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=${memoryCount} | pendingReviews=${pendingReviews} | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${!config.autoExtract && config.autoClassifier ? "on" : "off"}`;
+    const header = `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=${memoryCount} | pendingReviews=${pendingReviews} | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${classifier}`;
 
     if (!config.startupInject || memories.length === 0) return header;
 
@@ -371,7 +376,7 @@ async function buildSessionBanner(ctx: unknown, signal?: AbortSignal): Promise<s
     if (topMemories.length === 0) return header;
     return `${header}\n\nTop ${config.startupTopK} global + top ${config.startupTopK} project memories (highest importance, one-shot seed):\n${topMemories.join("\n")}`;
   } catch {
-    return `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=? | pendingReviews=? | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${!config.autoExtract && config.autoClassifier ? "on" : "off"}`;
+    return `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=? | pendingReviews=? | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${classifier}`;
   }
 }
 
@@ -680,8 +685,8 @@ export default function (pi: ExtensionAPI) {
           `- apiKey: ${config.apiKey ? "configured" : "missing"}`,
           `- userId: ${config.userId}`,
           `- defaultScope: ${config.defaultScope}`,
-          `- autoExtract: ${config.autoExtract ? "enabled" : "disabled"}`,
-          `- autoClassifier: ${!config.autoExtract && config.autoClassifier ? "enabled" : "disabled"}`,
+          `- autoExtract: ${config.autoExtract ? "on" : "off"}`,
+          `- classifier: ${!config.autoExtract && config.autoClassifier ? "on" : "off"}`,
           `- classifierModel: ${config.classifierModel}`,
           `- projectId: ${resolveProjectId(ctx) || "missing"}`,
           `- sessionId: ${config.sessionId || "missing"}`,
