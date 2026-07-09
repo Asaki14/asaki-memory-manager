@@ -14,6 +14,8 @@ const DEFAULT_STARTUP_TOP_K = 6;
 const AUTO_EXTRACT_MAX_CHARS = 20_000;
 const AUTO_EXTRACT_TIMEOUT_MS = 20_000;
 const DEFAULT_EXTRACT_MIN_INTERVAL_SECONDS = 300;
+const DEFAULT_CLASSIFIER_MODEL = "opencode/deepseek-v4-flash-free";
+const CLASSIFIER_TIMEOUT_MS = 120_000;
 // Caps how much text a single tool call (or auto-inject) can put into the agent's context,
 // independent of item count (a memory's content can be up to 8000 chars, and search/list can
 // return up to 50/100 items). KEEP IN SYNC with the same constant in
@@ -73,10 +75,16 @@ function memoryConfig() {
     defaultScope: normalizeScope(process.env.ASAKI_MEMORY_DEFAULT_SCOPE || stringConfig(fileConfig, "defaultScope", "default_scope")) || DEFAULT_SCOPE,
     autoMinScore: numberConfig(process.env.ASAKI_MEMORY_AUTO_MIN_SCORE, numberConfig(fileConfig.autoMinScore ?? fileConfig.auto_min_score, DEFAULT_AUTO_MIN_SCORE)),
     autoExtract: envFlagEnabledConfig(process.env.ASAKI_MEMORY_AUTO_EXTRACT ?? fileConfig.autoExtract ?? fileConfig.auto_extract, false),
+    autoClassifier: envFlagEnabledConfig(process.env.ASAKI_MEMORY_AUTO_CLASSIFIER ?? fileConfig.autoClassifier ?? fileConfig.auto_classifier, true),
     startupInject: envFlagEnabledConfig(process.env.ASAKI_MEMORY_STARTUP_INJECT ?? fileConfig.startupInject ?? fileConfig.startup_inject, true),
     startupTopK: numberConfig(process.env.ASAKI_MEMORY_STARTUP_TOP_K, numberConfig(fileConfig.startupTopK ?? fileConfig.startup_top_k, DEFAULT_STARTUP_TOP_K)),
     extractMinIntervalMs:
       numberConfig(process.env.ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS, numberConfig(fileConfig.extractMinIntervalSeconds ?? fileConfig.extract_min_interval_seconds, DEFAULT_EXTRACT_MIN_INTERVAL_SECONDS)) * 1000,
+    classifierModel:
+      process.env.ASAKI_MEMORY_CLASSIFIER_MODEL ||
+      process.env.PI_ATOMIC_COMMIT_MESSAGE_MODEL ||
+      stringConfig(fileConfig, "classifierModel", "classifier_model") ||
+      DEFAULT_CLASSIFIER_MODEL,
   };
 }
 
@@ -332,7 +340,7 @@ async function buildSessionBanner(ctx: unknown, signal?: AbortSignal): Promise<s
   const projectId = resolveProjectId(ctx) || "unknown";
   const project = isRealProject(ctx) ? projectId : "none";
   if (!config.apiKey) {
-    return `Asaki Memory — setup required\nuser=${config.userId} | project=${project} | auth=missing | autoExtract=${config.autoExtract ? "on" : "off"}`;
+    return `Asaki Memory — setup required\nuser=${config.userId} | project=${project} | auth=missing | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${!config.autoExtract && config.autoClassifier ? "on" : "off"}`;
   }
 
   try {
@@ -343,7 +351,7 @@ async function buildSessionBanner(ctx: unknown, signal?: AbortSignal): Promise<s
     const memories = Array.isArray(memoryData?.memories) ? (memoryData.memories as Record<string, unknown>[]) : [];
     const memoryCount = Array.isArray(memoryData?.memories) ? `${memories.length}${memories.length === 100 ? "+" : ""}` : "?";
     const pendingReviews = Array.isArray(reviewData?.reviews) ? `${reviewData.reviews.length}${reviewData.reviews.length === 100 ? "+" : ""}` : "?";
-    const header = `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=${memoryCount} | pendingReviews=${pendingReviews} | autoExtract=${config.autoExtract ? "on" : "off"}`;
+    const header = `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=${memoryCount} | pendingReviews=${pendingReviews} | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${!config.autoExtract && config.autoClassifier ? "on" : "off"}`;
 
     if (!config.startupInject || memories.length === 0) return header;
 
@@ -363,7 +371,7 @@ async function buildSessionBanner(ctx: unknown, signal?: AbortSignal): Promise<s
     if (topMemories.length === 0) return header;
     return `${header}\n\nTop ${config.startupTopK} global + top ${config.startupTopK} project memories (highest importance, one-shot seed):\n${topMemories.join("\n")}`;
   } catch {
-    return `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=? | pendingReviews=? | autoExtract=${config.autoExtract ? "on" : "off"}`;
+    return `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=? | pendingReviews=? | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${!config.autoExtract && config.autoClassifier ? "on" : "off"}`;
   }
 }
 
@@ -433,34 +441,171 @@ function timeoutSignal(ms: number): AbortSignal {
 }
 
 // Module-level, not per-call: agent_end fires every turn, and this must survive across those
-// calls within the same process to actually throttle repeat extraction attempts.
+// calls within the same process to actually throttle repeat extraction/classifier attempts.
 let lastAutoExtractAt = 0;
 
-async function autoExtractMemory(messages: unknown, ctx: unknown): Promise<string | null> {
+type ClassifierResult = {
+  flag: boolean;
+  text: string;
+  type: string;
+  scope: string;
+  reason: string;
+};
+
+const CLASSIFIER_SYSTEM_PROMPT = `You are a memory-candidate detector, not a writer. Given a conversation delta, decide if it contains something worth saving as a durable memory, and if so pre-distill it into ready-to-write fields. The extension will execute the write via HTTP after your response, so make the call carefully here.
+
+Apply this checklist:
+1. Durable — will this still matter later, not just for the current task.
+2. Actually happened — a completed decision/fact/fix, not a proposal, question, or hypothetical.
+3. Not noise — not chit-chat, a one-off command, or quoted code/CLI output/prompt text used only to explain how something works.
+4. Self-contained — understandable on its own, without the rest of the conversation.
+5. Right scope — see scope rule below.
+
+Do NOT flag: an in-progress/undecided plan, or a routine implementation-progress update within ongoing work.
+
+Two contrastive examples:
+- "解决了内存泄漏问题，已验证生效" -> flag=true (a previously-existing problem is now resolved).
+- "加了个测试用例，跑了一下全过了" -> flag=false (a routine step of ongoing work, no prior problem being resolved, nothing durable to recall later).
+
+If flag=true, distill exactly ONE self-contained sentence for text, roughly 40-160 characters, same language as the source. No bullet lists. One fact per memory. Never paste raw code, CLI output, or a multi-paragraph narrative.
+
+Classify only when flag=true:
+- type: preference | rule | fact | decision | task_learning | bug_fix | workflow
+- scope rule: "global" only if the statement would genuinely help in ANY unrelated project (cross-project dev preferences, communication/output style, secret-handling rules, durable personal/identity facts), and "project" for everything else, including system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs, OS-level fixes) even when it was not said inside a recognizable project. When ambiguous, prefer "project".
+
+Be conservative: when genuinely unsure, prefer flag=false.
+
+Output compact JSON only, no prose: {"flag":true|false,"text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","reason":"<short reason, especially when flag=false>"}`;
+
+function parseClassifierResult(output: string): ClassifierResult | null {
+  try {
+    const match = output.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    const parsed = JSON.parse(match[0]) as Partial<ClassifierResult>;
+    return {
+      flag: parsed.flag === true,
+      text: typeof parsed.text === "string" ? parsed.text.trim() : "",
+      type: typeof parsed.type === "string" ? parsed.type.trim() : "",
+      scope: typeof parsed.scope === "string" ? parsed.scope.trim() : "",
+      reason: typeof parsed.reason === "string" ? parsed.reason.trim() : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function summarizeCandidateDecision(data: any, fallbackText: string): string | null {
+  const decision = Array.isArray(data?.decisions) ? data.decisions[0] : null;
+  if (!decision) return null;
+  const action = typeof decision.action === "string" ? decision.action : "ok";
+  const verbs: Record<string, string> = {
+    add: "add",
+    merge: "merge into existing",
+    update: "update existing with",
+    delete: "delete stale memory for",
+    ignore: "ignore duplicate",
+    review: "queue for review",
+  };
+  const verb = verbs[action] || action;
+  const memory = decision.memory?.content || decision.matched_memory?.content || fallbackText;
+  return `${verb} "${String(memory).slice(0, 120)}"`;
+}
+
+async function classifyMemoryCandidate(text: string, ctx: unknown, pi: ExtensionAPI): Promise<ClassifierResult | null> {
   const config = memoryConfig();
-  if (!config.autoExtract || !config.apiKey) return null;
+  const prompt = `Delta:
+${text}`;
+  const result = await pi
+    .exec(
+      "pi",
+      [
+        "--model",
+        config.classifierModel,
+        "--thinking",
+        "minimal",
+        "--mode",
+        "text",
+        "--print",
+        "--no-session",
+        "--no-tools",
+        "--no-extensions",
+        "--no-skills",
+        "--no-prompt-templates",
+        "--no-context-files",
+        "--system-prompt",
+        CLASSIFIER_SYSTEM_PROMPT,
+        prompt,
+      ],
+      { cwd: cwdFromContext(ctx), timeout: CLASSIFIER_TIMEOUT_MS },
+    )
+    .catch(() => undefined);
+  if (result?.code !== 0 || !result.stdout.trim()) return null;
+  return parseClassifierResult(result.stdout);
+}
+
+async function writeClassifiedMemory(candidate: ClassifierResult, ctx: unknown): Promise<string | null> {
+  const config = memoryConfig();
+  const scope = normalizeScope(candidate.scope) || "project";
+  const projectId = resolveProjectId(ctx);
+  const body: Record<string, unknown> = {
+    user_id: config.userId,
+    source: "pi:agent-end-classifier",
+    candidates: [
+      {
+        content: candidate.text,
+        kind: normalizeKind(candidate.type),
+        scope,
+        ...(scope === "project" ? { project_id: projectId } : {}),
+        ...(scope === "session" && config.sessionId ? { session_id: config.sessionId } : {}),
+      },
+    ],
+  };
+  if (scope === "project") body.project_id = projectId;
+  if (scope === "session" && config.sessionId) body.session_id = config.sessionId;
+  const data = await memoryRequest("/v1/memories/candidates", body, timeoutSignal(AUTO_EXTRACT_TIMEOUT_MS));
+  return summarizeCandidateDecision(data, candidate.text);
+}
+
+async function autoExtractMemory(messages: unknown, ctx: unknown, pi: ExtensionAPI): Promise<string | null> {
+  const config = memoryConfig();
+  if (!config.apiKey) return null;
 
   const now = Date.now();
   if (now - lastAutoExtractAt < config.extractMinIntervalMs) return null;
 
   const text = buildExtractionText(messages).slice(0, AUTO_EXTRACT_MAX_CHARS);
-  if (containsSensitiveText(text)) return null;
-  if (!EXTRACT_SIGNAL_RE.test(text)) return null;
+  if (!text.trim() || containsSensitiveText(text)) return null;
 
-  // Set before the request lands, not after, so a slow/in-flight call still blocks a
-  // concurrent agent_end from firing a second extraction within the same interval.
+  if (config.autoExtract) {
+    if (!EXTRACT_SIGNAL_RE.test(text)) return null;
+
+    // Set before the request lands, not after, so a slow/in-flight call still blocks a
+    // concurrent agent_end from firing a second extraction within the same interval.
+    lastAutoExtractAt = now;
+
+    const body: Record<string, unknown> = {
+      text,
+      user_id: config.userId,
+      project_id: resolveProjectId(ctx),
+      source: "pi:auto-extract",
+    };
+    if (config.sessionId) body.session_id = config.sessionId;
+
+    const data = await memoryRequest("/v1/memories/extract", body, timeoutSignal(AUTO_EXTRACT_TIMEOUT_MS));
+    return summarizeExtractionDecisions(data?.decisions, data?.reviews);
+  }
+
+  if (!config.autoClassifier) return null;
+
+  // Cloud auto-extract is off by default. Pi can still run a local headless classifier using
+  // the same model-selection pattern as the atomic-commit extension, then write the pre-distilled
+  // candidate via the same HTTP candidate endpoint as asaki_memory_add.
   lastAutoExtractAt = now;
-
-  const body: Record<string, unknown> = {
-    text,
-    user_id: config.userId,
-    project_id: resolveProjectId(ctx),
-    source: "pi:auto-extract",
-  };
-  if (config.sessionId) body.session_id = config.sessionId;
-
-  const data = await memoryRequest("/v1/memories/extract", body, timeoutSignal(AUTO_EXTRACT_TIMEOUT_MS));
-  return summarizeExtractionDecisions(data?.decisions, data?.reviews);
+  const candidate = await classifyMemoryCandidate(text, ctx, pi);
+  if (!candidate) return null;
+  if (!candidate.flag) return envFlagEnabled("ASAKI_MEMORY_DEBUG", false) && candidate.reason ? `skip — ${candidate.reason}` : null;
+  if (!candidate.text) return null;
+  return writeClassifiedMemory(candidate, ctx);
 }
 
 export default function (pi: ExtensionAPI) {
@@ -508,9 +653,9 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_end", async (event, ctx) => {
-    void autoExtractMemory(event.messages, ctx)
+    void autoExtractMemory(event.messages, ctx, pi)
       .then((summary) => {
-        if (summary && ctx.hasUI) ctx.ui.notify(`🧠 Asaki auto-extract: ${summary}`, "info");
+        if (summary && ctx.hasUI) ctx.ui.notify(`🧠 Asaki memory: ${summary}`, "info");
       })
       .catch((error) => {
         if (envFlagEnabled("ASAKI_MEMORY_DEBUG", false) && ctx.hasUI) {
@@ -533,6 +678,8 @@ export default function (pi: ExtensionAPI) {
           `- userId: ${config.userId}`,
           `- defaultScope: ${config.defaultScope}`,
           `- autoExtract: ${config.autoExtract ? "enabled" : "disabled"}`,
+          `- autoClassifier: ${!config.autoExtract && config.autoClassifier ? "enabled" : "disabled"}`,
+          `- classifierModel: ${config.classifierModel}`,
           `- projectId: ${resolveProjectId(ctx) || "missing"}`,
           `- sessionId: ${config.sessionId || "missing"}`,
         ];

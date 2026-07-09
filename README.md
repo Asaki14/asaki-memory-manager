@@ -314,6 +314,8 @@ export ASAKI_MEMORY_PROJECT_ID="demo-app"
 export ASAKI_MEMORY_AUTO_INJECT="1"
 export ASAKI_MEMORY_AUTO_MIN_SCORE="0.67"
 export ASAKI_MEMORY_AUTO_EXTRACT="0"
+export ASAKI_MEMORY_AUTO_CLASSIFIER="1"
+export ASAKI_MEMORY_CLASSIFIER_MODEL="opencode/deepseek-v4-flash-free"
 export ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS="300"
 export ASAKI_MEMORY_STARTUP_INJECT="1"
 export ASAKI_MEMORY_STARTUP_TOP_K="6"
@@ -321,7 +323,7 @@ export ASAKI_MEMORY_STARTUP_TOP_K="6"
 
 On every `session_start` (new/resume/fork, not plain extension `reload`), the
 next turn's `before_agent_start` injects a compact status banner with user,
-project, memory count, pending review count, and auto-extract state, plus
+project, memory count, pending review count, auto-extract state, and classifier state, plus
 (default on; set `ASAKI_MEMORY_STARTUP_INJECT=0` or `startupInject: false` in
 the local config file to disable) the top `ASAKI_MEMORY_STARTUP_TOP_K`
 (default 6) highest-importance active memories as a one-shot seed — not a
@@ -331,16 +333,26 @@ agent decides for itself whether to call `asaki_memory_search`/`asaki_memory_add
 keyword-triggered search on top of that judgment call.
 
 `ASAKI_MEMORY_AUTO_EXTRACT` (default off) enables Pi-native background
-extraction on `agent_end`: the extension sends only text user/assistant
+server extraction on `agent_end`: the extension sends only text user/assistant
 messages from that prompt to `/v1/memories/extract`, excluding tool results,
-tool calls, and thinking blocks. This mirrors the Claude Code Stop hook's
-server-side extraction tradeoff, but uses Pi's in-process event API instead of
-transcript offset files. It intentionally sends conversation text off-machine.
-Throttled to at most once per `ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS`
-(default 300 seconds). The extraction endpoint itself caps candidates at 2
-per call and only auto-adds project-scope candidates with importance ≥ 0.6 —
+tool calls, and thinking blocks. It intentionally sends conversation text
+off-machine to the Worker. The extraction endpoint caps candidates at 2 per
+call and only auto-adds project-scope candidates with importance ≥ 0.6 —
 global-scope or lower-importance candidates are queued to
 `/v1/memories/reviews` for human review instead of being written directly.
+
+When `ASAKI_MEMORY_AUTO_EXTRACT=0` and `ASAKI_MEMORY_AUTO_CLASSIFIER` is not
+disabled, Pi instead runs an `agent_end` classifier in the background using the
+same headless Pi model-call pattern as the local `atomic-commit` extension.
+Default model: `opencode/deepseek-v4-flash-free`; override with
+`ASAKI_MEMORY_CLASSIFIER_MODEL` or `classifierModel` in
+`~/.pi/agent/asaki-memory.json`. The classifier judges the delta locally via
+Pi, pre-distills one `text`/`type`/`scope` candidate, then the extension writes
+it over plain HTTP to `/v1/memories/candidates` so the normal server-side
+dedup/merge pipeline decides the real action. No extra agent turn is forced.
+Both modes are throttled to at most once per
+`ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS` (default 300 seconds), and both
+skip deltas matching the sensitive-text gate.
 
 The extension exposes:
 
