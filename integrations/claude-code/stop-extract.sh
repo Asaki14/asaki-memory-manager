@@ -18,6 +18,14 @@
 # asaki_memory_add — the classifier itself has no asaki_memory_add access, it can only nudge.
 set -uo pipefail
 
+# Guard against the classifier's own `claude -p` subprocess re-triggering this same Stop hook:
+# if it loads the asaki-memory plugin (needed for MCP tool access), it also loads this hook's
+# own hooks.json, and its Stop event would spawn *another* classifier subprocess with a fresh
+# session_id — the stop_hook_active guard below cannot catch this since that flag only covers
+# Claude Code's own block/continue mechanism, not an independently spawned child process tree.
+# This must be checked before anything else in the script, unconditionally.
+[ -n "${ASAKI_MEMORY_CLASSIFIER_CHILD:-}" ] && exit 0
+
 INPUT=$(cat)
 
 # Guard against the block below re-triggering itself: when Claude Code is already forcing a
