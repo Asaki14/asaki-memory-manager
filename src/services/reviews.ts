@@ -248,48 +248,65 @@ export async function resolveMemoryReview(env: Env, id: string, input: { user_id
   if (claim.meta.changes !== 1) throw new Error('Review is already resolved.');
 
   let memory: Awaited<ReturnType<typeof createMemory>> | undefined;
+  let memoryId: string | null = null;
 
-  if (input.action === 'add') {
-    memory = await createMemory(env, review.candidate);
-  }
+  // The claim above already committed status='resolved' so a second concurrent resolve can't
+  // also run these side effects — but that means a failure here (e.g. a stale/deleted
+  // memory_id) must not leave the review permanently stuck "resolved" with nothing having
+  // actually happened. Revert the claim back to 'pending' on any failure so the review stays
+  // retryable, then rethrow the original error.
+  try {
+    if (input.action === 'add') {
+      memory = await createMemory(env, review.candidate);
+    }
 
-  if (input.action === 'merge') {
-    if (!input.memory_id) throw new Error('memory_id is required when action is merge.');
-    const target = await getMemory(env, input.memory_id, input.user_id);
-    if (!target) throw new Error('Target memory not found.');
-    memory = await updateMemoryContent(env, target, {
-      content: mergeContent(target.content, review.candidate.content),
-      importance: Math.max(target.importance, review.candidate.importance),
-      confidence: Math.max(target.confidence, review.candidate.confidence),
-    });
-  }
+    if (input.action === 'merge') {
+      if (!input.memory_id) throw new Error('memory_id is required when action is merge.');
+      const target = await getMemory(env, input.memory_id, input.user_id);
+      if (!target) throw new Error('Target memory not found.');
+      memory = await updateMemoryContent(env, target, {
+        content: mergeContent(target.content, review.candidate.content),
+        importance: Math.max(target.importance, review.candidate.importance),
+        confidence: Math.max(target.confidence, review.candidate.confidence),
+      });
+    }
 
-  if (input.action === 'update') {
-    if (!input.memory_id) throw new Error('memory_id is required when action is update.');
-    const target = await getMemory(env, input.memory_id, input.user_id);
-    if (!target) throw new Error('Target memory not found.');
-    memory = await updateMemoryContent(env, target, {
-      content: review.candidate.content,
-      importance: review.candidate.importance,
-      confidence: review.candidate.confidence,
-    });
-  }
+    if (input.action === 'update') {
+      if (!input.memory_id) throw new Error('memory_id is required when action is update.');
+      const target = await getMemory(env, input.memory_id, input.user_id);
+      if (!target) throw new Error('Target memory not found.');
+      memory = await updateMemoryContent(env, target, {
+        content: review.candidate.content,
+        importance: review.candidate.importance,
+        confidence: review.candidate.confidence,
+      });
+    }
 
-  if (input.action === 'delete') {
-    if (!input.memory_id) throw new Error('memory_id is required when action is delete.');
-    const deleted = await deleteMemory(env, input.memory_id, input.user_id);
-    if (!deleted) throw new Error('Target memory not found.');
-    memory = deleted;
-  }
+    if (input.action === 'delete') {
+      if (!input.memory_id) throw new Error('memory_id is required when action is delete.');
+      const deleted = await deleteMemory(env, input.memory_id, input.user_id);
+      if (!deleted) throw new Error('Target memory not found.');
+      memory = deleted;
+    }
 
-  const memoryId = memory?.id ?? input.memory_id ?? null;
-  if (memory?.id && memory.id !== (input.memory_id ?? null)) {
-    // action === 'add': createMemory() only generates the new memory's id after the claim
-    // UPDATE above already ran (it didn't know this id yet), so backfill it now. No WHERE
-    // status = 'pending' guard needed here — this row is already exclusively ours from the claim.
-    await env.DB.prepare(`UPDATE memory_reviews SET memory_id = ?1 WHERE id = ?2 AND user_id = ?3`)
-      .bind(memoryId, id, input.user_id)
+    memoryId = memory?.id ?? input.memory_id ?? null;
+    if (memory?.id && memory.id !== (input.memory_id ?? null)) {
+      // action === 'add': createMemory() only generates the new memory's id after the claim
+      // UPDATE above already ran (it didn't know this id yet), so backfill it now. No WHERE
+      // status = 'pending' guard needed here — this row is already exclusively ours from the claim.
+      await env.DB.prepare(`UPDATE memory_reviews SET memory_id = ?1 WHERE id = ?2 AND user_id = ?3`)
+        .bind(memoryId, id, input.user_id)
+        .run();
+    }
+  } catch (error) {
+    await env.DB.prepare(
+      `UPDATE memory_reviews
+       SET status = 'pending', resolved_action = NULL, memory_id = NULL, reason = NULL, updated_at = ?1, resolved_at = NULL
+       WHERE id = ?2 AND user_id = ?3`
+    )
+      .bind(nowIso(), id, input.user_id)
       .run();
+    throw error;
   }
 
   await writeMemoryEvent(env, {

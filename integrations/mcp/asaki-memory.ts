@@ -340,6 +340,13 @@ server.tool(
       combinedSignal(extra.signal),
     );
     const decision = Array.isArray(data.decisions) ? (data.decisions[0] as Record<string, any> | undefined) : undefined;
+    // An unsupervised source (see isUnsupervisedSource() server-side) never lands in
+    // `decisions` — it's routed straight to `reviews` instead. Check that before falling back
+    // to a misleading default "ok".
+    const queuedReview = !decision && Array.isArray(data.reviews) ? (data.reviews[0] as Record<string, any> | undefined) : undefined;
+    if (queuedReview) {
+      return { content: [{ type: "text" as const, text: `Asaki memory queued for review id=${queuedReview.id}` }] };
+    }
     const action = decision?.action || "ok";
     const memoryId = decision?.memory?.id || decision?.matched_memory?.id;
     const reviewId = decision?.review?.id;
@@ -537,6 +544,9 @@ server.tool(
     status: z.enum(["active", "archived", "deleted"]).optional(),
   },
   async ({ id, ...fields }, extra) => {
+    if (typeof fields.content === "string" && containsSensitiveText(fields.content)) {
+      throw new Error("Refusing to store: content appears to contain a secret/credential (API key, token, private key, or similar). Remove it and try again.");
+    }
     const cfg = memoryConfig();
     const body: Record<string, unknown> = { user_id: cfg.userId };
     for (const [key, value] of Object.entries(fields)) if (value !== undefined) body[key] = value;

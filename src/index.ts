@@ -81,8 +81,12 @@ app.post('/v1/memories/candidates', async (c) => {
   const validation = validateProcessCandidates(body.body);
   if (!validation.ok) return c.json({ error: validation.error }, 400);
 
-  const rateLimited = await checkRateLimit(c, `candidates:${validation.data[0]?.user_id ?? 'unknown'}`);
-  if (rateLimited) return rateLimited;
+  // Each candidate can carry its own user_id, so rate-limit every distinct one present —
+  // keying off only the first item let the rest of a mixed-user batch dodge the limit entirely.
+  for (const uid of new Set(validation.data.map((item) => item.user_id))) {
+    const rateLimited = await checkRateLimit(c, `candidates:${uid}`);
+    if (rateLimited) return rateLimited;
+  }
 
   // Candidates from an unsupervised background classifier never auto-add/merge/update/delete —
   // they always land in the review queue, regardless of scope/importance. See
@@ -126,8 +130,11 @@ app.post('/v1/memories/extract', async (c) => {
   });
 
   const deduped = dedupeCandidateBatch(candidates);
-  const autoBucket = deduped.filter((item) => isAutoAddEligible(item));
-  const reviewBucket = deduped.filter((item) => !isAutoAddEligible(item));
+  // Same rule as /v1/memories/candidates: an unsupervised source never auto-adds/merges/
+  // updates/deletes, regardless of scope/importance — this endpoint shares the same source
+  // field and must enforce the same invariant, not just the importance/scope gate.
+  const autoBucket = deduped.filter((item) => isAutoAddEligible(item) && !isUnsupervisedSource(item.source));
+  const reviewBucket = deduped.filter((item) => !isAutoAddEligible(item) || isUnsupervisedSource(item.source));
 
   // Calibration mode: report what the pipeline would extract and how it would bucket without
   // writing anything (no processMemoryCandidates, no createMemoryReviews). Used by the

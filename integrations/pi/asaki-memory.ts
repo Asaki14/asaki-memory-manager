@@ -967,6 +967,18 @@ Safety:
         const data = await memoryRequest("/v1/memories/candidates", requestBody, signal);
         const decisions = Array.isArray(data?.decisions) ? data.decisions : [];
         const decision = decisions[0];
+        // An unsupervised source never lands in `decisions` — it's routed straight to `reviews`
+        // instead (see isUnsupervisedSource() server-side). Check that before falling back to a
+        // misleading default "ok".
+        if (!decision) {
+          const queuedReview = Array.isArray(data?.reviews) ? data.reviews[0] : undefined;
+          if (queuedReview) {
+            return {
+              content: [{ type: "text", text: `Asaki memory queued for review id=${queuedReview.id}\nCandidate: ${formatMemoryLine(candidate)}` }],
+              details: { action: "review", review_id: queuedReview.id, user_id: config.userId, project_id: projectId, scope, candidate },
+            };
+          }
+        }
         const action = decision?.action || "ok";
         const memory = decision?.memory || decision?.matched_memory;
         const memoryId = memory?.id;

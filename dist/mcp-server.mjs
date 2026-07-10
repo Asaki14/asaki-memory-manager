@@ -21371,6 +21371,10 @@ server.tool(
       combinedSignal(extra.signal)
     );
     const decision = Array.isArray(data.decisions) ? data.decisions[0] : void 0;
+    const queuedReview = !decision && Array.isArray(data.reviews) ? data.reviews[0] : void 0;
+    if (queuedReview) {
+      return { content: [{ type: "text", text: `Asaki memory queued for review id=${queuedReview.id}` }] };
+    }
     const action = decision?.action || "ok";
     const memoryId = decision?.memory?.id || decision?.matched_memory?.id;
     const reviewId = decision?.review?.id;
@@ -21553,6 +21557,9 @@ server.tool(
     status: external_exports.enum(["active", "archived", "deleted"]).optional()
   },
   async ({ id, ...fields }, extra) => {
+    if (typeof fields.content === "string" && containsSensitiveText(fields.content)) {
+      throw new Error("Refusing to store: content appears to contain a secret/credential (API key, token, private key, or similar). Remove it and try again.");
+    }
     const cfg = memoryConfig();
     const body = { user_id: cfg.userId };
     for (const [key, value] of Object.entries(fields)) if (value !== void 0) body[key] = value;
