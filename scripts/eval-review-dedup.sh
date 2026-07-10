@@ -9,7 +9,11 @@
 # LLM call entirely, since this is testing DB-level dedup logic, not extraction quality).
 set -uo pipefail
 
-BASE_URL="${ASAKI_MEMORY_BASE_URL:-${ASAKI_MEMORY_API_URL:-https://asaki-memory-manager.wangyao1414114wy.workers.dev}}"
+BASE_URL="${ASAKI_MEMORY_BASE_URL:-${ASAKI_MEMORY_API_URL:-}}"
+if [ -z "$BASE_URL" ]; then
+  echo "ASAKI_MEMORY_BASE_URL (or ASAKI_MEMORY_API_URL) must be set — no production default." >&2
+  exit 1
+fi
 API_KEY="${ASAKI_MEMORY_API_KEY:-${ADMIN_API_KEY:-}}"
 if [ -z "$API_KEY" ]; then
   echo "ASAKI_MEMORY_API_KEY (or ADMIN_API_KEY) must be set." >&2

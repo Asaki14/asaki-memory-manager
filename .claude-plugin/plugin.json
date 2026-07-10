@@ -1,7 +1,7 @@
 {
   "name": "asaki-memory",
   "description": "Persistent cross-session memory for Claude Code: auto-injected recall on session start, on-demand search/store via MCP tools, /memory audit command.",
-  "author": { "name": "wangyao" },
+  "author": { "name": "Asaki14" },
   "homepage": "https://github.com/Asaki14/asaki-memory-manager",
   "repository": "https://github.com/Asaki14/asaki-memory-manager",
   "license": "MIT"

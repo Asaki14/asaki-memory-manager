@@ -3,10 +3,10 @@
 #
 # Unlike eval-candidates.ts (pure heuristicDecision(), no LLM call, runs offline instantly),
 # extraction is inherently LLM-based — env.AI.run() only works inside a real Worker runtime.
-# So this hits a live Worker over HTTP instead: defaults to production, or point it at
-# `wrangler dev --remote` via ASAKI_MEMORY_BASE_URL for pre-deploy testing. Every case that
-# expects candidates writes a real memory (test user, auto-cleaned at the end) since
-# /v1/memories/extract always runs its output through the dedup pipeline.
+# So this hits a live Worker over HTTP instead: point it at your deployed Worker or
+# `wrangler dev --remote` via ASAKI_MEMORY_BASE_URL (no default — must be set explicitly).
+# Every case that expects candidates writes a real memory (test user, auto-cleaned at the
+# end) since /v1/memories/extract always runs its output through the dedup pipeline.
 #
 # Each fixture case in test/fixtures/extraction-cases.json is a real production false positive/
 # negative this project has hit — add a new case here whenever a future one turns up.
@@ -17,7 +17,11 @@
 # the routing threshold sent it to.
 set -uo pipefail
 
-BASE_URL="${ASAKI_MEMORY_BASE_URL:-${ASAKI_MEMORY_API_URL:-https://asaki-memory-manager.wangyao1414114wy.workers.dev}}"
+BASE_URL="${ASAKI_MEMORY_BASE_URL:-${ASAKI_MEMORY_API_URL:-}}"
+if [ -z "$BASE_URL" ]; then
+  echo "ASAKI_MEMORY_BASE_URL (or ASAKI_MEMORY_API_URL) must be set — no production default." >&2
+  exit 1
+fi
 API_KEY="${ASAKI_MEMORY_API_KEY:-${ADMIN_API_KEY:-}}"
 if [ -z "$API_KEY" ]; then
   echo "ASAKI_MEMORY_API_KEY (or ADMIN_API_KEY) must be set." >&2
