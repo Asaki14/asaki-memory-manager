@@ -461,6 +461,13 @@ export async function purgeMemory(env: Env, id: string, userId: string, reason: 
   const existing = await getMemory(env, id, userId);
   if (!existing) return null;
 
+  // Clear prior history first — those older events may themselves carry raw content. Any
+  // failure event logged below (from this purge attempt, not stored content) is written after,
+  // so purge failures actually stay visible in the audit trail instead of erasing themselves.
+  const deletedEvents = await env.DB.prepare('DELETE FROM memory_events WHERE memory_id = ?1 AND user_id = ?2')
+    .bind(existing.id, userId)
+    .run();
+
   if (env.VECTORIZE) {
     try {
       await (env.VECTORIZE as any).deleteByIds([existing.id]);
@@ -473,10 +480,6 @@ export async function purgeMemory(env: Env, id: string, userId: string, reason: 
       });
     }
   }
-
-  const deletedEvents = await env.DB.prepare('DELETE FROM memory_events WHERE memory_id = ?1 AND user_id = ?2')
-    .bind(existing.id, userId)
-    .run();
 
   const updatedAt = nowIso();
   await env.DB.prepare(`UPDATE memories SET content = '[purged]', status = 'deleted', index_status = 'pending', updated_at = ?1 WHERE id = ?2 AND user_id = ?3`)

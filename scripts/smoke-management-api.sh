@@ -122,6 +122,25 @@ RESOLVE_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/reviews/${REVIEW_ID}/
   -d "{\"user_id\":\"${USER_ID}\",\"action\":\"ignore\",\"reason\":\"smoke test\"}")
 printf '%s' "$RESOLVE_RESPONSE" | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); if (j.review?.status !== "resolved" || j.review?.resolved_action !== "ignore") process.exit(1); });'
 
+# Failed-side-effect regression: resolving with a memory_id that doesn't exist must fail (404)
+# without leaving the review permanently stuck "resolved" — resolveMemoryReview()'s atomic claim
+# now rolls the row back to pending on any side-effect failure so it stays retryable.
+FAILRESOLVE_REVIEW_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/reviews" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_id\":\"${USER_ID}\",\"project_id\":\"${PROJECT_ID}\",\"source\":\"smoke-review-failure\",\"candidates\":[{\"content\":\"failure rollback candidate ${CONTENT}\",\"scope\":\"project\",\"kind\":\"task_learning\",\"importance\":0.1,\"confidence\":0.9}]}")
+FAILRESOLVE_REVIEW_ID=$(printf '%s' "$FAILRESOLVE_REVIEW_RESPONSE" | json_value 'reviews.0.id')
+FAILRESOLVE_STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/memories/reviews/${FAILRESOLVE_REVIEW_ID}/resolve" \
+  -H "Authorization: Bearer ${ADMIN_API_KEY}" -H 'Content-Type: application/json' \
+  -d "{\"user_id\":\"${USER_ID}\",\"action\":\"merge\",\"memory_id\":\"does-not-exist\",\"reason\":\"smoke test\"}")
+[[ "$FAILRESOLVE_STATUS" == "404" ]] || { echo "expected 404 for resolve with a missing target memory_id, got ${FAILRESOLVE_STATUS}"; exit 1; }
+FAILRESOLVE_LIST_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/reviews/list" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_id\":\"${USER_ID}\",\"project_id\":\"${PROJECT_ID}\",\"status\":\"pending\"}")
+printf '%s' "$FAILRESOLVE_LIST_RESPONSE" | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); if (!j.reviews?.some((review) => review.id === process.argv[1] && review.status === "pending")) process.exit(1); });' "$FAILRESOLVE_REVIEW_ID"
+curl_api -X POST "$BASE_URL/v1/memories/reviews/${FAILRESOLVE_REVIEW_ID}/resolve" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_id\":\"${USER_ID}\",\"action\":\"ignore\",\"reason\":\"smoke test cleanup\"}" >/dev/null
+
 # Concurrent-resolve regression: N requests racing to resolve the same review must not all
 # run the add/merge/update/delete side effects. resolveMemoryReview() now folds the
 # "still pending?" check and the resolved-status write into a single atomic UPDATE
