@@ -2,9 +2,9 @@ import { Hono, type Context } from 'hono';
 import type { Env } from './types';
 import { dedupeCandidateBatch, isAutoAddEligible, isUnsupervisedSource, processMemoryCandidates } from './services/candidates';
 import { extractMemoryCandidates } from './services/extraction';
-import { backfillPendingIndex, createMemory, deleteMemory, getMemory, listMemories, pruneStaleMemories, searchMemories, updateMemory } from './services/memories';
+import { backfillPendingIndex, createMemory, deleteMemory, getMemory, listMemories, pruneStaleMemories, purgeMemory, searchMemories, updateMemory } from './services/memories';
 import { createMemoryReviews, listMemoryReviews, resolveMemoryReview } from './services/reviews';
-import { validateBackfillIndex, validateCreateMemory, validateCreateMemoryReviews, validateExtractMemories, validateListMemories, validateListMemoryReviews, validateMemoryIdInput, validatePruneStale, validateProcessCandidates, validateResolveMemoryReview, validateSearchMemories, validateUpdateMemory } from './utils/validation';
+import { validateBackfillIndex, validateCreateMemory, validateCreateMemoryReviews, validateExtractMemories, validateListMemories, validateListMemoryReviews, validateMemoryIdInput, validatePruneStale, validateProcessCandidates, validatePurgeMemory, validateResolveMemoryReview, validateSearchMemories, validateUpdateMemory } from './utils/validation';
 
 type Bindings = Env;
 
@@ -225,6 +225,22 @@ app.delete('/v1/memories/:id', async (c) => {
   if (!validation.ok) return c.json({ error: validation.error }, 400);
 
   const memory = await deleteMemory(c.env, c.req.param('id'), validation.data.user_id);
+  if (!memory) return c.json({ error: 'Memory not found.' }, 404);
+  return c.json({ memory });
+});
+
+// Unlike DELETE (soft delete — recoverable, content stays in D1), purge is for content that
+// should never have been stored (a leaked credential, etc): it wipes the memory's content,
+// the Vectorize entry, and every prior memory_events row for it. Separate endpoint so it's
+// never triggered by a routine delete call.
+app.post('/v1/memories/:id/purge', async (c) => {
+  const body = await readJson(c);
+  if (!body.ok) return body.response;
+
+  const validation = validatePurgeMemory(body.body);
+  if (!validation.ok) return c.json({ error: validation.error }, 400);
+
+  const memory = await purgeMemory(c.env, c.req.param('id'), validation.data.user_id, validation.data.reason);
   if (!memory) return c.json({ error: 'Memory not found.' }, 404);
   return c.json({ memory });
 });
