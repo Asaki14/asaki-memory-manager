@@ -20,7 +20,9 @@ async function readJson(c: Context<{ Bindings: Bindings }>): Promise<{ ok: true;
 
 app.use('/v1/*', async (c, next) => {
   const configuredKey = c.env.ADMIN_API_KEY;
-  if (!configuredKey) return next();
+  if (!configuredKey) {
+    return c.json({ error: 'Service misconfigured: ADMIN_API_KEY is not set.' }, 503);
+  }
   const authorization = c.req.header('Authorization');
   if (authorization !== `Bearer ${configuredKey}`) {
     return c.json({ error: 'Unauthorized.' }, 401);
