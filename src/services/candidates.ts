@@ -5,7 +5,7 @@ import { scoreMemoryForSearch } from './searchScoring';
 
 import { bestUsableMatch, chooseDecision, hasContradictionSignal, hasForgetSignal, heuristicDecision, lexicalSimilarity, mergeContent, needsLlmDecision, type CandidateAction, type ProcessMemoryCandidateInput } from './candidateDecision';
 export type { CandidateAction, ProcessMemoryCandidateInput } from './candidateDecision';
-export { heuristicDecision, mergeContent, dedupeCandidateBatch, isAutoAddEligible, AUTO_ADD_MIN_IMPORTANCE } from './candidateDecision';
+export { heuristicDecision, mergeContent, dedupeCandidateBatch, isAutoAddEligible, isUnsupervisedSource, AUTO_ADD_MIN_IMPORTANCE } from './candidateDecision';
 
 export interface CandidateDecision {
   action: CandidateAction | 'review';
