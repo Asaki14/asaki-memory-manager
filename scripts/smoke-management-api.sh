@@ -122,6 +122,63 @@ RESOLVE_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/reviews/${REVIEW_ID}/
   -d "{\"user_id\":\"${USER_ID}\",\"action\":\"ignore\",\"reason\":\"smoke test\"}")
 printf '%s' "$RESOLVE_RESPONSE" | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); if (j.review?.status !== "resolved" || j.review?.resolved_action !== "ignore") process.exit(1); });'
 
+# Concurrent-resolve regression: two requests racing to resolve the same review must not both
+# run the add/merge/update/delete side effects. resolveMemoryReview() now folds the
+# "still pending?" check and the resolved-status write into a single atomic UPDATE
+# (WHERE status = 'pending'), so only one of two simultaneous resolves can win the row.
+CONCURRENT_CONTENT="concurrency review candidate ${CONTENT}"
+CONCURRENT_REVIEW_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/reviews" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_id\":\"${USER_ID}\",\"project_id\":\"${PROJECT_ID}\",\"source\":\"smoke-review-concurrency\",\"candidates\":[{\"content\":\"${CONCURRENT_CONTENT}\",\"scope\":\"project\",\"kind\":\"task_learning\",\"importance\":0.1,\"confidence\":0.9}]}")
+CONCURRENT_REVIEW_ID=$(printf '%s' "$CONCURRENT_REVIEW_RESPONSE" | json_value 'reviews.0.id')
+
+CONCURRENT_DIR=$(mktemp -d)
+set +e
+(
+  curl -s -o "${CONCURRENT_DIR}/resp1.json" -w '%{http_code}' -X POST \
+    -H "Authorization: Bearer ${ADMIN_API_KEY}" -H 'Content-Type: application/json' \
+    "$BASE_URL/v1/memories/reviews/${CONCURRENT_REVIEW_ID}/resolve" \
+    -d "{\"user_id\":\"${USER_ID}\",\"action\":\"add\",\"reason\":\"concurrency race A\"}" \
+    > "${CONCURRENT_DIR}/status1.txt"
+) &
+CONCURRENT_PID1=$!
+(
+  curl -s -o "${CONCURRENT_DIR}/resp2.json" -w '%{http_code}' -X POST \
+    -H "Authorization: Bearer ${ADMIN_API_KEY}" -H 'Content-Type: application/json' \
+    "$BASE_URL/v1/memories/reviews/${CONCURRENT_REVIEW_ID}/resolve" \
+    -d "{\"user_id\":\"${USER_ID}\",\"action\":\"add\",\"reason\":\"concurrency race B\"}" \
+    > "${CONCURRENT_DIR}/status2.txt"
+) &
+CONCURRENT_PID2=$!
+wait "$CONCURRENT_PID1"
+wait "$CONCURRENT_PID2"
+set -e
+
+CONCURRENT_SUCCESS_COUNT=0
+for i in 1 2; do
+  status="$(cat "${CONCURRENT_DIR}/status${i}.txt")"
+  body_file="${CONCURRENT_DIR}/resp${i}.json"
+  if [[ "$status" =~ ^2 ]]; then
+    if node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); if (j.review?.status !== "resolved" || !j.memory) process.exit(1); });' < "$body_file"; then
+      CONCURRENT_SUCCESS_COUNT=$((CONCURRENT_SUCCESS_COUNT + 1))
+    else
+      echo "concurrent resolve request ${i} returned ${status} but body lacks resolved review + memory: $(cat "$body_file")"
+      exit 1
+    fi
+  else
+    node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); if (!j.error) process.exit(1); });' < "$body_file" \
+      || { echo "concurrent resolve request ${i} failed with ${status} but body has no error: $(cat "$body_file")"; exit 1; }
+  fi
+done
+[[ "$CONCURRENT_SUCCESS_COUNT" == "1" ]] || { echo "expected exactly one concurrent resolve to succeed, got ${CONCURRENT_SUCCESS_COUNT} (status1=$(cat "${CONCURRENT_DIR}/status1.txt") status2=$(cat "${CONCURRENT_DIR}/status2.txt"))"; exit 1; }
+
+CONCURRENT_LIST_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/list" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_id\":\"${USER_ID}\",\"project_id\":\"${PROJECT_ID}\"}")
+CONCURRENT_MATCH_COUNT=$(printf '%s' "$CONCURRENT_LIST_RESPONSE" | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); const needle = process.argv[1]; console.log((j.memories ?? []).filter(m => m.content === needle && m.status === "active").length); });' "$CONCURRENT_CONTENT")
+[[ "$CONCURRENT_MATCH_COUNT" == "1" ]] || { echo "expected exactly 1 memory from the concurrent add-resolve race, got ${CONCURRENT_MATCH_COUNT}"; exit 1; }
+rm -rf "$CONCURRENT_DIR"
+
 CLASSIFIER_CANDIDATE_BODY=$(jq -cn --arg user "$USER_ID" --arg project "$PROJECT_ID" --arg content "unsupervised classifier candidate ${CONTENT}" '
   {user_id: $user, source: "pi:agent-end-classifier",
    candidates: [{content: $content, kind: "task_learning", scope: "project", project_id: $project, importance: 0.9, confidence: 0.9}]}')
