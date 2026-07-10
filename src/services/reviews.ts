@@ -228,9 +228,25 @@ export async function listMemoryReviews(env: Env, input: { user_id: string; stat
 export async function resolveMemoryReview(env: Env, id: string, input: { user_id: string; action: 'add' | 'merge' | 'update' | 'delete' | 'ignore'; memory_id?: string | null; reason?: string | null }): Promise<{ review: MemoryReviewRow; memory?: Awaited<ReturnType<typeof createMemory>> }> {
   const existing = await env.DB.prepare('SELECT * FROM memory_reviews WHERE id = ?1 AND user_id = ?2').bind(id, input.user_id).first<MemoryReviewRecord>();
   if (!existing) throw new Error('Review not found.');
-  if (existing.status !== 'pending') throw new Error('Review is already resolved.');
 
   const review = parseReview(existing);
+  const timestamp = nowIso();
+
+  // Atomically claim the review: fold the "is it still pending" check and the resolved-status
+  // write into one conditional UPDATE, so two concurrent resolve requests can't both read
+  // status='pending' and both go on to run add/merge/update/delete side effects. Only the
+  // request whose UPDATE actually changes a row (changes === 1) proceeds; the loser throws the
+  // same "already resolved" error it would have gotten from the old in-memory check.
+  const claim = await env.DB.prepare(
+    `UPDATE memory_reviews
+     SET status = 'resolved', resolved_action = ?1, memory_id = ?2, reason = ?3, updated_at = ?4, resolved_at = ?5
+     WHERE id = ?6 AND user_id = ?7 AND status = 'pending'`
+  )
+    .bind(input.action, input.memory_id ?? null, input.reason ?? null, timestamp, timestamp, id, input.user_id)
+    .run();
+
+  if (claim.meta.changes !== 1) throw new Error('Review is already resolved.');
+
   let memory: Awaited<ReturnType<typeof createMemory>> | undefined;
 
   if (input.action === 'add') {
@@ -266,15 +282,15 @@ export async function resolveMemoryReview(env: Env, id: string, input: { user_id
     memory = deleted;
   }
 
-  const timestamp = nowIso();
   const memoryId = memory?.id ?? input.memory_id ?? null;
-  await env.DB.prepare(
-    `UPDATE memory_reviews
-     SET status = 'resolved', resolved_action = ?1, memory_id = ?2, reason = ?3, updated_at = ?4, resolved_at = ?5
-     WHERE id = ?6 AND user_id = ?7`
-  )
-    .bind(input.action, memoryId, input.reason ?? null, timestamp, timestamp, id, input.user_id)
-    .run();
+  if (memory?.id && memory.id !== (input.memory_id ?? null)) {
+    // action === 'add': createMemory() only generates the new memory's id after the claim
+    // UPDATE above already ran (it didn't know this id yet), so backfill it now. No WHERE
+    // status = 'pending' guard needed here — this row is already exclusively ours from the claim.
+    await env.DB.prepare(`UPDATE memory_reviews SET memory_id = ?1 WHERE id = ?2 AND user_id = ?3`)
+      .bind(memoryId, id, input.user_id)
+      .run();
+  }
 
   await writeMemoryEvent(env, {
     memoryId,

@@ -122,62 +122,71 @@ RESOLVE_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/reviews/${REVIEW_ID}/
   -d "{\"user_id\":\"${USER_ID}\",\"action\":\"ignore\",\"reason\":\"smoke test\"}")
 printf '%s' "$RESOLVE_RESPONSE" | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); if (j.review?.status !== "resolved" || j.review?.resolved_action !== "ignore") process.exit(1); });'
 
-# Concurrent-resolve regression: two requests racing to resolve the same review must not both
+# Concurrent-resolve regression: N requests racing to resolve the same review must not all
 # run the add/merge/update/delete side effects. resolveMemoryReview() now folds the
 # "still pending?" check and the resolved-status write into a single atomic UPDATE
-# (WHERE status = 'pending'), so only one of two simultaneous resolves can win the row.
+# (WHERE status = 'pending'), so only one of many simultaneous resolves can win the row.
+# Fire all N requests from one already-running Node process via Promise.all(fetch...) so they
+# dispatch within the same tick (verified via timing: all N land within ~1-2ms of each other,
+# vs. spawning N separate `curl` processes, whose own fork/exec/DNS/connect overhead serializes
+# requests enough that they never overlap). Note: local `wrangler dev` has no real AI/Vectorize
+# credentials (both report "not supported" locally), so createMemory() never actually performs
+# genuine async I/O here — every promise in the request settles via microtasks with no macrotask
+# yield, so even fully-simultaneous dispatch mostly can't reproduce the interleaving that's
+# possible in production D1 (real network round-trips). This assertion is still meaningful as a
+# safety net (exactly one winner, even under maximum local contention) and directly exercises the
+# atomic `UPDATE ... WHERE status = 'pending'` guard that SQLite enforces at the storage layer.
 CONCURRENT_CONTENT="concurrency review candidate ${CONTENT}"
 CONCURRENT_REVIEW_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/reviews" \
   -H 'Content-Type: application/json' \
   -d "{\"user_id\":\"${USER_ID}\",\"project_id\":\"${PROJECT_ID}\",\"source\":\"smoke-review-concurrency\",\"candidates\":[{\"content\":\"${CONCURRENT_CONTENT}\",\"scope\":\"project\",\"kind\":\"task_learning\",\"importance\":0.1,\"confidence\":0.9}]}")
 CONCURRENT_REVIEW_ID=$(printf '%s' "$CONCURRENT_REVIEW_RESPONSE" | json_value 'reviews.0.id')
 
-CONCURRENT_DIR=$(mktemp -d)
-set +e
-(
-  curl -s -o "${CONCURRENT_DIR}/resp1.json" -w '%{http_code}' -X POST \
-    -H "Authorization: Bearer ${ADMIN_API_KEY}" -H 'Content-Type: application/json' \
-    "$BASE_URL/v1/memories/reviews/${CONCURRENT_REVIEW_ID}/resolve" \
-    -d "{\"user_id\":\"${USER_ID}\",\"action\":\"add\",\"reason\":\"concurrency race A\"}" \
-    > "${CONCURRENT_DIR}/status1.txt"
-) &
-CONCURRENT_PID1=$!
-(
-  curl -s -o "${CONCURRENT_DIR}/resp2.json" -w '%{http_code}' -X POST \
-    -H "Authorization: Bearer ${ADMIN_API_KEY}" -H 'Content-Type: application/json' \
-    "$BASE_URL/v1/memories/reviews/${CONCURRENT_REVIEW_ID}/resolve" \
-    -d "{\"user_id\":\"${USER_ID}\",\"action\":\"add\",\"reason\":\"concurrency race B\"}" \
-    > "${CONCURRENT_DIR}/status2.txt"
-) &
-CONCURRENT_PID2=$!
-wait "$CONCURRENT_PID1"
-wait "$CONCURRENT_PID2"
-set -e
+CONCURRENT_N=16
+CONCURRENT_RESULT=$(node -e '
+const [baseUrl, adminApiKey, userId, reviewId, n] = process.argv.slice(1);
+(async () => {
+  const requests = Array.from({ length: Number(n) }, (_, i) =>
+    fetch(`${baseUrl}/v1/memories/reviews/${reviewId}/resolve`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminApiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, action: "add", reason: `concurrency race ${i}` }),
+    }).then(async (res) => ({ status: res.status, body: await res.json().catch(() => null) }))
+  );
+  const results = await Promise.all(requests);
+  console.log(JSON.stringify(results));
+})();
+' "$BASE_URL" "$ADMIN_API_KEY" "$USER_ID" "$CONCURRENT_REVIEW_ID" "$CONCURRENT_N")
 
-CONCURRENT_SUCCESS_COUNT=0
-for i in 1 2; do
-  status="$(cat "${CONCURRENT_DIR}/status${i}.txt")"
-  body_file="${CONCURRENT_DIR}/resp${i}.json"
-  if [[ "$status" =~ ^2 ]]; then
-    if node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); if (j.review?.status !== "resolved" || !j.memory) process.exit(1); });' < "$body_file"; then
-      CONCURRENT_SUCCESS_COUNT=$((CONCURRENT_SUCCESS_COUNT + 1))
-    else
-      echo "concurrent resolve request ${i} returned ${status} but body lacks resolved review + memory: $(cat "$body_file")"
-      exit 1
-    fi
-  else
-    node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); if (!j.error) process.exit(1); });' < "$body_file" \
-      || { echo "concurrent resolve request ${i} failed with ${status} but body has no error: $(cat "$body_file")"; exit 1; }
-  fi
-done
-[[ "$CONCURRENT_SUCCESS_COUNT" == "1" ]] || { echo "expected exactly one concurrent resolve to succeed, got ${CONCURRENT_SUCCESS_COUNT} (status1=$(cat "${CONCURRENT_DIR}/status1.txt") status2=$(cat "${CONCURRENT_DIR}/status2.txt"))"; exit 1; }
+set +e
+CONCURRENT_SUCCESS_COUNT=$(printf '%s' "$CONCURRENT_RESULT" | node -e '
+let s=""; process.stdin.on("data", d => s += d).on("end", () => {
+  const results = JSON.parse(s);
+  for (const r of results) {
+    const ok2xx = r.status >= 200 && r.status < 300;
+    const looksResolved = ok2xx && r.body?.review?.status === "resolved" && !!r.body?.memory;
+    if (ok2xx && !looksResolved) {
+      console.error(`concurrent resolve returned ${r.status} but body lacks resolved review + memory: ${JSON.stringify(r.body)}`);
+      process.exit(2);
+    }
+    if (!ok2xx && !r.body?.error) {
+      console.error(`concurrent resolve failed with ${r.status} but body has no error: ${JSON.stringify(r.body)}`);
+      process.exit(2);
+    }
+  }
+  console.log(results.filter((r) => r.status >= 200 && r.status < 300).length);
+});
+')
+CONCURRENT_EXIT=$?
+set -e
+[[ "$CONCURRENT_EXIT" == "0" ]] || { echo "concurrent resolve responses failed shape validation: $CONCURRENT_RESULT"; exit 1; }
+[[ "$CONCURRENT_SUCCESS_COUNT" == "1" ]] || { echo "expected exactly one of ${CONCURRENT_N} concurrent resolves to succeed, got ${CONCURRENT_SUCCESS_COUNT}: $CONCURRENT_RESULT"; exit 1; }
 
 CONCURRENT_LIST_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/list" \
   -H 'Content-Type: application/json' \
   -d "{\"user_id\":\"${USER_ID}\",\"project_id\":\"${PROJECT_ID}\"}")
 CONCURRENT_MATCH_COUNT=$(printf '%s' "$CONCURRENT_LIST_RESPONSE" | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); const needle = process.argv[1]; console.log((j.memories ?? []).filter(m => m.content === needle && m.status === "active").length); });' "$CONCURRENT_CONTENT")
 [[ "$CONCURRENT_MATCH_COUNT" == "1" ]] || { echo "expected exactly 1 memory from the concurrent add-resolve race, got ${CONCURRENT_MATCH_COUNT}"; exit 1; }
-rm -rf "$CONCURRENT_DIR"
 
 CLASSIFIER_CANDIDATE_BODY=$(jq -cn --arg user "$USER_ID" --arg project "$PROJECT_ID" --arg content "unsupervised classifier candidate ${CONTENT}" '
   {user_id: $user, source: "pi:agent-end-classifier",
