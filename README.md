@@ -106,7 +106,7 @@ npm run deploy
 
 ## API
 
-All `/v1/*` endpoints require this header when `ADMIN_API_KEY` is configured:
+`ADMIN_API_KEY` must be configured — all `/v1/*` endpoints return `503` if it is unset, and require this header otherwise:
 
 ```http
 Authorization: Bearer <ADMIN_API_KEY>
@@ -382,7 +382,7 @@ provider-specific setup notes.
 | --- | --- | --- |
 | `EMBEDDING_MODEL` | `@cf/baai/bge-m3` | Workers AI embedding model |
 | `MEMORY_LLM_MODEL` | `@cf/meta/llama-3.1-8b-instruct-fp8` | Workers AI chat model for candidate merge/ignore decisions |
-| `ADMIN_API_KEY` | unset | Optional bearer-token auth for `/v1/*`; set as Wrangler secret |
+| `ADMIN_API_KEY` | unset | **Required** bearer-token auth for `/v1/*`; unset returns `503`. Set as Wrangler secret |
 
 ## Data model
 
