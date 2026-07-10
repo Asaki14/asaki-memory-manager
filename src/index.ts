@@ -18,6 +18,17 @@ async function readJson(c: Context<{ Bindings: Bindings }>): Promise<{ ok: true;
   }
 }
 
+// Guards the expensive routes (embeddings/Vectorize/LLM dedup calls) with the Cloudflare
+// Rate Limiting binding, keyed per user_id. Degrades to a no-op when RATE_LIMITER isn't
+// configured (e.g. local dev), matching the "binding absent -> skip" pattern used elsewhere
+// (see upsertVector() in services/memories.ts).
+async function checkRateLimit(c: Context<{ Bindings: Bindings }>, key: string): Promise<Response | null> {
+  if (!c.env.RATE_LIMITER) return null;
+  const { success } = await c.env.RATE_LIMITER.limit({ key });
+  if (!success) return c.json({ error: 'Rate limit exceeded. Try again shortly.' }, 429);
+  return null;
+}
+
 app.use('/v1/*', async (c, next) => {
   const configuredKey = c.env.ADMIN_API_KEY;
   if (!configuredKey) {
