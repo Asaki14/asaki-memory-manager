@@ -5,11 +5,7 @@ var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __commonJS = (cb, mod) => function __require() {
-  try {
-    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
-  } catch (e) {
-    throw mod = 0, e;
-  }
+  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -10716,7 +10712,7 @@ ZodNaN.create = (params) => {
     ...processCreateParams(params)
   });
 };
-var BRAND = /* @__PURE__ */ Symbol("zod_brand");
+var BRAND = Symbol("zod_brand");
 var ZodBranded = class extends ZodType {
   _parse(input) {
     const { ctx } = this._processInputParams(input);
@@ -10976,6 +10972,7 @@ function $constructor(name, initializer3, params) {
   Object.defineProperty(_, "name", { value: name });
   return _;
 }
+var $brand = Symbol("zod_brand");
 var $ZodAsyncError = class extends Error {
   constructor() {
     super(`Encountered Promise during synchronous parse. Use .parseAsync() instead.`);
@@ -13479,6 +13476,8 @@ function en_default2() {
 }
 
 // integrations/mcp/node_modules/zod/v4/core/registries.js
+var $output = Symbol("ZodOutput");
+var $input = Symbol("ZodInput");
 var $ZodRegistry = class {
   constructor() {
     this._map = /* @__PURE__ */ new Map();
@@ -17154,7 +17153,7 @@ function isTerminal(status) {
 }
 
 // integrations/mcp/node_modules/zod-to-json-schema/dist/esm/Options.js
-var ignoreOverride = /* @__PURE__ */ Symbol("Let zodToJsonSchema decide on which parser to use");
+var ignoreOverride = Symbol("Let zodToJsonSchema decide on which parser to use");
 var defaultOptions = {
   name: void 0,
   $refStrategy: "root",
@@ -20130,7 +20129,7 @@ var Server = class extends Protocol {
 };
 
 // integrations/mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/server/completable.js
-var COMPLETABLE_SYMBOL = /* @__PURE__ */ Symbol.for("mcp.completable");
+var COMPLETABLE_SYMBOL = Symbol.for("mcp.completable");
 function isCompletable(schema) {
   return !!schema && typeof schema === "object" && COMPLETABLE_SYMBOL in schema;
 }
@@ -21108,6 +21107,8 @@ var API_BASE = "https://asaki-memory-manager.YOUR_SUBDOMAIN.workers.dev";
 var DEFAULT_USER_ID = "asaki";
 var DEFAULT_SCOPE = "project";
 var SOURCE_TAG = process.env.ASAKI_MEMORY_SOURCE || "mcp";
+var MAX_TOOL_OUTPUT_CHARS = 6e3;
+var MEMORY_CONTEXT_CONTENT_CHARS = 280;
 var SCOPES = ["global", "project", "session"];
 var KINDS = ["preference", "rule", "fact", "decision", "task_learning", "bug_fix", "workflow"];
 function expandHome(path) {
@@ -21196,7 +21197,29 @@ async function apiRequest(path, body, signal, method = "POST") {
   }
   return response.json();
 }
-function formatLine(item, index) {
+function joinWithinBudget(lines, maxChars = MAX_TOOL_OUTPUT_CHARS) {
+  let text = "";
+  let included = 0;
+  for (const rawLine of lines) {
+    const line = rawLine.length > maxChars ? `${rawLine.slice(0, maxChars)}\u2026` : rawLine;
+    const next = text ? `${text}
+${line}` : line;
+    if (next.length > maxChars && included > 0) break;
+    text = next;
+    included += 1;
+  }
+  return { text, shown: included, total: lines.length };
+}
+function withBudgetFooter(budget, continueOffset) {
+  if (budget.shown >= budget.total) return budget.text;
+  const hint = continueOffset == null ? "" : ` \u2014 call again with offset=${continueOffset} to continue`;
+  return `${budget.text}
+...(showing ${budget.shown}/${budget.total}, output budget reached${hint})`;
+}
+function truncateText(text, maxChars) {
+  return text.length > maxChars ? `${text.slice(0, maxChars)}\u2026` : text;
+}
+function formatLine(item, index, maxContentChars) {
   const prefix = index == null ? "" : `${index + 1}. `;
   const id = item.id ? ` id=${item.id}` : "";
   const scope = item.scope ? ` scope=${item.scope}` : "";
@@ -21205,7 +21228,16 @@ function formatLine(item, index) {
   const importance = typeof item.importance === "number" ? ` importance=${item.importance.toFixed(2)}` : "";
   const updatedAt = item.updated_at ? ` updated_at=${item.updated_at}` : "";
   const content = item.content ?? item.memory ?? item.text;
-  return `${prefix}${typeof content === "string" ? content : JSON.stringify(item)}${id}${scope}${kind}${status}${importance}${updatedAt}`;
+  const text = typeof content === "string" ? content : JSON.stringify(item);
+  const shown = maxContentChars == null ? text : truncateText(text, maxContentChars);
+  return `${prefix}${shown}${id}${scope}${kind}${status}${importance}${updatedAt}`;
+}
+function formatScoreDetails(details) {
+  if (!details || typeof details !== "object") return "";
+  const d = details;
+  const parts = ["semantic", "keyword", "entity", "metadata"].filter((key) => typeof d[key] === "number").map((key) => `${key}=${d[key].toFixed(3)}`);
+  if (d.source) parts.push(`source=${d.source}`);
+  return parts.length ? ` [${parts.join(" ")}]` : "";
 }
 function formatReviewLine(item, index) {
   const prefix = index == null ? "" : `${index + 1}. `;
@@ -21218,7 +21250,9 @@ function formatReviewLine(item, index) {
   const scope = candidate.scope ? ` scope=${candidate.scope}` : "";
   const kind = candidate.kind ? ` kind=${candidate.kind}` : "";
   const content = candidate.content;
-  return `${prefix}${typeof content === "string" ? content : JSON.stringify(candidate || item)}${id}${status}${action}${memoryId}${scope}${kind}${updatedAt}`;
+  const potentialDuplicate = item.potential_duplicate && typeof item.potential_duplicate === "object" ? item.potential_duplicate : null;
+  const dup = potentialDuplicate ? ` potential_duplicate=[memory_id=${potentialDuplicate.memory_id} suggested=${potentialDuplicate.action} reason="${potentialDuplicate.reason}"]` : "";
+  return `${prefix}${typeof content === "string" ? content : JSON.stringify(candidate || item)}${id}${status}${action}${memoryId}${scope}${kind}${updatedAt}${dup}`;
 }
 var server = new McpServer({ name: "asaki-memory", version: "0.1.0" });
 server.tool(
@@ -21229,9 +21263,10 @@ server.tool(
     top_k: external_exports.number().int().min(1).max(50).optional().describe("Maximum results to return."),
     scope: external_exports.enum(["global", "project", "session"]).optional().describe("Optional scope filter."),
     project_id: external_exports.string().optional().describe("Project id override."),
-    session_id: external_exports.string().optional().describe("Session id override.")
+    session_id: external_exports.string().optional().describe("Session id override."),
+    debug: external_exports.boolean().optional().describe("Include score_details (semantic/keyword/entity/metadata breakdown) per result. Default off.")
   },
-  async ({ query, top_k, scope, project_id, session_id }) => {
+  async ({ query, top_k, scope, project_id, session_id, debug }) => {
     const cfg = memoryConfig();
     const body = {
       query,
@@ -21244,19 +21279,20 @@ server.tool(
     const data = await apiRequest("/v1/memories/search", body);
     const results = Array.isArray(data.results) ? data.results : [];
     if (results.length === 0) return { content: [{ type: "text", text: "No matching Asaki memories found." }] };
-    const text = results.map((item, index) => {
+    const lines = results.map((item, index) => {
       const score = typeof item.score === "number" ? ` score=${item.score.toFixed(3)}` : "";
       const similarity = typeof item.similarity === "number" ? ` similarity=${item.similarity.toFixed(3)}` : "";
-      return `${formatLine(item, index)}${score}${similarity}`;
-    }).join("\n");
-    return { content: [{ type: "text", text }] };
+      const scoreDetails = debug ? formatScoreDetails(item.score_details) : "";
+      return `${formatLine(item, index, MEMORY_CONTEXT_CONTENT_CHARS)}${score}${similarity}${scoreDetails}`;
+    });
+    return { content: [{ type: "text", text: withBudgetFooter(joinWithinBudget(lines)) }] };
   }
 );
 server.tool(
   "asaki_memory_add",
   "Store a durable memory in Asaki personal memory. Do not store secrets or sensitive transient data.",
   {
-    text: external_exports.string().describe("Concise, self-contained memory text to store (1-3 sentences, roughly 40-300 chars). Summarize the durable takeaway only \u2014 never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives."),
+    text: external_exports.string().describe("Concise, self-contained memory text to store. Preference/rule: roughly 40-160 chars. Decision/workflow/bug_fix/task_learning: 1-2 sentences, at most roughly 200-300 chars. Summarize the durable takeaway only."),
     type: external_exports.string().optional().describe("Memory kind."),
     scope: external_exports.enum(["global", "project", "session"]).optional().describe("Memory scope."),
     project_id: external_exports.string().optional().describe("Project id override."),
@@ -21284,8 +21320,9 @@ server.tool(
     const decision = Array.isArray(data.decisions) ? data.decisions[0] : void 0;
     const action = decision?.action || "ok";
     const memoryId = decision?.memory?.id || decision?.matched_memory?.id;
+    const reviewId = decision?.review?.id;
     const reason = decision?.reason ? `: ${decision.reason}` : "";
-    return { content: [{ type: "text", text: `Asaki memory ${action}${memoryId ? ` id=${memoryId}` : ""}${reason}` }] };
+    return { content: [{ type: "text", text: `Asaki memory ${action}${memoryId ? ` id=${memoryId}` : ""}${reviewId ? ` review_id=${reviewId}` : ""}${reason}` }] };
   }
 );
 server.tool(
@@ -21341,7 +21378,8 @@ server.tool(
     const data = await apiRequest("/v1/memories/list", body);
     const memories = Array.isArray(data.memories) ? data.memories : [];
     if (memories.length === 0) return { content: [{ type: "text", text: "No Asaki memories found." }] };
-    return { content: [{ type: "text", text: memories.map((item, index) => formatLine(item, index)).join("\n") }] };
+    const listBudget = joinWithinBudget(memories.map((item, index) => formatLine(item, index)));
+    return { content: [{ type: "text", text: withBudgetFooter(listBudget, (offset ?? 0) + listBudget.shown) }] };
   }
 );
 server.tool(
@@ -21389,9 +21427,10 @@ server.tool(
     session_id: external_exports.string().optional(),
     source: external_exports.string().optional(),
     limit: external_exports.number().int().min(1).max(100).optional(),
-    offset: external_exports.number().int().min(0).optional()
+    offset: external_exports.number().int().min(0).optional(),
+    include_suggestions: external_exports.boolean().optional().describe("Attach a potential_duplicate hint (matched memory + suggested add/merge/update/delete/ignore) to each pending review. Default off.")
   },
-  async ({ status, project_id, session_id, source, limit, offset }) => {
+  async ({ status, project_id, session_id, source, limit, offset, include_suggestions }) => {
     const cfg = memoryConfig();
     const body = { user_id: cfg.userId, project_id: resolveProjectId(project_id) };
     if (session_id || cfg.sessionId) body.session_id = session_id || cfg.sessionId;
@@ -21399,18 +21438,20 @@ server.tool(
     if (source) body.source = source;
     if (limit != null) body.limit = limit;
     if (offset != null) body.offset = offset;
+    if (include_suggestions) body.include_suggestions = true;
     const data = await apiRequest("/v1/memories/reviews/list", body);
     const reviews = Array.isArray(data.reviews) ? data.reviews : [];
     if (reviews.length === 0) return { content: [{ type: "text", text: "No Asaki memory reviews found." }] };
-    return { content: [{ type: "text", text: reviews.map((item, index) => formatReviewLine(item, index)).join("\n") }] };
+    const reviewBudget = joinWithinBudget(reviews.map((item, index) => formatReviewLine(item, index)));
+    return { content: [{ type: "text", text: withBudgetFooter(reviewBudget, (offset ?? 0) + reviewBudget.shown) }] };
   }
 );
 server.tool(
   "asaki_memory_review_resolve",
-  "Resolve a pending Asaki memory review as add, merge, or ignore. Only call after explicit user approval.",
+  "Resolve a pending Asaki memory review as add, merge, update, delete, or ignore. update/delete/merge require memory_id (the existing memory to replace/delete/merge into). Only call after explicit user approval.",
   {
     id: external_exports.string(),
-    action: external_exports.enum(["add", "merge", "ignore"]),
+    action: external_exports.enum(["add", "merge", "update", "delete", "ignore"]),
     memory_id: external_exports.string().optional(),
     reason: external_exports.string().optional()
   },
