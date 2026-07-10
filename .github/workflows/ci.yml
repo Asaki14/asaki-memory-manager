@@ -18,6 +18,19 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
 
+  mcp-build-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:mcp
+      - name: Ensure dist/mcp-server.mjs matches source (rebuild it if this fails)
+        run: git diff --exit-code dist/mcp-server.mjs
+
   hygiene:
     runs-on: ubuntu-latest
     steps:
