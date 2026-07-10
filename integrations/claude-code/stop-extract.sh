@@ -343,7 +343,9 @@ Output your FINAL answer as compact JSON only, no other prose before or after it
         -H "Authorization: Bearer ${ASAKI_MEMORY_API_KEY}" \
         -H "Content-Type: application/json" \
         -d "$CANDIDATE_BODY" 2>>"$CLASSIFIER_LOG_FILE")
-      ACTION=$(echo "$ADD_RESP" | jq -r '.decisions[0].action // "failed"' 2>/dev/null)
+      # The server routes this "claude-code:stop-classifier" source straight to the review queue
+      # (never decisions) — see isUnsupervisedSource() in src/services/candidateDecision.ts.
+      ACTION=$(echo "$ADD_RESP" | jq -r 'if (.decisions // [] | length) > 0 then .decisions[0].action elif (.reviews // [] | length) > 0 then "review" else "failed" end' 2>/dev/null)
       [ -z "$ACTION" ] && ACTION="failed"
       FINAL_JSON=$(jq -cn --arg action "$ACTION" --arg memory "$TEXT_FIELD" '{action: $action, memory: $memory, reason: ""}')
     else

@@ -513,19 +513,26 @@ function parseClassifierResult(output: string): ClassifierResult | null {
 
 function summarizeCandidateDecision(data: any, fallbackText: string): string | null {
   const decision = Array.isArray(data?.decisions) ? data.decisions[0] : null;
-  if (!decision) return null;
-  const action = typeof decision.action === "string" ? decision.action : "ok";
-  const verbs: Record<string, string> = {
-    add: "add",
-    merge: "merge into existing",
-    update: "update existing with",
-    delete: "delete stale memory for",
-    ignore: "ignore duplicate",
-    review: "queue for review",
-  };
-  const verb = verbs[action] || action;
-  const memory = decision.memory?.content || decision.matched_memory?.content || fallbackText;
-  return `${verb} "${String(memory).slice(0, 120)}"`;
+  if (decision) {
+    const action = typeof decision.action === "string" ? decision.action : "ok";
+    const verbs: Record<string, string> = {
+      add: "add",
+      merge: "merge into existing",
+      update: "update existing with",
+      delete: "delete stale memory for",
+      ignore: "ignore duplicate",
+      review: "queue for review",
+    };
+    const verb = verbs[action] || action;
+    const memory = decision.memory?.content || decision.matched_memory?.content || fallbackText;
+    return `${verb} "${String(memory).slice(0, 120)}"`;
+  }
+  // Unsupervised classifier sources never auto-write — the server routes them straight to the
+  // review queue instead of `decisions` (see isUnsupervisedSource() in candidateDecision.ts).
+  if (Array.isArray(data?.reviews) && data.reviews.length > 0) {
+    return `queue for review "${fallbackText.slice(0, 120)}"`;
+  }
+  return null;
 }
 
 async function classifyMemoryCandidate(text: string, ctx: unknown, pi: ExtensionAPI): Promise<ClassifierResult | null> {

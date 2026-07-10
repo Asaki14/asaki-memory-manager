@@ -106,6 +106,20 @@ RESOLVE_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/reviews/${REVIEW_ID}/
   -d "{\"user_id\":\"${USER_ID}\",\"action\":\"ignore\",\"reason\":\"smoke test\"}")
 printf '%s' "$RESOLVE_RESPONSE" | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); if (j.review?.status !== "resolved" || j.review?.resolved_action !== "ignore") process.exit(1); });'
 
+CLASSIFIER_CANDIDATE_BODY=$(jq -cn --arg user "$USER_ID" --arg project "$PROJECT_ID" --arg content "unsupervised classifier candidate ${CONTENT}" '
+  {user_id: $user, source: "pi:agent-end-classifier",
+   candidates: [{content: $content, kind: "task_learning", scope: "project", project_id: $project, importance: 0.9, confidence: 0.9}]}')
+CLASSIFIER_CANDIDATE_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/candidates" \
+  -H 'Content-Type: application/json' \
+  -d "$CLASSIFIER_CANDIDATE_BODY")
+# An unsupervised classifier source (project scope, high importance — would be auto-add
+# eligible for a normal source) must still land in reviews, never decisions.
+printf '%s' "$CLASSIFIER_CANDIDATE_RESPONSE" | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); if ((j.decisions ?? []).length !== 0 || (j.reviews ?? []).length !== 1) { console.error(s); process.exit(1); } });'
+CLASSIFIER_REVIEW_ID=$(printf '%s' "$CLASSIFIER_CANDIDATE_RESPONSE" | json_value 'reviews.0.id')
+curl_api -X POST "$BASE_URL/v1/memories/reviews/${CLASSIFIER_REVIEW_ID}/resolve" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_id\":\"${USER_ID}\",\"action\":\"ignore\",\"reason\":\"smoke test\"}" >/dev/null
+
 EXTRACT_VALIDATION_STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/memories/extract" \
   -H "Authorization: Bearer ${ADMIN_API_KEY}" -H 'Content-Type: application/json' \
   -d "{\"text\":\"some raw text\"}")

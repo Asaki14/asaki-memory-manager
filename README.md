@@ -214,7 +214,7 @@ curl -X POST http://127.0.0.1:8787/v1/memories/candidates \
   }'
 ```
 
-Agents should extract durable memories from their own conversation context and submit concise candidates to `/v1/memories/candidates`. The Worker does not accept full conversation transcripts for extraction.
+Agents should extract durable memories from their own conversation context and submit concise candidates to `/v1/memories/candidates`. The Worker does not accept full conversation transcripts for extraction. Candidates from an unsupervised background classifier (`source: "pi:agent-end-classifier"` or `"claude-code:stop-classifier"`) always land in `reviews`, never `decisions` — only a human-in-the-loop write can auto-add/merge/update/delete.
 
 ### Review queue
 

@@ -144,6 +144,18 @@ export function isAutoAddEligible(candidate: ProcessMemoryCandidateInput): boole
   return candidate.scope !== 'global' && candidate.importance >= AUTO_ADD_MIN_IMPORTANCE;
 }
 
+// Unsupervised background classifiers (no human/agent judgment in the loop before the write —
+// Pi's agent_end classifier, Claude Code's Stop-hook classifier) must never auto-add, merge,
+// update, or delete an active memory directly: their candidates always go to the review queue,
+// regardless of scope/importance. KEEP IN SYNC with the source strings used in
+// integrations/pi/asaki-memory.ts (writeClassifiedMemory) and
+// integrations/claude-code/stop-extract.sh (the classifier write branch).
+const UNSUPERVISED_CANDIDATE_SOURCES = new Set(['pi:agent-end-classifier', 'claude-code:stop-classifier']);
+
+export function isUnsupervisedSource(source: string | null | undefined): boolean {
+  return typeof source === 'string' && UNSUPERVISED_CANDIDATE_SOURCES.has(source);
+}
+
 export function bestUsableMatch(candidate: ProcessMemoryCandidateInput, matches: Array<SearchResult | undefined>): SearchResult | undefined {
   let best: SearchResult | undefined;
   for (const match of matches) {

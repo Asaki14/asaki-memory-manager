@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import type { Env } from './types';
-import { dedupeCandidateBatch, isAutoAddEligible, processMemoryCandidates } from './services/candidates';
+import { dedupeCandidateBatch, isAutoAddEligible, isUnsupervisedSource, processMemoryCandidates } from './services/candidates';
 import { extractMemoryCandidates } from './services/extraction';
 import { backfillPendingIndex, createMemory, deleteMemory, getMemory, listMemories, pruneStaleMemories, searchMemories, updateMemory } from './services/memories';
 import { createMemoryReviews, listMemoryReviews, resolveMemoryReview } from './services/reviews';
@@ -67,8 +67,15 @@ app.post('/v1/memories/candidates', async (c) => {
   const validation = validateProcessCandidates(body.body);
   if (!validation.ok) return c.json({ error: validation.error }, 400);
 
-  const decisions = await processMemoryCandidates(c.env, validation.data);
-  return c.json({ decisions });
+  // Candidates from an unsupervised background classifier never auto-add/merge/update/delete —
+  // they always land in the review queue, regardless of scope/importance. See
+  // isUnsupervisedSource() for why.
+  const autoBucket = validation.data.filter((item) => !isUnsupervisedSource(item.source));
+  const reviewBucket = validation.data.filter((item) => isUnsupervisedSource(item.source));
+
+  const decisions = autoBucket.length > 0 ? await processMemoryCandidates(c.env, autoBucket) : [];
+  const reviews = reviewBucket.length > 0 ? await createMemoryReviews(c.env, reviewBucket) : [];
+  return c.json({ decisions, reviews });
 });
 
 app.post('/v1/memories/extract', async (c) => {
