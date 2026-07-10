@@ -1,0 +1,92 @@
+[
+  {
+    "name": "pos: OpenAI project key (sk-proj-)",
+    "text": "my key is sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890",
+    "expectMatch": true
+  },
+  {
+    "name": "pos: Anthropic key (sk-ant-api03-)",
+    "text": "export ANTHROPIC_API_KEY=sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890",
+    "expectMatch": true
+  },
+  {
+    "name": "pos: Slack bot token (xoxb-)",
+    "text": "the slack token is xoxb-1234567890-abcdefghijklmnop",
+    "expectMatch": true
+  },
+  {
+    "name": "pos: Google API key (AIza)",
+    "text": "GOOGLE_API_KEY=AIzaSyD1234567890abcdefghijklmnopqrst",
+    "expectMatch": true
+  },
+  {
+    "name": "pos: AWS access key (AKIA)",
+    "text": "aws_access_key_id = AKIAIOSFODNN7EXAMPLE",
+    "expectMatch": true
+  },
+  {
+    "name": "pos: GitHub PAT (ghp_)",
+    "text": "use this token: ghp_1234567890abcdefghijklmnop for the clone",
+    "expectMatch": true
+  },
+  {
+    "name": "pos: private key block",
+    "text": "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
+    "expectMatch": true
+  },
+  {
+    "name": "pos: Bearer token",
+    "text": "curl -H \"Authorization: Bearer abcdefghijklmnopqrstuvwxyz1234567890\"",
+    "expectMatch": true
+  },
+  {
+    "name": "pos: credential URL (user:pass@host)",
+    "text": "DATABASE_URL=postgres://user:supersecretpw@host:5432/db",
+    "expectMatch": true
+  },
+  {
+    "name": "pos: JWT three-segment token",
+    "text": "id_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PYzJ",
+    "expectMatch": true
+  },
+  {
+    "name": "pos: generic secret assignment",
+    "text": "secret: th1s-is-a-fake-secret-value",
+    "expectMatch": true
+  },
+  {
+    "name": "pos: fish set -gx secret export",
+    "text": "set -gx OPENAI_API_KEY sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "expectMatch": true
+  },
+  {
+    "name": "neg: casual mention of sk cache, no key",
+    "text": "we use sk cache for speedup, nothing sensitive here",
+    "expectMatch": false
+  },
+  {
+    "name": "neg: env var name mentioned, no value",
+    "text": "set the SECRET_NAME env var name but no value",
+    "expectMatch": false
+  },
+  {
+    "name": "neg: talking about tokens abstractly",
+    "text": "the model has a context window of many tokens",
+    "expectMatch": false
+  },
+  {
+    "name": "neg: plain conversation about GitHub",
+    "text": "let's push this to GitHub and open a PR",
+    "expectMatch": false
+  },
+  {
+    "name": "neg: short non-secret value after key=",
+    "text": "region=us-east-1",
+    "expectMatch": false
+  },
+  {
+    "name": "neg: plain URL without credentials",
+    "text": "see docs at https://example.com/api/v1/reference",
+    "expectMatch": false
+  }
+]
