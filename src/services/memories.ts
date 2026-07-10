@@ -222,7 +222,7 @@ export async function searchMemories(env: Env, input: Required<Pick<SearchMemori
     userId: input.user_id,
     eventType: 'search',
     payload: {
-      query: input.query,
+      query_length: input.query.length,
       top_k: input.top_k,
       min_score: input.min_score,
       result_count: results.length,

@@ -302,8 +302,9 @@ else
   # judgment call is more reliable than a keyword gate at deciding whether a delta is worth
   # flagging, and this classifier has no write access, so a false positive only costs one extra
   # agent turn, not a bad write.
-  echo "$TOTAL" >"$STATE_FILE"
-  TEXT="${TEXT:0:20000}"
+  # Keep the tail of the delta, not the head — see the matching comment in the AUTO_EXTRACT=1
+  # branch above for why, and why the leading space in "${TEXT: -20000}" is load-bearing.
+  TEXT="${TEXT: -20000}"
 
   CLASSIFIER_MODEL="${ASAKI_MEMORY_CLASSIFIER_MODEL:-claude-haiku-4-5-20251001}"
   # --json-schema forces the CLI to constrain decoding to this shape (not just prompt-requested
@@ -353,7 +354,23 @@ Output your FINAL answer as compact JSON only, no other prose before or after it
 
   (
     RESP=$(claude -p --safe-mode --tools "" --model "$CLASSIFIER_MODEL" --system-prompt "$CLASSIFIER_SYSTEM_PROMPT" --json-schema "$CLASSIFIER_SCHEMA" "$CLASSIFIER_PROMPT" 2>>"$CLASSIFIER_LOG_FILE")
+    CLAUDE_STATUS=$?
     RESP_SINGLE_LINE=$(echo "$RESP" | tr '\n' ' ' | sed -E 's/```(json)?//g')
+    # Only advance STATE_FILE here, inside the background job, once `claude -p` actually
+    # succeeded AND the response parses as valid JSON — writing it eagerly before dispatch (as
+    # before) meant a crash/timeout/non-JSON response would permanently skip this delta with no
+    # retry. Checking FLAG alone isn't enough to detect success: `jq -r '.flag // false'` also
+    # yields "false" when parsing fails outright, indistinguishable from a genuine flag=false
+    # classification — so validity is checked separately via `jq -e .` first. Leaving STATE_FILE
+    # untouched on failure folds the delta into the next Stop event's (larger) increment instead,
+    # mirroring the throttle's and content-gate's carry-forward behavior above. Trade-off: a Stop
+    # event that fires again before this job finishes will re-read the same not-yet-advanced
+    # offset and may re-classify/re-send an overlapping delta — accepted, since the server's
+    # dedup/merge pipeline (src/services/candidates.ts) collapses duplicate candidates instead of
+    # writing them twice.
+    if [ "$CLAUDE_STATUS" -eq 0 ] && echo "$RESP_SINGLE_LINE" | jq -e . >/dev/null 2>&1; then
+      echo "$TOTAL" >"$STATE_FILE"
+    fi
     FLAG=$(echo "$RESP_SINGLE_LINE" | jq -r '.flag // false' 2>/dev/null)
     if [ "$FLAG" = "true" ]; then
       TEXT_FIELD=$(echo "$RESP_SINGLE_LINE" | jq -r '.text // ""')
