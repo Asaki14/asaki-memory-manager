@@ -37,6 +37,11 @@
 # late), no model self-report to trust (a real HTTP response), and no forced continuation.
 set -uo pipefail
 
+# This script's state dir stores generated memory text and classifier judgments — private
+# content on a possibly multi-user host. Force all files/dirs this script creates to be
+# owner-only, overriding whatever the default umask (commonly 0022/0002) would otherwise allow.
+umask 077
+
 INPUT=$(cat)
 
 # Guard against the block below re-triggering itself: when Claude Code is already forcing a
@@ -55,6 +60,12 @@ if [ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ]; then
   exit 0
 fi
 [ -z "$SESSION_ID" ] && SESSION_ID="unknown"
+# session_id is interpolated directly into filesystem paths below (STATE_FILE, LOG_FILE, etc.);
+# reject anything outside the character set a real UUID/session-id would use (e.g. a "../"
+# sequence) rather than trying to sanitize and continue — fall back to "unknown" outright.
+case "$SESSION_ID" in
+  *[!A-Za-z0-9_-]*) SESSION_ID="unknown" ;;
+esac
 
 ASAKI_BASE="${ASAKI_MEMORY_BASE_URL:-${ASAKI_MEMORY_API_URL:-}}"
 [ -z "$ASAKI_BASE" ] && exit 0
@@ -252,8 +263,11 @@ if [ "$AUTO_EXTRACT" = "1" ]; then
     report_and_exit
   fi
 
-  echo "$TOTAL" >"$STATE_FILE"
-  TEXT="${TEXT:0:20000}"
+  # Keep the tail of the delta, not the head — the highest-value content in a long turn (a final
+  # "verified working" / "decided to use X" conclusion) tends to land at the end; the head is
+  # more often process noise. NOTE: the leading space in "${TEXT: -20000}" is load-bearing —
+  # "${TEXT:-20000}" (no space) is bash's unset-or-empty default-value syntax, an unrelated form.
+  TEXT="${TEXT: -20000}"
 
   # No "scope" here on purpose — let the server infer global vs project per candidate.
   # project_id is still sent as a hint for whichever candidates resolve to project scope.
@@ -267,6 +281,19 @@ if [ "$AUTO_EXTRACT" = "1" ]; then
       -H "Authorization: Bearer ${ASAKI_MEMORY_API_KEY}" \
       -H "Content-Type: application/json" \
       -d "$BODY" 2>>"$LOG_FILE")
+    CURL_STATUS=$?
+    # Only advance STATE_FILE here, inside the background job, once the request actually
+    # succeeded — writing it eagerly before dispatch (as before) meant a curl failure (network
+    # down, 429, process killed) would permanently skip this delta with no retry. Leaving
+    # STATE_FILE untouched on failure folds the delta into the next Stop event's (larger)
+    # increment instead, mirroring the throttle's and content-gate's carry-forward behavior
+    # above. Trade-off: a Stop event that fires again before this job finishes will re-read the
+    # same not-yet-advanced offset and may resend an overlapping delta — accepted, since the
+    # server's dedup/merge pipeline (src/services/candidates.ts) collapses duplicate candidates
+    # instead of writing them twice.
+    if [ "$CURL_STATUS" -eq 0 ] && echo "$RESP" | jq -e . >/dev/null 2>&1; then
+      echo "$TOTAL" >"$STATE_FILE"
+    fi
     echo "$(date -u +%FT%TZ) ${RESP}" >>"$LOG_FILE"
   ) >/dev/null 2>&1 &
   disown

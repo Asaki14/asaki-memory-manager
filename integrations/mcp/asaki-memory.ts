@@ -31,6 +31,30 @@ type MemoryScope = (typeof SCOPES)[number];
 type MemoryKind = (typeof KINDS)[number];
 type ConfigFile = Record<string, unknown>;
 
+// Local hard gate before any network request — server-side src/utils/sensitiveContent.ts already
+// rejects these with a 400, but that's after the text has already left the machine. This is the
+// same pattern independently maintained in integrations/pi/asaki-memory.ts's SENSITIVE_RE_LIST and
+// integrations/claude-code/stop-extract.sh's SENSITIVE_PATTERN — keep them in sync. sk-/sk-proj-/
+// sk-ant- use a hyphen (not an underscore) to actually match real OpenAI/Anthropic keys; also
+// covers Slack xox- tokens, Google AIza- keys, JWTs, and user:pass@host credential URLs.
+const SENSITIVE_RE_LIST = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/i,
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b/i,
+  /\bsk-[A-Za-z0-9-]{10,}\b/i,
+  /\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{16,}\b/i,
+  /\bAKIA[0-9A-Z]{16}\b/,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/i,
+  /\bAIza[0-9A-Za-z_-]{20,}\b/,
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/,
+  /:\/\/[^/\s:]+:[^/\s@]{6,}@/,
+  /\b(?:api[_-]?key|token|secret|password|passwd|authorization)\b\s*[:=]\s*["']?[^"'\s]{8,}/i,
+  /set\s+-gx\s+\w*(?:KEY|TOKEN|SECRET|PASSWORD)\w*\s+[^$\s][^\s]{8,}/i,
+];
+
+function containsSensitiveText(text: string): boolean {
+  return SENSITIVE_RE_LIST.some((pattern) => pattern.test(text));
+}
+
 function expandHome(path: string): string {
   return path === "~" || path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
 }
@@ -132,6 +156,30 @@ async function apiRequest(path: string, body: unknown, signal?: AbortSignal, met
   return response.json() as Promise<Record<string, unknown>>;
 }
 
+const REQUEST_TIMEOUT_MS = 20_000;
+
+function timeoutSignal(ms: number): AbortSignal {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  if (typeof (timer as any).unref === "function") (timer as any).unref();
+  return controller.signal;
+}
+
+// Combines the MCP SDK's per-call cancellation signal (aborted if the caller cancels the tool
+// call) with a local fallback timeout, so a hung fetch can't outlive either. AbortSignal.any is
+// Node 20+; fall back to a small manual merge if unavailable.
+function combinedSignal(sdkSignal: AbortSignal | undefined, timeoutMs: number = REQUEST_TIMEOUT_MS): AbortSignal {
+  const timeout = timeoutSignal(timeoutMs);
+  if (!sdkSignal) return timeout;
+  if (typeof (AbortSignal as any).any === "function") return (AbortSignal as any).any([sdkSignal, timeout]);
+
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  sdkSignal.addEventListener("abort", onAbort, { once: true });
+  timeout.addEventListener("abort", onAbort, { once: true });
+  return controller.signal;
+}
+
 type BudgetedJoin = { text: string; shown: number; total: number };
 
 function joinWithinBudget(lines: string[], maxChars: number = MAX_TOOL_OUTPUT_CHARS): BudgetedJoin {
@@ -214,7 +262,7 @@ server.tool(
     session_id: z.string().optional().describe("Session id override."),
     debug: z.boolean().optional().describe("Include score_details (semantic/keyword/entity/metadata breakdown) per result. Default off."),
   },
-  async ({ query, top_k, scope, project_id, session_id, debug }) => {
+  async ({ query, top_k, scope, project_id, session_id, debug }, extra) => {
     const cfg = memoryConfig();
     const body: Record<string, unknown> = {
       query,
@@ -225,7 +273,7 @@ server.tool(
     if (session_id || cfg.sessionId) body.session_id = session_id || cfg.sessionId;
     if (scope) body.scope = scope;
 
-    const data = await apiRequest("/v1/memories/search", body);
+    const data = await apiRequest("/v1/memories/search", body, combinedSignal(extra.signal));
     const results = Array.isArray(data.results) ? (data.results as Record<string, unknown>[]) : [];
     if (results.length === 0) return { content: [{ type: "text" as const, text: "No matching Asaki memories found." }] };
 
@@ -251,7 +299,10 @@ server.tool(
     importance: z.number().min(0).max(1).optional().describe("Importance 0-1. Default 0.6."),
     confidence: z.number().min(0).max(1).optional().describe("Confidence 0-1. Default 0.9."),
   },
-  async ({ text, type, scope, project_id, session_id, importance, confidence }) => {
+  async ({ text, type, scope, project_id, session_id, importance, confidence }, extra) => {
+    if (containsSensitiveText(text)) {
+      throw new Error("Refusing to store: text appears to contain a secret/credential (API key, token, private key, or similar). Remove it and try again.");
+    }
     const cfg = memoryConfig();
     const resolvedScope = scope || cfg.defaultScope;
     const projectId = resolveProjectId(project_id);
@@ -268,7 +319,11 @@ server.tool(
     if (resolvedScope === "project") candidate.project_id = projectId;
     if (resolvedScope === "session") candidate.session_id = sessionId;
 
-    const data = await apiRequest("/v1/memories/candidates", { user_id: cfg.userId, source: SOURCE_TAG, candidates: [candidate] });
+    const data = await apiRequest(
+      "/v1/memories/candidates",
+      { user_id: cfg.userId, source: SOURCE_TAG, candidates: [candidate] },
+      combinedSignal(extra.signal),
+    );
     const decision = Array.isArray(data.decisions) ? (data.decisions[0] as Record<string, any> | undefined) : undefined;
     const action = decision?.action || "ok";
     const memoryId = decision?.memory?.id || decision?.matched_memory?.id;
@@ -287,7 +342,10 @@ server.tool(
     project_id: z.string().optional().describe("Project id override."),
     session_id: z.string().optional().describe("Session id override."),
   },
-  async ({ text, scope, project_id, session_id }) => {
+  async ({ text, scope, project_id, session_id }, extra) => {
+    if (containsSensitiveText(text)) {
+      throw new Error("Refusing to extract: text appears to contain a secret/credential (API key, token, private key, or similar). Remove it and try again.");
+    }
     const cfg = memoryConfig();
     const projectId = resolveProjectId(project_id);
     const sessionId = session_id || cfg.sessionId || undefined;
@@ -297,19 +355,33 @@ server.tool(
     if (scope) body.scope = scope;
     if (scope === "session" || (!scope && sessionId)) body.session_id = sessionId;
 
-    const data = await apiRequest("/v1/memories/extract", body);
+    const data = await apiRequest("/v1/memories/extract", body, combinedSignal(extra.signal));
     const decisions = Array.isArray(data.decisions) ? (data.decisions as Record<string, any>[]) : [];
-    if (decisions.length === 0) return { content: [{ type: "text" as const, text: "No durable memories extracted." }] };
-    const text_out = decisions
-      .map((decision, index) => {
-        const action = decision.action || "ok";
-        const memoryId = decision.memory?.id || decision.matched_memory?.id;
-        const reason = decision.reason ? `: ${decision.reason}` : "";
-        const content = decision.candidate?.content ?? "";
-        return `${index + 1}. [${action}]${memoryId ? ` id=${memoryId}` : ""} ${content}${reason}`;
-      })
-      .join("\n");
-    return { content: [{ type: "text" as const, text: text_out }] };
+    const reviews = Array.isArray(data.reviews) ? (data.reviews as Record<string, unknown>[]) : [];
+    // Low-importance/global-scope candidates are routed to `reviews` instead of `decisions` — an
+    // empty `decisions` array does not mean nothing was extracted.
+    if (decisions.length === 0 && reviews.length === 0) return { content: [{ type: "text" as const, text: "No durable memories extracted." }] };
+
+    const parts: string[] = [];
+    if (decisions.length > 0) {
+      parts.push(
+        decisions
+          .map((decision, index) => {
+            const action = decision.action || "ok";
+            const memoryId = decision.memory?.id || decision.matched_memory?.id;
+            const reason = decision.reason ? `: ${decision.reason}` : "";
+            const content = decision.candidate?.content ?? "";
+            return `${index + 1}. [${action}]${memoryId ? ` id=${memoryId}` : ""} ${content}${reason}`;
+          })
+          .join("\n"),
+      );
+    }
+    if (reviews.length > 0) {
+      parts.push(
+        `${reviews.length} candidate(s) queued for review:\n${reviews.map((item, index) => formatReviewLine(item, index)).join("\n")}`,
+      );
+    }
+    return { content: [{ type: "text" as const, text: parts.join("\n\n") }] };
   },
 );
 
@@ -325,7 +397,7 @@ server.tool(
     limit: z.number().int().min(1).max(100).optional(),
     offset: z.number().int().min(0).optional(),
   },
-  async ({ scope, project_id, session_id, kind, status, limit, offset }) => {
+  async ({ scope, project_id, session_id, kind, status, limit, offset }, extra) => {
     const cfg = memoryConfig();
     const body: Record<string, unknown> = { user_id: cfg.userId, project_id: resolveProjectId(project_id) };
     if (session_id || cfg.sessionId) body.session_id = session_id || cfg.sessionId;
@@ -335,7 +407,7 @@ server.tool(
     if (limit != null) body.limit = limit;
     if (offset != null) body.offset = offset;
 
-    const data = await apiRequest("/v1/memories/list", body);
+    const data = await apiRequest("/v1/memories/list", body, combinedSignal(extra.signal));
     const memories = Array.isArray(data.memories) ? (data.memories as Record<string, unknown>[]) : [];
     if (memories.length === 0) return { content: [{ type: "text" as const, text: "No Asaki memories found." }] };
     const listBudget = joinWithinBudget(memories.map((item, index) => formatLine(item, index)));
@@ -356,7 +428,10 @@ server.tool(
     importance: z.number().min(0).max(1).optional(),
     confidence: z.number().min(0).max(1).optional(),
   },
-  async ({ text, type, scope, project_id, session_id, importance, confidence }) => {
+  async ({ text, type, scope, project_id, session_id, importance, confidence }, extra) => {
+    if (containsSensitiveText(text)) {
+      throw new Error("Refusing to create review: text appears to contain a secret/credential (API key, token, private key, or similar). Remove it and try again.");
+    }
     const cfg = memoryConfig();
     const resolvedScope = scope || cfg.defaultScope;
     const projectId = resolveProjectId(project_id);
@@ -376,7 +451,7 @@ server.tool(
     const body: Record<string, unknown> = { user_id: cfg.userId, source: `${SOURCE_TAG}:review`, candidates: [candidate] };
     if (resolvedScope === "project") body.project_id = projectId;
     if (resolvedScope === "session") body.session_id = sessionId;
-    const data = await apiRequest("/v1/memories/reviews", body);
+    const data = await apiRequest("/v1/memories/reviews", body, combinedSignal(extra.signal));
     const review = Array.isArray(data.reviews) ? (data.reviews[0] as Record<string, unknown> | undefined) : undefined;
     return { content: [{ type: "text" as const, text: review ? `Created review: ${formatReviewLine(review)}` : "Created Asaki memory review." }] };
   },
@@ -394,7 +469,7 @@ server.tool(
     offset: z.number().int().min(0).optional(),
     include_suggestions: z.boolean().optional().describe("Attach a potential_duplicate hint (matched memory + suggested add/merge/update/delete/ignore) to each pending review. Default off."),
   },
-  async ({ status, project_id, session_id, source, limit, offset, include_suggestions }) => {
+  async ({ status, project_id, session_id, source, limit, offset, include_suggestions }, extra) => {
     const cfg = memoryConfig();
     const body: Record<string, unknown> = { user_id: cfg.userId, project_id: resolveProjectId(project_id) };
     if (session_id || cfg.sessionId) body.session_id = session_id || cfg.sessionId;
@@ -403,7 +478,7 @@ server.tool(
     if (limit != null) body.limit = limit;
     if (offset != null) body.offset = offset;
     if (include_suggestions) body.include_suggestions = true;
-    const data = await apiRequest("/v1/memories/reviews/list", body);
+    const data = await apiRequest("/v1/memories/reviews/list", body, combinedSignal(extra.signal));
     const reviews = Array.isArray(data.reviews) ? (data.reviews as Record<string, unknown>[]) : [];
     if (reviews.length === 0) return { content: [{ type: "text" as const, text: "No Asaki memory reviews found." }] };
     const reviewBudget = joinWithinBudget(reviews.map((item, index) => formatReviewLine(item, index)));
@@ -420,12 +495,12 @@ server.tool(
     memory_id: z.string().optional(),
     reason: z.string().optional(),
   },
-  async ({ id, action, memory_id, reason }) => {
+  async ({ id, action, memory_id, reason }, extra) => {
     const cfg = memoryConfig();
     const body: Record<string, unknown> = { user_id: cfg.userId, action };
     if (memory_id) body.memory_id = memory_id;
     if (reason) body.reason = reason;
-    const data = await apiRequest(`/v1/memories/reviews/${id}/resolve`, body);
+    const data = await apiRequest(`/v1/memories/reviews/${id}/resolve`, body, combinedSignal(extra.signal));
     const review = data.review as Record<string, unknown> | undefined;
     const memory = data.memory as Record<string, unknown> | undefined;
     return { content: [{ type: "text" as const, text: `${review ? `Resolved review: ${formatReviewLine(review)}` : `Review ${id} resolved.`}${memory ? `\nMemory: ${formatLine(memory)}` : ""}` }] };
@@ -446,12 +521,12 @@ server.tool(
     confidence: z.number().min(0).max(1).optional(),
     status: z.enum(["active", "archived", "deleted"]).optional(),
   },
-  async ({ id, ...fields }) => {
+  async ({ id, ...fields }, extra) => {
     const cfg = memoryConfig();
     const body: Record<string, unknown> = { user_id: cfg.userId };
     for (const [key, value] of Object.entries(fields)) if (value !== undefined) body[key] = value;
 
-    const data = await apiRequest(`/v1/memories/${id}`, body, undefined, "PATCH");
+    const data = await apiRequest(`/v1/memories/${id}`, body, combinedSignal(extra.signal), "PATCH");
     const memory = data.memory as Record<string, unknown> | undefined;
     return { content: [{ type: "text" as const, text: memory ? `Updated: ${formatLine(memory)}` : `Memory ${id} updated.` }] };
   },
@@ -461,9 +536,9 @@ server.tool(
   "asaki_memory_delete",
   "Soft-delete a memory from Asaki personal memory by id. Only call after explicit user approval.",
   { id: z.string() },
-  async ({ id }) => {
+  async ({ id }, extra) => {
     const cfg = memoryConfig();
-    const data = await apiRequest(`/v1/memories/${id}`, { user_id: cfg.userId }, undefined, "DELETE");
+    const data = await apiRequest(`/v1/memories/${id}`, { user_id: cfg.userId }, combinedSignal(extra.signal), "DELETE");
     const memory = data.memory as Record<string, unknown> | undefined;
     return { content: [{ type: "text" as const, text: memory ? `Deleted: ${formatLine(memory)}` : `Memory ${id} deleted.` }] };
   },
