@@ -171,8 +171,23 @@ function resolveProjectId(ctx: unknown, explicit?: string): string | undefined {
   return explicit || config.projectId || slugProjectId(cwdFromContext(ctx));
 }
 
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+function assertSafeBaseUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Invalid ASAKI_MEMORY_BASE_URL "${url}": baseUrl must be https:, only localhost/127.0.0.1 may use http:.`);
+  }
+  if (parsed.protocol === "https:") return;
+  if (parsed.protocol === "http:" && LOOPBACK_HOSTNAMES.has(parsed.hostname)) return;
+  throw new Error(`Unsafe ASAKI_MEMORY_BASE_URL "${url}": baseUrl must be https:, only localhost/127.0.0.1 may use http:.`);
+}
+
 async function memoryRequest(path: string, body: unknown, signal?: AbortSignal, method = "POST") {
   const { baseUrl, apiKey } = memoryConfig();
+  assertSafeBaseUrl(baseUrl);
   if (!apiKey) {
     throw new Error(
       "ASAKI_MEMORY_API_KEY is not set. Set it to the same value as the Cloudflare Worker ADMIN_API_KEY secret before starting pi.",

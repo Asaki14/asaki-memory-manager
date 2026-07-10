@@ -418,6 +418,7 @@ preference | rule | fact | decision | task_learning | bug_fix | workflow
 - Project/session memories are only visible when the matching `project_id` / `session_id` is provided.
 - Memory content is user/project context only. It should never override system or developer safety instructions.
 - The server rejects (`400`) any `content`/`text` that looks like a secret or credential (API keys, Bearer tokens, private keys, credential URLs, etc.) before it reaches Workers AI or D1/Vectorize — see `src/utils/sensitiveContent.ts`. If one slips through anyway, purge it (see above) rather than deleting it.
+- `/v1/memories/search`, `/v1/memories/candidates`, and `/v1/memories/extract` (the routes that trigger Workers AI embeddings/LLM calls and Vectorize queries) are protected by a Cloudflare Rate Limiting binding, keyed per `user_id`. Requests over the limit get `429`. Default is 30 requests/minute per user; adjust `ratelimits[].simple.limit`/`simple.period` in `wrangler.jsonc`.
 
 ## Development
 
