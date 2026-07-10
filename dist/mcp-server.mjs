@@ -21194,8 +21194,21 @@ var MemoryApiError = class extends Error {
     this.body = body;
   }
 };
+var LOOPBACK_HOSTNAMES = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+function assertSafeBaseUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Invalid ASAKI_MEMORY_BASE_URL "${url}": baseUrl must be https:, only localhost/127.0.0.1 may use http:.`);
+  }
+  if (parsed.protocol === "https:") return;
+  if (parsed.protocol === "http:" && LOOPBACK_HOSTNAMES.has(parsed.hostname)) return;
+  throw new Error(`Unsafe ASAKI_MEMORY_BASE_URL "${url}": baseUrl must be https:, only localhost/127.0.0.1 may use http:.`);
+}
 async function apiRequest(path, body, signal, method = "POST") {
   const { baseUrl, apiKey } = memoryConfig();
+  assertSafeBaseUrl(baseUrl);
   if (!apiKey) throw new Error("ASAKI_MEMORY_API_KEY is not set. Add it to MCP server env or ASAKI_MEMORY_CONFIG_FILE.");
   const response = await fetch(`${baseUrl}${path}`, {
     method,

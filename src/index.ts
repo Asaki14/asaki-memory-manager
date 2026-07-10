@@ -67,6 +67,9 @@ app.post('/v1/memories/search', async (c) => {
   const validation = validateSearchMemories(body.body);
   if (!validation.ok) return c.json({ error: validation.error }, 400);
 
+  const rateLimited = await checkRateLimit(c, `search:${validation.data.user_id}`);
+  if (rateLimited) return rateLimited;
+
   const results = await searchMemories(c.env, validation.data);
   return c.json({ results });
 });
@@ -77,6 +80,9 @@ app.post('/v1/memories/candidates', async (c) => {
 
   const validation = validateProcessCandidates(body.body);
   if (!validation.ok) return c.json({ error: validation.error }, 400);
+
+  const rateLimited = await checkRateLimit(c, `candidates:${validation.data[0]?.user_id ?? 'unknown'}`);
+  if (rateLimited) return rateLimited;
 
   // Candidates from an unsupervised background classifier never auto-add/merge/update/delete —
   // they always land in the review queue, regardless of scope/importance. See
@@ -95,6 +101,9 @@ app.post('/v1/memories/extract', async (c) => {
 
   const validation = validateExtractMemories(body.body);
   if (!validation.ok) return c.json({ error: validation.error }, 400);
+
+  const rateLimited = await checkRateLimit(c, `extract:${validation.data.user_id}`);
+  if (rateLimited) return rateLimited;
 
   const { text, user_id, scope, project_id, session_id, source, dry_run } = validation.data;
   const extracted = await extractMemoryCandidates(c.env, text, user_id);
