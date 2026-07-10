@@ -11,6 +11,7 @@ export interface Env {
   EMBEDDING_MODEL?: string;
   MEMORY_LLM_MODEL?: string;
   ADMIN_API_KEY?: string;
+  RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
 }
 
 export interface CreateMemoryInput {

@@ -26,5 +26,17 @@
       "binding": "VECTORIZE",
       "index_name": "asaki-memory-manager"
     }
+  ],
+  // Rate limiting for the expensive routes (search/candidates/extract) that trigger
+  // Workers AI embeddings/LLM calls and Vectorize queries. namespace_id is a free-form
+  // identifier — no Cloudflare dashboard setup needed, just keep it stable per binding.
+  // Tune simple.limit/simple.period to taste; 30 req/min per user_id is a starting point
+  // for single-operator use.
+  "ratelimits": [
+    {
+      "name": "RATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 30, "period": 60 }
+    }
   ]
 }
