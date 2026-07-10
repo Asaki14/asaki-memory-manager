@@ -605,7 +605,9 @@ async function autoExtractMemory(messages: unknown, ctx: unknown, pi: ExtensionA
   const now = Date.now();
   if (now - lastAutoExtractAt < config.extractMinIntervalMs) return null;
 
-  const text = buildExtractionText(messages).slice(0, AUTO_EXTRACT_MAX_CHARS);
+  // Keep the tail, not the head — the highest-value content in a long turn (a final "verified
+  // working" / "decided to use X" conclusion) tends to land at the end, not the start.
+  const text = buildExtractionText(messages).slice(-AUTO_EXTRACT_MAX_CHARS);
   if (!text.trim() || containsSensitiveText(text)) return null;
 
   if (config.autoExtract) {

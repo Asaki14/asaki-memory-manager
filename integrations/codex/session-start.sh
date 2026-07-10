@@ -52,13 +52,19 @@ Open your first reply with: \`Asaki Memory Active | user=${ASAKI_USER} | project
 
 Always include \`user_id: "${ASAKI_USER}"\` in every \`asaki_memory_search\` and \`asaki_memory_add\` call.
 
-After completing any task, decision, or meaningful exchange, proactively store learnings via \`asaki_memory_add\`. Do NOT wait — store incrementally. Focus on: decisions made, bugs fixed, patterns discovered, user preferences, task outcomes. Aim for 1–3 memories per substantial interaction. Keep each memory concise: preference/rule should be roughly 40-160 chars; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 chars. Summarize the durable takeaway only — never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives.
+You are the primary writer for durable memory — cloud auto-extraction is off, so if you don't call \`asaki_memory_add\`, nothing gets recorded. This means recording deliberately, not more. Before calling \`asaki_memory_add\`, check ALL of:
+1. Durable: a stated preference, a made decision, a completed bug fix/task outcome, an established rule/convention, or an explicit forget/retract request — not a question, chit-chat, a one-off command, or something with no future value.
+2. Actually happened: a completed fact, not a proposed plan, an open "should we do X? I'd recommend X" deliberation, or a present-tense explanation of how something works (a past-tense "we changed X, verified it works" DOES qualify).
+3. Not noise: skip illustrative/hypothetical examples and quoted code/CLI output; when a problem and its fix both appear in the same exchange, record only the resolved outcome, not the problem report too.
+4. Not a duplicate or stale-making: \`asaki_memory_search\` first — update/skip a near-duplicate, and separately, if what you just did makes an OLDER, differently-worded memory factually wrong (e.g. you just disabled a mechanism an old memory still describes as active), update that old memory too — don't just leave it to rot next to the new one.
+5. Right scope: \`global\` only if useful in ANY unrelated project (cross-project preferences, communication style, secret-handling rules). Everything else, including project-specific tooling/bugs AND product/business decisions (a metric definition, a customer-facing feature) — even ones that feel foundational — is \`project\`. Importance and scope are independent; a high-stakes decision is not automatically global. When genuinely ambiguous, default to \`project\` — rescoping later is cheap, a wrongly-global memory pollutes every future project's context immediately.
+6. Self-contained: no pronoun or bare reference (this/that/该/这个/主公) whose target isn't named in the same sentence — a reader with zero conversation context must be able to understand it standing alone.
+
+If nothing in the exchange clears this bar, call nothing — silence is a correct outcome, not a shortfall. Keep each memory concise: preference/rule should be roughly 40-160 chars; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 chars. Summarize the durable takeaway only — never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives.
 BANNER
 
 if [ "$SOURCE" = "startup" ]; then
-  if [ "$MEMORY_COUNT" != "0" ] && [ "$MEMORY_COUNT" != "?" ]; then
-    echo "Search Asaki memory for recent decisions and task learnings before responding. Run 2 parallel \`asaki_memory_search\` calls: one for decision kind, one for task_learning kind."
-  fi
+  echo "Asaki memory precheck: decide whether durable memory is needed for this turn. Call \`asaki_memory_search\` only when the answer or next action depends on remembered preferences, prior project decisions, conventions, task learnings, or explicitly requested past context. Simple questions, direct file edits, commands, formatting, explanations, and self-contained coding tasks should skip \`asaki_memory_search\`."
 elif [ "$SOURCE" = "resume" ] || [ "$SOURCE" = "compact" ]; then
   echo "Session ${SOURCE}. Search Asaki memory for recent session state and decisions to recover context."
 fi
