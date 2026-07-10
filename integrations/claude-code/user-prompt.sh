@@ -32,8 +32,10 @@ DEFAULT_AUTO_MIN_SCORE=0.67
 MEMORY_NEEDED_RE='记忆|记得|回忆|想起|以前|之前|上次|过往|历史|偏好|习惯|约定|惯例|决策|背景|上下文|继续|延续|remember|recall|memory|previous|before|last time|preference|convention|decision|context|continue'
 # Requires an actual 8+ char value after the label (not just the bare label) and adds the
 # fish `set -gx *KEY|TOKEN|SECRET|PASSWORD* value` exporter pattern — keep both in parity
-# with the 6-entry SENSITIVE_RE_LIST in integrations/pi/asaki-memory.ts.
-SENSITIVE_RE='-----BEGIN [A-Z ]*PRIVATE KEY-----|Bearer [A-Za-z0-9._~+/=-]{16,}|(sk|sk-ant|sk-proj|ghp|gho|ghu|ghs|github_pat)_[A-Za-z0-9_=-]{16,}|AKIA[0-9A-Z]{16}|(api[_-]?key|token|secret|password|passwd|authorization)[[:space:]]*[:=][[:space:]]*[^[:space:]]{8,}|set[[:space:]]+-gx[[:space:]]+[A-Za-z0-9_]*(KEY|TOKEN|SECRET|PASSWORD)[A-Za-z0-9_]*[[:space:]]+[^$[:space:]][^[:space:]]{8,}'
+# with the 11-entry SENSITIVE_RE_LIST in integrations/pi/asaki-memory.ts. sk-/sk-proj-/sk-ant-
+# use a hyphen (not an underscore) to actually match real OpenAI/Anthropic keys, and this now
+# also covers Slack xox- tokens, Google AIza- keys, JWTs, and user:pass@host credential URLs.
+SENSITIVE_RE='-----BEGIN [A-Z ]*PRIVATE KEY-----|Bearer [A-Za-z0-9._~+/=-]{16,}|sk-[A-Za-z0-9-]{10,}|(ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{16,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|://[^/[:space:]:]+:[^/[:space:]@]{6,}@|(api[_-]?key|token|secret|password|passwd|authorization)[[:space:]]*[:=][[:space:]]*[^[:space:]]{8,}|set[[:space:]]+-gx[[:space:]]+[A-Za-z0-9_]*(KEY|TOKEN|SECRET|PASSWORD)[A-Za-z0-9_]*[[:space:]]+[^$[:space:]][^[:space:]]{8,}'
 
 # Runs `git rev-parse --show-toplevel` under a hard wall-clock cap so a hung git process
 # (stale mount, lock, credential prompt) can never eat into the hook's own 8s timeout and

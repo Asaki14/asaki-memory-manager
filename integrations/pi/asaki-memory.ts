@@ -32,12 +32,20 @@ const MEMORY_NEEDED_RE =
 const EXTRACT_SIGNAL_RE =
   /以后都|以后就|不要再|别再|记住|记得|规则是|统一用|统一使用|根因是|已验证|已修复|已确认|踩坑|决定用|决定是|改用|换成|约定是|复盘|经验是|remember|always|never|from now on|going forward|decided to|decision is|decision was|root cause is|root cause was|already fixed|now fixed|now verified|already verified|learned that|instead of|switch to|switched to|switching to|convention is|the rule is/i;
 // KEEP IN SYNC with SENSITIVE_PATTERN in integrations/claude-code/stop-extract.sh and
-// SENSITIVE_RE_LIST in scripts/shadow-run-extraction.ts.
+// SENSITIVE_RE_LIST in scripts/shadow-run-extraction.ts. Also mirrors the server-side canonical
+// list in src/utils/sensitiveContent.ts: sk-/sk-proj-/sk-ant- use a hyphen (not an underscore)
+// to actually match real OpenAI/Anthropic keys, and this now also covers Slack xox- tokens,
+// Google AIza- keys, JWTs, and user:pass@host credential URLs.
 const SENSITIVE_RE_LIST = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/i,
   /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b/i,
-  /\b(?:sk|sk-ant|sk-proj|ghp|gho|ghu|ghs|github_pat)_[A-Za-z0-9_=-]{16,}\b/i,
+  /\bsk-[A-Za-z0-9-]{10,}\b/i,
+  /\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{16,}\b/i,
   /\bAKIA[0-9A-Z]{16}\b/,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/i,
+  /\bAIza[0-9A-Za-z_-]{20,}\b/,
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/,
+  /:\/\/[^/\s:]+:[^/\s@]{6,}@/,
   /\b(?:api[_-]?key|token|secret|password|passwd|authorization)\b\s*[:=]\s*["']?[^"'\s]{8,}/i,
   /set\s+-gx\s+\w*(?:KEY|TOKEN|SECRET|PASSWORD)\w*\s+[^$\s][^\s]{8,}/i,
 ];
