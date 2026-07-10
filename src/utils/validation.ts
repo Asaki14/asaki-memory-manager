@@ -1,4 +1,7 @@
 import type { CreateMemoryInput, ExtractMemoriesInput, ListMemoriesInput, MemoryIdInput, MemoryKind, MemoryScope, MemoryStatus, SearchMemoriesInput, UpdateMemoryInput } from '../types';
+import { containsSensitiveContent } from './sensitiveContent';
+
+const SENSITIVE_CONTENT_ERROR = 'content looks like it contains a secret or credential; refusing to store it.';
 
 const scopes = new Set<MemoryScope>(['global', 'project', 'session']);
 const kinds = new Set<MemoryKind>(['preference', 'rule', 'fact', 'decision', 'task_learning', 'bug_fix', 'workflow']);
@@ -21,6 +24,7 @@ export function validateCreateMemory(value: unknown): { ok: true; data: Required
   const input = value as CreateMemoryInput;
   if (typeof input.content !== 'string' || input.content.trim().length === 0) return { ok: false, error: 'content is required.' };
   if (input.content.length > 8000) return { ok: false, error: 'content must be <= 8000 characters.' };
+  if (containsSensitiveContent(input.content)) return { ok: false, error: SENSITIVE_CONTENT_ERROR };
   if (typeof input.user_id !== 'string' || input.user_id.trim().length === 0) return { ok: false, error: 'user_id is required.' };
 
   const scope = input.scope ?? 'global';
@@ -132,6 +136,7 @@ export function validateUpdateMemory(value: unknown): { ok: true; data: UpdateMe
   if (input.content !== undefined) {
     if (typeof input.content !== 'string' || input.content.trim().length === 0) return { ok: false, error: 'content must be a non-empty string when provided.' };
     if (input.content.length > 8000) return { ok: false, error: 'content must be <= 8000 characters.' };
+    if (containsSensitiveContent(input.content)) return { ok: false, error: SENSITIVE_CONTENT_ERROR };
     data.content = input.content.trim();
   }
   if (input.scope !== undefined) {
@@ -172,6 +177,7 @@ export function validateExtractMemories(value: unknown): { ok: true; data: Extra
   const input = value as ExtractMemoriesInput;
   if (typeof input.text !== 'string' || input.text.trim().length === 0) return { ok: false, error: 'text is required.' };
   if (input.text.length > 20000) return { ok: false, error: 'text must be <= 20000 characters.' };
+  if (containsSensitiveContent(input.text)) return { ok: false, error: SENSITIVE_CONTENT_ERROR };
   const userId = validateUserId(input.user_id);
   if (!userId) return { ok: false, error: 'user_id is required.' };
   if (input.scope && !scopes.has(input.scope)) return { ok: false, error: 'scope must be global, project, or session.' };
@@ -274,4 +280,13 @@ export function validateResolveMemoryReview(value: unknown): { ok: true; data: {
   if (input.reason != null && (typeof input.reason !== 'string' || input.reason.trim().length === 0)) return { ok: false, error: 'reason must be a non-empty string when provided.' };
   if ((input.action === 'merge' || input.action === 'update' || input.action === 'delete') && !input.memory_id) return { ok: false, error: 'memory_id is required when action is merge, update, or delete.' };
   return { ok: true, data: { user_id: userId, action: input.action as 'add' | 'merge' | 'update' | 'delete' | 'ignore', memory_id: input.memory_id?.trim() ?? null, reason: input.reason?.trim() ?? null } };
+}
+
+export function validatePurgeMemory(value: unknown): { ok: true; data: { user_id: string; reason: string | null } } | { ok: false; error: string } {
+  if (!value || typeof value !== 'object') return { ok: false, error: 'Body must be a JSON object.' };
+  const input = value as { user_id?: unknown; reason?: unknown };
+  const userId = validateUserId(input.user_id);
+  if (!userId) return { ok: false, error: 'user_id is required.' };
+  if (input.reason != null && (typeof input.reason !== 'string' || input.reason.trim().length === 0)) return { ok: false, error: 'reason must be a non-empty string when provided.' };
+  return { ok: true, data: { user_id: userId, reason: input.reason?.trim() ?? null } };
 }

@@ -142,7 +142,7 @@ export async function processMemoryCandidate(env: Env, candidate: ProcessMemoryC
       memoryId: match?.id ?? null,
       userId: candidate.user_id,
       eventType: 'ignore',
-      payload: { candidate, matched_memory_id: match?.id, reason: decision.reason },
+      payload: { candidate_kind: candidate.kind, candidate_scope: candidate.scope, candidate_content_length: candidate.content.length, matched_memory_id: match?.id, reason: decision.reason },
     });
     return { action: 'ignore', candidate, matched_memory: match, reason: decision.reason };
   }
@@ -157,7 +157,7 @@ export async function processMemoryCandidate(env: Env, candidate: ProcessMemoryC
       memoryId: memory.id,
       userId: candidate.user_id,
       eventType: 'merge',
-      payload: { candidate, matched_memory_id: match.id, reason: decision.reason },
+      payload: { candidate_kind: candidate.kind, candidate_scope: candidate.scope, candidate_content_length: candidate.content.length, matched_memory_id: match.id, reason: decision.reason },
     });
     return { action: 'merge', candidate, memory, matched_memory: match, reason: decision.reason };
   }
@@ -172,7 +172,7 @@ export async function processMemoryCandidate(env: Env, candidate: ProcessMemoryC
       memoryId: memory.id,
       userId: candidate.user_id,
       eventType: 'supersede',
-      payload: { candidate, matched_memory_id: match.id, previous_content: match.content, reason: decision.reason },
+      payload: { candidate_kind: candidate.kind, candidate_scope: candidate.scope, candidate_content_length: candidate.content.length, matched_memory_id: match.id, previous_content_length: match.content.length, reason: decision.reason },
     });
     return { action: 'update', candidate, memory, matched_memory: match, reason: decision.reason };
   }

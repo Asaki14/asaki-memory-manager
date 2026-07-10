@@ -388,7 +388,11 @@ export async function updateMemory(env: Env, id: string, input: UpdateMemoryInpu
     memoryId: updated.id,
     userId: updated.user_id,
     eventType: 'update',
-    payload: { before: existing, after: updated },
+    payload: {
+      changed_fields: (Object.keys(updated) as (keyof MemoryRow)[]).filter((key) => key !== 'updated_at' && updated[key] !== existing[key]),
+      before_content_length: existing.content.length,
+      after_content_length: updated.content.length,
+    },
   });
 
   return updated;
@@ -443,8 +447,50 @@ async function softDeleteMemory(env: Env, memory: MemoryRow, eventType: string, 
 export async function deleteMemory(env: Env, id: string, userId: string): Promise<MemoryRow | null> {
   const existing = await getMemory(env, id, userId);
   if (!existing) return null;
-  const updatedAt = await softDeleteMemory(env, existing, 'delete', { before: existing });
+  const updatedAt = await softDeleteMemory(env, existing, 'delete', { scope: existing.scope, kind: existing.kind, content_length: existing.content.length });
   return { ...existing, status: 'deleted', updated_at: updatedAt };
+}
+
+// Unlike deleteMemory() (soft delete — status flips to 'deleted' but content/history stay
+// intact and recoverable), purgeMemory() is for content that should never have been stored
+// (a leaked credential, etc): it wipes the row's content, removes the Vectorize entry, and
+// deletes every prior memory_events row for this memory (which may themselves carry the raw
+// content in older payloads, from before payloads were minimized) before logging a single
+// content-free 'purge' event.
+export async function purgeMemory(env: Env, id: string, userId: string, reason: string | null): Promise<MemoryRow | null> {
+  const existing = await getMemory(env, id, userId);
+  if (!existing) return null;
+
+  if (env.VECTORIZE) {
+    try {
+      await (env.VECTORIZE as any).deleteByIds([existing.id]);
+    } catch (error) {
+      await writeMemoryEvent(env, {
+        memoryId: existing.id,
+        userId,
+        eventType: 'vectorize_delete_failed',
+        payload: { message: error instanceof Error ? error.message : String(error) },
+      });
+    }
+  }
+
+  const deletedEvents = await env.DB.prepare('DELETE FROM memory_events WHERE memory_id = ?1 AND user_id = ?2')
+    .bind(existing.id, userId)
+    .run();
+
+  const updatedAt = nowIso();
+  await env.DB.prepare(`UPDATE memories SET content = '[purged]', status = 'deleted', index_status = 'pending', updated_at = ?1 WHERE id = ?2 AND user_id = ?3`)
+    .bind(updatedAt, existing.id, userId)
+    .run();
+
+  await writeMemoryEvent(env, {
+    memoryId: existing.id,
+    userId,
+    eventType: 'purge',
+    payload: { reason, purged_prior_events: deletedEvents.meta?.changes ?? null },
+  });
+
+  return { ...existing, content: '[purged]', status: 'deleted', index_status: 'pending', updated_at: updatedAt };
 }
 
 export type StaleMemoryCandidate = Pick<MemoryRow, 'id' | 'user_id' | 'scope' | 'content' | 'kind' | 'importance' | 'last_accessed_at' | 'created_at'>;

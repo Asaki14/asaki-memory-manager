@@ -41,6 +41,7 @@ Both the Claude Code plugin and the Pi extension are consumed straight from this
 - `src/services/memoryEvents.ts`: event logging.
 - `src/ai/embeddings.ts`: Workers AI embedding helpers.
 - `src/utils/validation.ts`: request validation.
+- `src/utils/sensitiveContent.ts`: server-side secret/credential detection gate, applied in `validateCreateMemory`/`validateUpdateMemory`/`validateExtractMemories` before any Workers AI call or D1/Vectorize write. Client-side copies in `integrations/pi/asaki-memory.ts`, `integrations/claude-code/stop-extract.sh`, and `scripts/shadow-run-extraction.ts` are a separate, known-stale pattern set — not kept in sync with this file.
 - `src/services/extraction.ts`: LLM extraction prompt (`SYSTEM_PROMPT`) + deterministic noise pre-filter.
 - `integrations/pi/asaki-memory.ts`: optional Pi extension.
 - `commands/memory.md`: Claude Code plugin `/memory` slash command (audit workflow; mirrors the Pi extension's `registerCommand("memory", ...)`).

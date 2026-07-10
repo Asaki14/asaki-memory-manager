@@ -68,6 +68,11 @@ kill "${NOAUTH_SERVER_PID}" >/dev/null 2>&1 || true
 wait "${NOAUTH_SERVER_PID}" >/dev/null 2>&1 || true
 unset NOAUTH_SERVER_PID
 
+SECRET_STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/memories" \
+  -H "Authorization: Bearer ${ADMIN_API_KEY}" -H 'Content-Type: application/json' \
+  -d "{\"content\":\"my key is sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890\",\"user_id\":\"${USER_ID}\",\"scope\":\"project\",\"project_id\":\"${PROJECT_ID}\"}")
+[[ "$SECRET_STATUS" == "400" ]] || { echo "expected 400 for content containing a secret, got ${SECRET_STATUS}"; exit 1; }
+
 CREATE_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories" \
   -H 'Content-Type: application/json' \
   -d "{\"content\":\"${CONTENT}\",\"user_id\":\"${USER_ID}\",\"scope\":\"project\",\"project_id\":\"${PROJECT_ID}\",\"kind\":\"decision\",\"importance\":0.8,\"confidence\":0.9}")
@@ -90,6 +95,17 @@ DELETE_RESPONSE=$(curl_api -X DELETE "$BASE_URL/v1/memories/${MEMORY_ID}" \
   -H 'Content-Type: application/json' \
   -d "{\"user_id\":\"${USER_ID}\"}")
 printf '%s' "$DELETE_RESPONSE" | assert_json 'j.memory.id === id && j.memory.status === "deleted"'
+
+PURGE_CREATE_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories" \
+  -H 'Content-Type: application/json' \
+  -d "{\"content\":\"leaked-looking content to purge ${CONTENT}\",\"user_id\":\"${USER_ID}\",\"scope\":\"project\",\"project_id\":\"${PROJECT_ID}\"}")
+PURGE_MEMORY_ID=$(printf '%s' "$PURGE_CREATE_RESPONSE" | json_value 'memory.id')
+PURGE_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/${PURGE_MEMORY_ID}/purge" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_id\":\"${USER_ID}\",\"reason\":\"smoke test\"}")
+printf '%s' "$PURGE_RESPONSE" | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); if (j.memory?.status !== "deleted" || j.memory?.content !== "[purged]") process.exit(1); });'
+PURGE_GET_RESPONSE=$(curl_api "$BASE_URL/v1/memories/${PURGE_MEMORY_ID}?user_id=${USER_ID}")
+printf '%s' "$PURGE_GET_RESPONSE" | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); if (j.memory?.content !== "[purged]") process.exit(1); });'
 
 REVIEW_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/reviews" \
   -H 'Content-Type: application/json' \

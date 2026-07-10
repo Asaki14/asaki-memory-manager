@@ -191,7 +191,18 @@ curl -X DELETE http://127.0.0.1:8787/v1/memories/<memory-id> \
   -d '{"user_id":"alice"}'
 ```
 
-Delete is soft delete: the row is marked `status=deleted`.
+Delete is soft delete: the row is marked `status=deleted`, content is retained and recoverable.
+
+### Purge memory
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/memories/<memory-id>/purge \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -d '{"user_id":"alice","reason":"accidentally stored a credential"}'
+```
+
+Unlike delete, purge is irreversible: it wipes the memory's `content` (replaced with `[purged]`), removes its Vectorize entry, and deletes every prior `memory_events` row for it, then logs a single content-free `purge` event. Use this — not delete — for content that should never have been stored.
 
 ### Process candidates
 
@@ -406,6 +417,7 @@ preference | rule | fact | decision | task_learning | bug_fix | workflow
 - Every query is filtered by `user_id`.
 - Project/session memories are only visible when the matching `project_id` / `session_id` is provided.
 - Memory content is user/project context only. It should never override system or developer safety instructions.
+- The server rejects (`400`) any `content`/`text` that looks like a secret or credential (API keys, Bearer tokens, private keys, credential URLs, etc.) before it reaches Workers AI or D1/Vectorize — see `src/utils/sensitiveContent.ts`. If one slips through anyway, purge it (see above) rather than deleting it.
 
 ## Development
 
