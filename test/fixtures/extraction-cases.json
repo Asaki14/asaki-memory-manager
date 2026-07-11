@@ -70,5 +70,44 @@
     "text": "User: 记忆系统漏掉了一条关键信息，关于缓存过期时间的配置项。\nAssistant: 已经把这条信息补全到对应的记忆里了，缓存过期时间统一改成 300 秒。",
     "expectEmpty": false,
     "expectCount": 1
+  },
+  {
+    "name": "neg: one-off push status is not durable",
+    "text": "Assistant: 已将变更推送至 origin/main，提交为 8df25dd，并通过敏感信息检查。",
+    "expectEmpty": true
+  },
+  {
+    "name": "neg: generic technical trivia is not a personal or project memory",
+    "text": "Assistant: Node.js new URL().hostname 对 IPv6 loopback 返回 '[::1]'。",
+    "expectEmpty": true
+  },
+  {
+    "name": "pos: site-specific scraping learning must stay project-scoped",
+    "text": "Assistant: 点点数据的 App 详情页是 JS SPA，WebFetch 抓不到价格，后续改用官方 API。",
+    "expectEmpty": false,
+    "expectScope": "project"
+  },
+  {
+    "name": "pos: removed package is durable current project state",
+    "text": "Assistant: 已从 Pi 配置中彻底移除 Ponytail 包、extension、skills 和配置引用，并通过 TypeScript 检查。",
+    "expectEmpty": false,
+    "expectScope": "project"
+  },
+  {
+    "name": "neg: vague commit fragment has no durable context",
+    "text": "Assistant: type: fix",
+    "expectEmpty": true
+  },
+  {
+    "name": "neg: transient UI status",
+    "text": "Assistant: Music playing now",
+    "expectEmpty": true
+  },
+  {
+    "name": "pos: superseded intermediate config collapses to final state",
+    "text": "Assistant: Herdr 中运行 Yazi 时先强制使用 Chafa；后续确认 Herdr 已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp。",
+    "expectEmpty": false,
+    "expectCount": 1,
+    "expectScope": "project"
   }
 ]

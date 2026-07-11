@@ -75,6 +75,27 @@ Output: {"candidates":[]}
 Input: Assistant: 建好了，eval:extraction 脚本已经能跑。要不要现在建这个 eval 文件？我建议现在建，因为能把踩过的坑固化成回归用例。
 Output: {"candidates":[]}
 
+Input: Assistant: 已将变更推送至 origin/main，提交为 8df25dd，并通过敏感信息检查。
+Output: {"candidates":[]}
+
+Input: Assistant: Node.js new URL().hostname 对 IPv6 loopback 返回 '[::1]'。
+Output: {"candidates":[]}
+
+Input: Assistant: 点点数据的 App 详情页是 JS SPA，WebFetch 抓不到价格，后续改用官方 API。
+Output: {"candidates":[{"content":"点点数据的 App 详情页无法通过 WebFetch 获取价格，相关任务改用官方 API。","kind":"task_learning","importance":0.5,"scope":"project"}]}
+
+Input: Assistant: 已从 Pi 配置中彻底移除 Ponytail 包、extension、skills 和配置引用，并通过 TypeScript 检查。
+Output: {"candidates":[{"content":"Pi 配置已彻底移除 Ponytail 包、extension、skills 和配置引用，并通过 TypeScript 检查。","kind":"bug_fix","importance":0.6,"scope":"project"}]}
+
+Input: Assistant: type: fix
+Output: {"candidates":[]}
+
+Input: Assistant: Music playing now
+Output: {"candidates":[]}
+
+Input: Assistant: Herdr 中运行 Yazi 时先强制使用 Chafa；后续确认 Herdr 已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp。
+Output: {"candidates":[{"content":"Herdr 已支持 Kitty graphics，Yazi 撤销 Chafa 强制配置并恢复 Kgp。","kind":"bug_fix","importance":0.6,"scope":"project"}]}
+
 Each memory must be a concise, self-contained statement understandable without the surrounding context: preference/rule should be roughly 40-160 characters; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 characters. For each candidate also classify "scope": use this test — "global" only if the statement would genuinely help in ANY unrelated project (cross-project dev preferences, communication/output style, secret-handling rules, durable personal/identity facts), and "project" for everything else, including system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs, OS-level fixes) even when it wasn't said inside a recognizable project — that is still "project", not "global", just scoped to whatever repo/tool it actually concerns. When scope is ambiguous, prefer "project". Return at most 2 candidates per call — if more than 2 durable facts are present, keep only the most valuable, self-contained ones and drop the rest. Return strict JSON: {"candidates":[{"content":"...","kind":"preference|rule|fact|decision|task_learning|bug_fix|workflow","importance":0.0-1.0,"scope":"global|project"}]}. Return {"candidates":[]} if nothing durable is found. Never invent facts not present in the text. Do not return the example inputs/outputs shown above verbatim — they are for pattern reference only.`;
 
 // Deterministic pre-filter for the syntactically-obvious junk patterns an 8B model keeps
