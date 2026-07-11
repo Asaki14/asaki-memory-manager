@@ -464,14 +464,18 @@ async function callTool(app: AppType, c: Context<{ Bindings: Bindings }>, name: 
 }
 
 export async function handleMcpRequest(app: AppType, c: Context<{ Bindings: Bindings }>): Promise<Response> {
+  // JSON-RPC-level errors are always returned as HTTP 200 with an `error` envelope: the MCP
+  // Streamable HTTP client treats any non-2xx as a transport failure and throws without
+  // parsing the body, so a 400/404 here would surface as a hard connection error instead of
+  // a recoverable JSON-RPC error (e.g. method-not-found during capability probing).
   let payload: any;
   try {
     payload = await c.req.json();
   } catch {
-    return c.json(rpcError(null, -32700, 'Parse error'), 400);
+    return c.json(rpcError(null, -32700, 'Parse error'));
   }
   if (Array.isArray(payload)) {
-    return c.json(rpcError(null, -32600, 'Batch requests are not supported'), 400);
+    return c.json(rpcError(null, -32600, 'Batch requests are not supported'));
   }
 
   const { id = null, method, params } = payload ?? {};
@@ -500,7 +504,7 @@ export async function handleMcpRequest(app: AppType, c: Context<{ Bindings: Bind
       );
     case 'tools/call': {
       const name = params?.name;
-      if (typeof name !== 'string') return c.json(rpcError(id, -32602, 'Missing tool name'), 400);
+      if (typeof name !== 'string') return c.json(rpcError(id, -32602, 'Missing tool name'));
       try {
         const result = await callTool(app, c, name, params?.arguments ?? {});
         return c.json(rpcResult(id, result));
@@ -510,6 +514,6 @@ export async function handleMcpRequest(app: AppType, c: Context<{ Bindings: Bind
       }
     }
     default:
-      return c.json(rpcError(id, -32601, `Method not found: ${method}`), 404);
+      return c.json(rpcError(id, -32601, `Method not found: ${method}`));
   }
 }

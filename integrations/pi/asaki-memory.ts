@@ -933,6 +933,11 @@ Safety:
       ),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      // Local gate before any network call — the server rejects this too, but only after the
+      // text has already left the machine. Mirrors integrations/mcp/asaki-memory.ts.
+      if (containsSensitiveText(params.text)) {
+        throw new Error("Refusing to store: text appears to contain a secret/credential (API key, token, private key, or similar). Remove it and try again.");
+      }
       const config = memoryConfig();
       const scope = params.scope || config.defaultScope;
       const projectId = resolveProjectId(ctx, params.project_id);
@@ -1085,6 +1090,10 @@ Safety:
       confidence: Type.Optional(Type.Number({ description: "Confidence score between 0 and 1. Defaults to 0.8.", minimum: 0, maximum: 1 })),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      // Local gate before any network call — mirrors integrations/mcp/asaki-memory.ts.
+      if (containsSensitiveText(params.text)) {
+        throw new Error("Refusing to create review: text appears to contain a secret/credential (API key, token, private key, or similar). Remove it and try again.");
+      }
       const config = memoryConfig();
       const scope = params.scope || config.defaultScope;
       const projectId = resolveProjectId(ctx, params.project_id);
@@ -1234,6 +1243,10 @@ Safety:
       ),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+      // Local gate before any network call — mirrors integrations/mcp/asaki-memory.ts.
+      if (typeof params.content === "string" && containsSensitiveText(params.content)) {
+        throw new Error("Refusing to store: content appears to contain a secret/credential (API key, token, private key, or similar). Remove it and try again.");
+      }
       const config = memoryConfig();
       const { id, ...fields } = params;
 
