@@ -1,6 +1,6 @@
 {
   "name": "asaki-memory-manager",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --local",
