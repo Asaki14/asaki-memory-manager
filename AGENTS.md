@@ -41,6 +41,7 @@ The Claude Code plugin is consumed straight from this repo; the Pi extension is 
 - `src/services/memoryEvents.ts`: event logging.
 - `src/ai/embeddings.ts`: Workers AI embedding helpers.
 - `src/utils/validation.ts`: request validation.
+- `src/utils/errors.ts`: `UserFacingError` — the only service-thrown error class whose message route handlers forward to API clients; any other exception falls through to the sanitized generic 500.
 - `src/utils/sensitiveContent.ts`: server-side secret/credential detection gate, applied in `validateCreateMemory`/`validateUpdateMemory`/`validateExtractMemories` before any Workers AI call or D1/Vectorize write. Client-side copies in `integrations/pi/asaki-memory.ts`, `integrations/claude-code/stop-extract.sh`, and `scripts/shadow-run-extraction.ts` are a separate, known-stale pattern set — not kept in sync with this file.
 - `src/services/extraction.ts`: LLM extraction prompt (`SYSTEM_PROMPT`) + deterministic noise pre-filter.
 - `integrations/pi/asaki-memory.ts`: optional Pi extension.
@@ -97,6 +98,7 @@ npm run deploy
 - Run `npm run eval:extraction` after changing the extraction prompt (`src/services/extraction.ts`); it hits a live Worker since `env.AI.run()` needs a real Worker runtime — set `ASAKI_MEMORY_BASE_URL` explicitly, there is no default. Add a new case to `test/fixtures/extraction-cases.json` whenever a production false positive/negative turns up.
 - Run `npm run eval:classifier` after changing the classifier prompt (`CLASSIFIER_SYSTEM_PROMPT` in `integrations/claude-code/stop-extract.sh`). Add a new case to `test/fixtures/classifier-cases.json` whenever a production false positive/negative turns up.
 - Pi auto inject defaults to `ASAKI_MEMORY_AUTO_MIN_SCORE=0.67` (calibrated via `npm run eval:search`); keep low-score memories out of injected context.
+- Service-layer validation failures meant for API callers must throw `UserFacingError` (`src/utils/errors.ts`); route handlers only forward those messages — never raw `Error` messages.
 - Keep changes small and consistent with existing style.
 - Run `npm run typecheck` after TypeScript edits.
 
