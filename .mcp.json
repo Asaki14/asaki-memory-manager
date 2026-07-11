@@ -1,9 +1,11 @@
 {
-  "asaki-memory": {
-    "type": "http",
-    "url": "${ASAKI_MEMORY_BASE_URL}/mcp",
-    "headers": {
-      "Authorization": "Bearer ${ASAKI_MEMORY_API_KEY}"
+  "mcpServers": {
+    "asaki-memory": {
+      "type": "http",
+      "url": "${ASAKI_MEMORY_BASE_URL}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${ASAKI_MEMORY_API_KEY}"
+      }
     }
   }
 }
