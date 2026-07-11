@@ -1,5 +1,6 @@
 import { generateEmbedding } from '../ai/embeddings';
 import type { CreateMemoryInput, Env, ListMemoriesInput, MemoryRow, SearchMemoriesInput, SearchResult, UpdateMemoryInput } from '../types';
+import { UserFacingError } from '../utils/errors';
 import { writeMemoryEvent } from './memoryEvents';
 import { scoreMemoryForSearch } from './searchScoring';
 
@@ -113,8 +114,10 @@ function isVisibleInScope(memory: MemoryRow, input: SearchMemoriesInput): boolea
   if (memory.user_id !== input.user_id || memory.status !== 'active') return false;
   if (input.scope) {
     if (memory.scope !== input.scope) return false;
-    if (input.scope === 'project' && input.project_id && memory.project_id !== input.project_id) return false;
-    if (input.scope === 'session' && input.session_id && memory.session_id !== input.session_id) return false;
+    // A missing project_id/session_id must exclude, not admit everything of that scope —
+    // the public API validates ids are present, but internal callers can reach here directly.
+    if (input.scope === 'project') return Boolean(input.project_id && memory.project_id === input.project_id);
+    if (input.scope === 'session') return Boolean(input.session_id && memory.session_id === input.session_id);
     return true;
   }
 
@@ -345,8 +348,8 @@ export async function updateMemory(env: Env, id: string, input: UpdateMemoryInpu
     updated.project_id = null;
     updated.session_id = null;
   }
-  if (updated.scope === 'project' && !updated.project_id) throw new Error('project_id is required when scope is project.');
-  if (updated.scope === 'session' && !updated.session_id) throw new Error('session_id is required when scope is session.');
+  if (updated.scope === 'project' && !updated.project_id) throw new UserFacingError('project_id is required when scope is project.');
+  if (updated.scope === 'session' && !updated.session_id) throw new UserFacingError('session_id is required when scope is session.');
 
   // Reactivation must reindex even without field changes: softDeleteMemory() removed the
   // Vectorize entry but left index_status='indexed', so a pure status flip back to 'active'
@@ -363,6 +366,13 @@ export async function updateMemory(env: Env, id: string, input: UpdateMemoryInpu
 
   if (shouldReindex) {
     updated.index_status = await upsertVector(env, updated, await generateEmbedding(env, updated.content));
+  }
+
+  // Deactivation must clean up Vectorize the same way softDeleteMemory() does — otherwise a
+  // PATCH to 'archived'/'deleted' leaves an orphaned vector no other code path ever removes
+  // (backfill only scans 'pending'/'failed', and the delete/purge endpoints never see it).
+  if (existing.status === 'active' && updated.status !== 'active') {
+    await deleteVector(env, updated);
   }
 
   await env.DB.prepare(
@@ -428,22 +438,25 @@ export async function backfillPendingIndex(env: Env, limit: number): Promise<{ c
   return { checked: rows.length, indexed, remaining: remainingIds.length, remaining_ids: remainingIds };
 }
 
+async function deleteVector(env: Env, memory: MemoryRow): Promise<void> {
+  if (!env.VECTORIZE) return;
+  try {
+    await (env.VECTORIZE as any).deleteByIds([memory.id]);
+  } catch (error) {
+    await writeMemoryEvent(env, {
+      memoryId: memory.id,
+      userId: memory.user_id,
+      eventType: 'vectorize_delete_failed',
+      payload: { message: error instanceof Error ? error.message : String(error) },
+    });
+  }
+}
+
 async function softDeleteMemory(env: Env, memory: MemoryRow, eventType: string, payload: unknown): Promise<string> {
   const updatedAt = nowIso();
   await env.DB.prepare(`UPDATE memories SET status = 'deleted', updated_at = ?1 WHERE id = ?2`).bind(updatedAt, memory.id).run();
 
-  if (env.VECTORIZE) {
-    try {
-      await (env.VECTORIZE as any).deleteByIds([memory.id]);
-    } catch (error) {
-      await writeMemoryEvent(env, {
-        memoryId: memory.id,
-        userId: memory.user_id,
-        eventType: 'vectorize_delete_failed',
-        payload: { message: error instanceof Error ? error.message : String(error) },
-      });
-    }
-  }
+  await deleteVector(env, memory);
 
   await writeMemoryEvent(env, { memoryId: memory.id, userId: memory.user_id, eventType, payload });
   return updatedAt;

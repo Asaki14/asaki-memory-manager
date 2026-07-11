@@ -193,7 +193,16 @@ report_and_exit() {
 # for this session is already mid-flight, skip this one — the offset hasn't advanced, so the
 # next Stop event will pick up the full accumulated delta anyway.
 LOCK_DIR="$STATE_DIR/${SESSION_ID}.lock"
-mkdir "$LOCK_DIR" 2>/dev/null || report_and_exit
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  # The EXIT trap never fires on SIGKILL or the hook runner's hard timeout, so a crashed run
+  # can leave the lock behind forever — which would silently disable capture for the rest of
+  # the session. The lock only guards the short foreground phase (seconds), so anything older
+  # than 60s is stale: reclaim it. Otherwise another invocation really is mid-flight — skip.
+  LOCK_MTIME=$(stat -f %m "$LOCK_DIR" 2>/dev/null || stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)
+  [ $(( $(date +%s) - LOCK_MTIME )) -lt 60 ] && report_and_exit
+  rmdir "$LOCK_DIR" 2>/dev/null
+  mkdir "$LOCK_DIR" 2>/dev/null || report_and_exit
+fi
 trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
 
 # Throttle: skip firing another extraction/classifier call within the min interval since the

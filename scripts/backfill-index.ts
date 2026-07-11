@@ -10,13 +10,22 @@
 
 type Args = { limit: number; maxRounds: number };
 
+function numberArg(flag: string, raw: string | undefined): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    console.error(`${flag} requires a numeric value, got: ${raw ?? '(missing)'}`);
+    process.exit(1);
+  }
+  return value;
+}
+
 function parseArgs(argv: string[]): Args {
   let limit = 50;
   let maxRounds = 20;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === '--limit') limit = Number(argv[++i]);
-    else if (arg === '--max-rounds') maxRounds = Number(argv[++i]);
+    if (arg === '--limit') limit = numberArg(arg, argv[++i]);
+    else if (arg === '--max-rounds') maxRounds = numberArg(arg, argv[++i]);
   }
   return { limit, maxRounds };
 }

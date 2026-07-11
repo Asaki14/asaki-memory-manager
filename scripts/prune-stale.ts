@@ -8,6 +8,15 @@
 
 type Args = { days: number; limit: number; apply: boolean; maxRounds: number };
 
+function numberArg(flag: string, raw: string | undefined): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    console.error(`${flag} requires a numeric value, got: ${raw ?? '(missing)'}`);
+    process.exit(1);
+  }
+  return value;
+}
+
 function parseArgs(argv: string[]): Args {
   let days = 90;
   let limit = 100;
@@ -15,10 +24,10 @@ function parseArgs(argv: string[]): Args {
   let maxRounds = 20;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === '--days') days = Number(argv[++i]);
-    else if (arg === '--limit') limit = Number(argv[++i]);
+    if (arg === '--days') days = numberArg(arg, argv[++i]);
+    else if (arg === '--limit') limit = numberArg(arg, argv[++i]);
     else if (arg === '--apply') apply = true;
-    else if (arg === '--max-rounds') maxRounds = Number(argv[++i]);
+    else if (arg === '--max-rounds') maxRounds = numberArg(arg, argv[++i]);
   }
   return { days, limit, apply, maxRounds };
 }
