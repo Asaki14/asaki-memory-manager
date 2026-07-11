@@ -20,9 +20,10 @@ default locations. Their `command` entries still point into
 
 ## Secret
 
-The bundled `.mcp.json` and `session-start.sh` read `ASAKI_MEMORY_API_KEY` (and
-`ASAKI_MEMORY_BASE_URL`) from the process environment (never hardcoded / never
-committed). Set them once in `~/.claude/settings.json`:
+The bundled `.mcp.json` (remote MCP `url` + bearer header) and `session-start.sh`
+read `ASAKI_MEMORY_API_KEY` (and `ASAKI_MEMORY_BASE_URL`) from the process
+environment (never hardcoded / never committed). Set them once in
+`~/.claude/settings.json`:
 
 ```json
 {
@@ -92,7 +93,16 @@ committed). Set them once in `~/.claude/settings.json`:
   Per-session offset/log/throttle files live under
   `${TMPDIR:-/tmp}/asaki-memory-stop-extract/`.
 - `tool-visibility.sh` — PostToolUse hook, surfaces memory tool calls in the TUI
-- `../mcp/asaki-memory.ts` — MCP server exposing `asaki_memory_search`/`asaki_memory_add`/etc.
+- `.mcp.json` — **remote** MCP server reference (`type: http`, `url:
+  ${ASAKI_MEMORY_BASE_URL}/mcp`, bearer auth). The MCP server runs inside the
+  Worker (`src/mcp.ts`), so Claude Code spawns **no local node process** and the
+  same `asaki_memory_search`/`asaki_memory_add`/etc. tools are served over HTTP.
+  Because the Worker has no local git checkout, `project_id` is not auto-derived
+  from a git root as it was in the stdio server — the agent passes it explicitly
+  (the session-start banner already reports `project=<name>`). `user_id`
+  defaults to the Worker's `ASAKI_MCP_DEFAULT_USER_ID` (or `asaki`). The
+  standalone stdio server `../mcp/asaki-memory.ts` / `dist/mcp-server.mjs` is
+  still available for other MCP clients (e.g. Codex) that need a local process.
 - `../../commands/memory.md` — `/memory` slash command. `/memory status` checks
   backend connectivity only; any other args (or none) run a full audit:
   list pending reviews + global/project memories, propose

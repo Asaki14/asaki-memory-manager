@@ -20,19 +20,24 @@
     "db:migrate:local": "wrangler d1 migrations apply asaki-memory-manager --local",
     "db:migrate:remote": "wrangler d1 migrations apply asaki-memory-manager --remote",
     "build:mcp": "esbuild integrations/mcp/asaki-memory.ts --bundle --platform=node --format=esm --outfile=dist/mcp-server.mjs",
-    "build:plugin": "npm run build:mcp"
+    "build:plugin": "npm run build:mcp",
+    "build:pi": "node --experimental-strip-types scripts/build-pi-package.ts"
   },
   "dependencies": {
     "hono": "^4.10.7"
   },
   "pi": {
-    "extensions": ["./integrations/pi/asaki-memory.ts"]
+    "extensions": [
+      "./integrations/pi/asaki-memory.ts"
+    ]
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20251224.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "esbuild": "^0.25.12",
     "typescript": "^5.9.3",
-    "wrangler": "^4.105.0"
+    "wrangler": "^4.105.0",
+    "zod": "^3.25.76"
   },
   "description": "Cloudflare-native personal memory layer for AI agents: D1, Vectorize, Workers AI, REST, and Pi integration.",
   "license": "MIT",
