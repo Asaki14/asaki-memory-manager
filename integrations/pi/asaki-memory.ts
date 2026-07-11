@@ -14,7 +14,7 @@ const DEFAULT_STARTUP_TOP_K = 6;
 const AUTO_EXTRACT_MAX_CHARS = 20_000;
 const AUTO_EXTRACT_TIMEOUT_MS = 20_000;
 const DEFAULT_EXTRACT_MIN_INTERVAL_SECONDS = 300;
-const DEFAULT_CLASSIFIER_MODEL = "opencode/deepseek-v4-flash-free";
+const DEFAULT_CLASSIFIER_MODEL = "openai-codex/gpt-5.6-luna";
 const CLASSIFIER_TIMEOUT_MS = 120_000;
 // Caps how much text a single tool call (or auto-inject) can put into the agent's context,
 // independent of item count (a memory's content can be up to 8000 chars, and search/list can

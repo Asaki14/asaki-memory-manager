@@ -27,6 +27,14 @@ ASAKI_USER="${ASAKI_MEMORY_USER_ID:-asaki}"
 AUTO_EXTRACT_STATE="off"
 [ "${ASAKI_MEMORY_AUTO_EXTRACT:-0}" = "1" ] && AUTO_EXTRACT_STATE="on"
 
+# Classifier runs in the AUTO_EXTRACT=0 branch of stop-extract.sh (the default); mirror the
+# Pi banner's `classifier=on model=X` / `classifier=off` field.
+if [ "$AUTO_EXTRACT_STATE" = "on" ]; then
+  CLASSIFIER_STATE="off"
+else
+  CLASSIFIER_STATE="on model=${ASAKI_MEMORY_CLASSIFIER_MODEL:-claude-haiku-4-5-20251001}"
+fi
+
 if [ -n "${ASAKI_MEMORY_PROJECT_ID:-}" ]; then
   ASAKI_PROJECT="$ASAKI_MEMORY_PROJECT_ID"
 elif [ -n "$CWD" ] && GIT_ROOT=$(cd "$CWD" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null) && [ -n "$GIT_ROOT" ]; then
@@ -69,7 +77,7 @@ cat <<BANNER
 
 Open your first reply with exactly these two lines, matching the Pi startup resource banner style:
 \`[Memory]\`
-\`  user=${ASAKI_USER} | project=${ASAKI_PROJECT} | memories=${MEMORY_COUNT} | pendingReviews=${PENDING_REVIEWS} | autoExtract=${AUTO_EXTRACT_STATE}\`
+\`  user=${ASAKI_USER} | project=${ASAKI_PROJECT} | memories=${MEMORY_COUNT} | pendingReviews=${PENDING_REVIEWS} | autoExtract=${AUTO_EXTRACT_STATE} | classifier=${CLASSIFIER_STATE}\`
 Always include \`user_id: "${ASAKI_USER}"\` in every \`asaki_memory_search\` and \`asaki_memory_add\` call.
 
 You are the primary writer for durable memory — cloud auto-extraction is off, so if you don't call \`asaki_memory_add\`, nothing gets recorded. This means recording deliberately, not more. Before calling \`asaki_memory_add\`, check ALL of:
