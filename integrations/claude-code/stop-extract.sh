@@ -332,7 +332,7 @@ else
   # KEEP IN SYNC with the judgment/distill/scope-rule prompt template in scripts/eval-classifier.sh,
   # and (scope rule wording) with src/services/extraction.ts's SYSTEM_PROMPT / commands/memory.md /
   # integrations/pi/asaki-memory.ts.
-  CLASSIFIER_SYSTEM_PROMPT='You are a memory-candidate detector, not a writer. Given a conversation delta, decide if it contains something worth saving as a durable memory, and if so pre-distill it into ready-to-write fields — the main agent will execute the write, not re-review your judgment, so make the call carefully here.
+  CLASSIFIER_SYSTEM_PROMPT='You are a memory-candidate detector, not a writer. Given a conversation delta, decide if it contains something worth saving as a durable memory, and if so pre-distill it into ready-to-write fields — this hook executes the write itself via HTTP after your response (the server then routes it to a review queue), so make the call carefully here.
 
 Apply this checklist:
 1. Durable — will this still matter later, not just for the current task.

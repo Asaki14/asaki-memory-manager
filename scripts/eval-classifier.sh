@@ -33,7 +33,7 @@ for i in $(seq 0 $((CASE_COUNT - 1))); do
   EXPECT_FLAG=$(echo "$CASE" | jq -r '.expectFlag')
 
   # KEEP IN SYNC with CLASSIFIER_SYSTEM_PROMPT in stop-extract.sh.
-  SYSTEM_PROMPT='You are a memory-candidate detector, not a writer. Given a conversation delta, decide if it contains something worth saving as a durable memory, and if so pre-distill it into ready-to-write fields — the main agent will execute the write, not re-review your judgment, so make the call carefully here.
+  SYSTEM_PROMPT='You are a memory-candidate detector, not a writer. Given a conversation delta, decide if it contains something worth saving as a durable memory, and if so pre-distill it into ready-to-write fields — this hook executes the write itself via HTTP after your response (the server then routes it to a review queue), so make the call carefully here.
 
 Apply this checklist:
 1. Durable — will this still matter later, not just for the current task.
