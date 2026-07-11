@@ -37,6 +37,12 @@
 
 ## 近期完成（已验证落地）
 
+0. ~~全仓缺陷审计与修复（2026-07-11）~~ — 已完成，已部署生产（Worker + `@asaki14/pi-memory@0.1.1`）
+   - 高危三项：软删后重激活不重建向量索引（`updateMemory` 的 `shouldReindex` 补重激活条件，否则该记忆永久丢出向量检索且 backfill 修不到）；Claude Code Stop-hook 分类器分支 `STATE_FILE` 在 HTTP 写入前推进，写入失败即静默丢候选（改为最终结局确定后才推进 + `report_and_exit` 补 `failed` 分支）；`POST /v1/memories` 与 `PATCH /v1/memories/:id` 漏限流（补齐，README 同步）。
+   - 中低危：remote MCP 对 JSON-RPC 错误改回 HTTP 200 封套（SDK 客户端把非 2xx 当传输错误硬抛）；review resolve "add" 用 `mutated` 标记防"记忆已建但回滚 pending → 重试出重复孤儿"；PATCH 停用（archived/deleted）时清 Vectorize 向量（新共享 `deleteVector()`）；forget/矛盾信号转 review 但未入队时如实返回 `ignore` 而非假报；Stop-hook 锁加 60s mtime 过期回收（SIGKILL/超时残留不再永久禁用采集）；新增 `UserFacingError`（`src/utils/errors.ts`）白名单，未知异常一律 sanitized 500；bearer 校验改 `crypto.subtle.timingSafeEqual`；delete 目标消失不再把"forget X"指令误存为新记忆；`memory_events.created_at` 改显式 ISO（原 SQL default 格式与其他表不可比）；`isVisibleInScope` 显式 scope 缺 id 时改排除；Pi 扩展 add/review_create/update 三工具补本地敏感内容门（对齐 MCP stdio 版）；backfill/prune 脚本数字参数校验。
+   - 验证：typecheck、`eval:candidates` 15/15、本地 wrangler dev 端到端（MCP 状态码、重激活 reindex、UserFacingError 404/400、事件时间戳格式）、生产 `smoke:management` 全绿。
+   - 明确不修两项：词法兜底预取窗口召回上限（个人规模 + 已砍 FTS，见"已评估并砍掉"）；批量限流先扣后 429（绑定无 peek API，单用户无实际影响）。
+
 1. ~~云端抽取降级为 shadow-run 校准工具~~ — 已完成
    - `scripts/shadow-run-extraction.ts`（`npm run shadow-run:extraction -- <transcript.jsonl> --user <id> --project <id>`）：读取 Claude Code transcript，调 `/v1/memories/extract`（新增 `dry_run` 参数，见 `src/index.ts`）拿云端候选但不写库，再跟同窗口内 agent 直接 `asaki_memory_add` 的记忆做 `lexicalSimilarity` diff，只读输出 covered/gap 报告；`--create-reviews` 可选择把 gap 候选推进 review 队列（默认不推，只报告）。
    - 已用本地 `wrangler dev` 验证：dry_run 不写库、直接 add 的记忆能被正确识别为窗口内的 direct add；diff 算法单独验证过 covered/gap 判定正确。
