@@ -32,7 +32,8 @@ Workflow:
 5. Ask the user before any write. Offer options like: apply all high-confidence changes, resolve selected reviews, only deletes, only updates/additions, or skip.
 6. Execute approved changes using `asaki_memory_review_resolve`, `asaki_memory_update`, `asaki_memory_delete`, and `asaki_memory_add`.
 7. Use `asaki_memory_review_create` instead of `asaki_memory_add` for high-risk uncertain memories.
-8. Report final changes and remaining recommendations.
+8. Close the loop (few-shot self-iteration): for every DELETE/RESCOPE/compression you just executed on a memory whose `source` shows it came from the extraction or classifier pipeline, turn that miss into a regression case + few-shot example so it is caught automatically next time — do not stop at deleting the symptom. Follow AGENTS.md "Few-shot self-iteration" for the `source`→surface map and the TDD flow (add the failing fixture case → update the matching prompt copies → run the eval to green). If this audit is running inside the `asaki-memory-manager` repo, apply those edits under the same approval as the memory writes; otherwise emit the distilled contrastive cases as a copy-pasteable block to apply in that repo later. Never make these edits in `report` mode.
+9. Report final changes and remaining recommendations.
 
 Safety:
 - Never expose or store secrets.

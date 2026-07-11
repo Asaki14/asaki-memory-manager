@@ -506,6 +506,13 @@ Two contrastive examples:
 - "FORGET_SIGNALS 正则用于识别类似 \"forget that I prefer dark mode\" 这种表达" -> flag=false (documentation-style explanation of code/prompt behavior, not an actual forget request).
 - User says "forget that I prefer dark mode" -> flag=true (actual forget/retract request).
 - "prompt 里加了 few-shot 正例，比如 User: 以后都用 pnpm" -> flag=false (prompt/eval calibration quoting a hypothetical user input).
+- "已将变更推送至 origin/main，提交为 8df25dd" -> flag=false (one-off delivery status, not durable memory).
+- "Node.js new URL().hostname 对 IPv6 loopback 返回 '[::1]'" -> flag=false (generic technical trivia, not a user/project memory).
+- "点点数据的 App 详情页是 JS SPA，WebFetch 抓不到价格，后续改用官方 API" -> flag=true, scope=project (tool/site-specific learning never belongs in global scope).
+- "已从 Pi 配置中彻底移除 Ponytail 包、extension、skills 和配置引用" -> flag=true, scope=project (durable current configuration state).
+- "type: fix" -> flag=false (vague commit fragment with no self-contained durable fact).
+- "Music playing now" -> flag=false (transient UI/runtime status).
+- "先强制使用 Chafa；后续确认已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp" -> flag=true, scope=project, but distill only the final Kgp state (superseded intermediate states must not become separate memories).
 
 If flag=true, distill exactly ONE self-contained sentence for text, same language as the source. Preference/rule should be roughly 40-160 characters; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 characters. No bullet lists. One fact per memory. Never paste raw code, CLI output, or a multi-paragraph narrative.
 
@@ -771,7 +778,8 @@ Workflow:
 5. Use questionnaire before any write. Offer options like apply all high-confidence changes, resolve selected reviews, only deletes, only updates/additions, or skip.
 6. Execute approved changes using asaki_memory_review_resolve, asaki_memory_update, asaki_memory_delete, and asaki_memory_add.
 7. Use asaki_memory_review_create instead of asaki_memory_add for high-risk uncertain memories.
-8. Report final changes and remaining recommendations.
+8. Close the loop (few-shot self-iteration): for every DELETE/RESCOPE/compression you just executed on a memory whose source shows it came from the extraction or classifier pipeline, turn that miss into a regression case + few-shot example so it is caught automatically next time — do not stop at deleting the symptom. Follow AGENTS.md "Few-shot self-iteration" for the source-to-surface map and the TDD flow (add the failing fixture case, update the matching prompt copies, run the eval to green). If this audit is running inside the asaki-memory-manager repo, apply those edits under the same approval as the memory writes; otherwise emit the distilled contrastive cases as a copy-pasteable block to apply in that repo later. Never make these edits in report mode.
+9. Report final changes and remaining recommendations.
 
 Safety:
 - Never expose or store secrets.
