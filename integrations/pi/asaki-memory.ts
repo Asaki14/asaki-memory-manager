@@ -576,7 +576,7 @@ ${text}`;
         "--model",
         config.classifierModel,
         "--thinking",
-        "minimal",
+        "off",
         "--mode",
         "text",
         "--print",
