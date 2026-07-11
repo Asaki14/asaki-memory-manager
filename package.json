@@ -51,12 +51,12 @@
     "hono",
     "typescript"
   ],
-  "homepage": "https://github.com/your-name/asaki-memory-manager#readme",
+  "homepage": "https://github.com/Asaki14/asaki-memory-manager#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/your-name/asaki-memory-manager.git"
+    "url": "git+https://github.com/Asaki14/asaki-memory-manager.git"
   },
   "bugs": {
-    "url": "https://github.com/your-name/asaki-memory-manager/issues"
+    "url": "https://github.com/Asaki14/asaki-memory-manager/issues"
   }
 }
