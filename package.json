@@ -20,7 +20,8 @@
     "db:migrate:local": "wrangler d1 migrations apply asaki-memory-manager --local",
     "db:migrate:remote": "wrangler d1 migrations apply asaki-memory-manager --remote",
     "build:mcp": "esbuild integrations/mcp/asaki-memory.ts --bundle --platform=node --format=esm --outfile=dist/mcp-server.mjs",
-    "build:plugin": "npm run build:mcp"
+    "build:plugin": "npm run build:mcp",
+    "build:pi": "node --experimental-strip-types scripts/build-pi-package.ts"
   },
   "dependencies": {
     "hono": "^4.10.7"
