@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono';
 import type { Env } from './types';
 import { handleMcpRequest } from './mcp';
+import { UserFacingError } from './utils/errors';
 import { dedupeCandidateBatch, isAutoAddEligible, isUnsupervisedSource, processMemoryCandidates } from './services/candidates';
 import { extractMemoryCandidates } from './services/extraction';
 import { backfillPendingIndex, createMemory, deleteMemory, getMemory, listMemories, pruneStaleMemories, purgeMemory, searchMemories, updateMemory } from './services/memories';
@@ -34,13 +35,25 @@ async function checkRateLimit(c: Context<{ Bindings: Bindings }>, key: string): 
 // endpoint with the same ADMIN_API_KEY. The /mcp handler bridges tool calls into
 // /v1/* via app.fetch(), which re-runs this middleware on the subrequest — hence
 // the incoming Authorization header must be forwarded there.
+// Constant-time comparison so the key check isn't timing-observable (plain `!==`
+// short-circuits at the first differing character). Uses the Workers-specific
+// crypto.subtle.timingSafeEqual extension, which requires equal-length inputs — length
+// inequality returns early, leaking the key's length is acceptable, its contents are not.
+function safeKeyEqual(a: string, b: string): boolean {
+  const encoder = new TextEncoder();
+  const bufferA = encoder.encode(a);
+  const bufferB = encoder.encode(b);
+  if (bufferA.byteLength !== bufferB.byteLength) return false;
+  return (crypto.subtle as SubtleCrypto & { timingSafeEqual(a: ArrayBufferView, b: ArrayBufferView): boolean }).timingSafeEqual(bufferA, bufferB);
+}
+
 const requireBearer = async (c: Context<{ Bindings: Bindings }>, next: () => Promise<void>) => {
   const configuredKey = c.env.ADMIN_API_KEY;
   if (!configuredKey) {
     return c.json({ error: 'Service misconfigured: ADMIN_API_KEY is not set.' }, 503);
   }
   const authorization = c.req.header('Authorization');
-  if (authorization !== `Bearer ${configuredKey}`) {
+  if (!authorization || !safeKeyEqual(authorization, `Bearer ${configuredKey}`)) {
     return c.json({ error: 'Unauthorized.' }, 401);
   }
   return next();
@@ -227,8 +240,12 @@ app.post('/v1/memories/reviews/:id/resolve', async (c) => {
     const result = await resolveMemoryReview(c.env, c.req.param('id'), validation.data);
     return c.json(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return c.json({ error: message }, message.includes('not found') ? 404 : 400);
+    // Only UserFacingError messages go to the client; anything else (transient D1/Vectorize
+    // failure) rethrows into the sanitized generic 500 handler below.
+    if (error instanceof UserFacingError) {
+      return c.json({ error: error.message }, error.message.includes('not found') ? 404 : 400);
+    }
+    throw error;
   }
 });
 
@@ -256,7 +273,8 @@ app.patch('/v1/memories/:id', async (c) => {
     if (!memory) return c.json({ error: 'Memory not found.' }, 404);
     return c.json({ memory });
   } catch (error) {
-    return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    if (error instanceof UserFacingError) return c.json({ error: error.message }, 400);
+    throw error;
   }
 });
 

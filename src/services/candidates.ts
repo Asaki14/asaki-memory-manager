@@ -126,6 +126,16 @@ export async function processMemoryCandidate(env: Env, candidate: ProcessMemoryC
   if (requiresLlm && !llm && match && (hasContradictionSignal(candidate.content) || hasForgetSignal(candidate.content))) {
     const { createMemoryReviews } = await import('./reviews');
     const [review] = await createMemoryReviews(env, [candidate]);
+    // createMemoryReviews can decline to queue (its findActiveDuplicate check hit a heuristic
+    // 'ignore') — report that honestly instead of claiming a review exists that doesn't.
+    if (!review) {
+      return {
+        action: 'ignore',
+        candidate,
+        matched_memory: match,
+        reason: 'Duplicate of an active memory; review not queued.',
+      };
+    }
     return {
       action: 'review',
       candidate,
@@ -182,6 +192,9 @@ export async function processMemoryCandidate(env: Env, candidate: ProcessMemoryC
     if (memory) {
       return { action: 'delete', candidate, memory, matched_memory: match, reason: decision.reason };
     }
+    // Never fall through to createMemory here — that would store the raw "forget X"
+    // instruction itself as a brand-new memory when the delete target has vanished.
+    return { action: 'ignore', candidate, matched_memory: match, reason: 'Delete target no longer exists; nothing to do.' };
   }
 
   const memory = await createMemory(env, candidate);

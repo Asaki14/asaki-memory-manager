@@ -1,4 +1,5 @@
 import type { Env, MemoryReviewRecord, MemoryReviewRow } from '../types';
+import { UserFacingError } from '../utils/errors';
 import { createMemory, deleteMemory, getMemory, searchMemories, updateMemoryContent } from './memories';
 import { writeMemoryEvent } from './memoryEvents';
 import { BATCH_DEDUP_SIMILARITY_THRESHOLD, bestUsableMatch, heuristicDecision, lexicalSimilarity, mergeContent, type ProcessMemoryCandidateInput } from './candidateDecision';
@@ -227,7 +228,7 @@ export async function listMemoryReviews(env: Env, input: { user_id: string; stat
 
 export async function resolveMemoryReview(env: Env, id: string, input: { user_id: string; action: 'add' | 'merge' | 'update' | 'delete' | 'ignore'; memory_id?: string | null; reason?: string | null }): Promise<{ review: MemoryReviewRow; memory?: Awaited<ReturnType<typeof createMemory>> }> {
   const existing = await env.DB.prepare('SELECT * FROM memory_reviews WHERE id = ?1 AND user_id = ?2').bind(id, input.user_id).first<MemoryReviewRecord>();
-  if (!existing) throw new Error('Review not found.');
+  if (!existing) throw new UserFacingError('Review not found.');
 
   const review = parseReview(existing);
   const timestamp = nowIso();
@@ -245,48 +246,57 @@ export async function resolveMemoryReview(env: Env, id: string, input: { user_id
     .bind(input.action, input.memory_id ?? null, input.reason ?? null, timestamp, timestamp, id, input.user_id)
     .run();
 
-  if (claim.meta.changes !== 1) throw new Error('Review is already resolved.');
+  if (claim.meta.changes !== 1) throw new UserFacingError('Review is already resolved.');
 
   let memory: Awaited<ReturnType<typeof createMemory>> | undefined;
   let memoryId: string | null = null;
+  let mutated = false;
 
   // The claim above already committed status='resolved' so a second concurrent resolve can't
   // also run these side effects — but that means a failure here (e.g. a stale/deleted
   // memory_id) must not leave the review permanently stuck "resolved" with nothing having
-  // actually happened. Revert the claim back to 'pending' on any failure so the review stays
-  // retryable, then rethrow the original error.
+  // actually happened. Revert the claim back to 'pending' on failure so the review stays
+  // retryable — but ONLY while no memory mutation has committed yet: once createMemory/
+  // updateMemoryContent/deleteMemory has durably run, reverting to 'pending' would invite a
+  // retry that re-applies the action (e.g. a second duplicate memory for 'add' whose first
+  // copy nothing references). After the mutation, a trailing failure keeps the review
+  // resolved and rethrows.
   try {
     if (input.action === 'add') {
       memory = await createMemory(env, review.candidate);
+      mutated = true;
     }
 
     if (input.action === 'merge') {
-      if (!input.memory_id) throw new Error('memory_id is required when action is merge.');
+      if (!input.memory_id) throw new UserFacingError('memory_id is required when action is merge.');
       const target = await getMemory(env, input.memory_id, input.user_id);
-      if (!target) throw new Error('Target memory not found.');
+      if (!target) throw new UserFacingError('Target memory not found.');
       memory = await updateMemoryContent(env, target, {
         content: mergeContent(target.content, review.candidate.content),
         importance: Math.max(target.importance, review.candidate.importance),
         confidence: Math.max(target.confidence, review.candidate.confidence),
       });
+      mutated = true;
     }
 
     if (input.action === 'update') {
-      if (!input.memory_id) throw new Error('memory_id is required when action is update.');
+      if (!input.memory_id) throw new UserFacingError('memory_id is required when action is update.');
       const target = await getMemory(env, input.memory_id, input.user_id);
-      if (!target) throw new Error('Target memory not found.');
+      if (!target) throw new UserFacingError('Target memory not found.');
       memory = await updateMemoryContent(env, target, {
         content: review.candidate.content,
         importance: review.candidate.importance,
         confidence: review.candidate.confidence,
       });
+      mutated = true;
     }
 
     if (input.action === 'delete') {
-      if (!input.memory_id) throw new Error('memory_id is required when action is delete.');
+      if (!input.memory_id) throw new UserFacingError('memory_id is required when action is delete.');
       const deleted = await deleteMemory(env, input.memory_id, input.user_id);
-      if (!deleted) throw new Error('Target memory not found.');
+      if (!deleted) throw new UserFacingError('Target memory not found.');
       memory = deleted;
+      mutated = true;
     }
 
     memoryId = memory?.id ?? input.memory_id ?? null;
@@ -299,13 +309,15 @@ export async function resolveMemoryReview(env: Env, id: string, input: { user_id
         .run();
     }
   } catch (error) {
-    await env.DB.prepare(
-      `UPDATE memory_reviews
-       SET status = 'pending', resolved_action = NULL, memory_id = NULL, reason = NULL, updated_at = ?1, resolved_at = NULL
-       WHERE id = ?2 AND user_id = ?3`
-    )
-      .bind(nowIso(), id, input.user_id)
-      .run();
+    if (!mutated) {
+      await env.DB.prepare(
+        `UPDATE memory_reviews
+         SET status = 'pending', resolved_action = NULL, memory_id = NULL, reason = NULL, updated_at = ?1, resolved_at = NULL
+         WHERE id = ?2 AND user_id = ?3`
+      )
+        .bind(nowIso(), id, input.user_id)
+        .run();
+    }
     throw error;
   }
 

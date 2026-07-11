@@ -12,6 +12,7 @@
 - auto-inject score 阈值三处默认值 + 文档统一为 eval 建议的 `0.67`。
 - `POST /v1/memories/search` 支持可选 `min_score` 过滤；`asaki_memory_search`（Pi/MCP）支持可选 `debug` 参数展示 `score_details`。
 - entity 匹配识别裸相对路径（如 `src/services/memories.ts`），不再依赖前导 `/` 或连字符。
+- 服务端限流已实装：Cloudflare Workers Rate Limiting 绑定，按 `user_id` 分 key，覆盖 search/candidates/extract/create/update 等高成本路由（无绑定时自动降级为 no-op，本地 dev 不受影响）。
 
 ## 下一步（按优先级，代码审查发现的真缺陷/清理项，非猜测）
 
@@ -71,7 +72,6 @@
 
 - 记忆压缩与冲突治理：同一主题多条旧记忆归并成 summary、冲突记忆标记 conflict——个人规模下人工偶尔清理成本远低于建自动治理机制的成本，先攒观测数据看是否真有堆积。
 - 按命中率降权（非删除的 stale 建议）：仍无证据不投入，跟"生命周期策略"里已实现的硬删除是两回事。
-- 服务端限流：当前只有单一共享 `ADMIN_API_KEY`，没有速率限制——key 一旦泄露就是无限 AI 调用成本敞口。个人规模下 key 只在自己机器/CI 用，没发生过滥用，先不投入；真出现异常调用量再加（Cloudflare 自带的 Workers Rate Limiting 绑定，不用自己写）。
 - 单元测试框架：目前只有 eval 回归（`eval:candidates`/`eval:search`/`eval:extraction`/`eval:extraction-guardrails`）+ smoke 脚本，`validation.ts` 每个函数的错误分支没有系统性覆盖。项目已经明确选了"eval 驱动"而不是传统单测——不无证据引入新测试框架；`validation.ts` 或别处真出一个具体 bug 时，优先补一条对应的 eval/guardrail case，而不是补一整套单测基础设施。
 
 ## 已评估并砍掉（不做）
