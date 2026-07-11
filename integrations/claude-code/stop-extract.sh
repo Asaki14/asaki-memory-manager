@@ -135,6 +135,7 @@ report_and_exit() {
           delete) VERB="delete stale memory for" ;;
           ignore) VERB="ignore (duplicate)" ;;
           review) VERB="queue for review" ;;
+          failed) VERB="failed to save (will retry next turn)" ;;
           skipped)
             REASON=$(echo "$CLASSIFIER_RESP" | jq -r '.reason // ""')
             jq -cn --arg r "$REASON" '{systemMessage: ("🧠 Asaki-memory (prev turn): skip" + (if $r == "" then "" else " — " + $r end))}'
@@ -356,20 +357,23 @@ Output your FINAL answer as compact JSON only, no other prose before or after it
     RESP=$(claude -p --safe-mode --tools "" --model "$CLASSIFIER_MODEL" --system-prompt "$CLASSIFIER_SYSTEM_PROMPT" --json-schema "$CLASSIFIER_SCHEMA" "$CLASSIFIER_PROMPT" 2>>"$CLASSIFIER_LOG_FILE")
     CLAUDE_STATUS=$?
     RESP_SINGLE_LINE=$(echo "$RESP" | tr '\n' ' ' | sed -E 's/```(json)?//g')
-    # Only advance STATE_FILE here, inside the background job, once `claude -p` actually
-    # succeeded AND the response parses as valid JSON — writing it eagerly before dispatch (as
-    # before) meant a crash/timeout/non-JSON response would permanently skip this delta with no
-    # retry. Checking FLAG alone isn't enough to detect success: `jq -r '.flag // false'` also
-    # yields "false" when parsing fails outright, indistinguishable from a genuine flag=false
-    # classification — so validity is checked separately via `jq -e .` first. Leaving STATE_FILE
-    # untouched on failure folds the delta into the next Stop event's (larger) increment instead,
-    # mirroring the throttle's and content-gate's carry-forward behavior above. Trade-off: a Stop
-    # event that fires again before this job finishes will re-read the same not-yet-advanced
-    # offset and may re-classify/re-send an overlapping delta — accepted, since the server's
-    # dedup/merge pipeline (src/services/candidates.ts) collapses duplicate candidates instead of
-    # writing them twice.
+    # STATE_FILE only advances once the delta's FINAL outcome is known: a valid flag=false
+    # classification (nothing to write), or a flag=true candidate whose HTTP write actually
+    # succeeded. Advancing right after `claude -p` returned valid JSON (as before) reintroduced
+    # the exact bug the AUTO_EXTRACT=1 branch's comment warns about — a curl failure on the
+    # write below happened AFTER the offset had moved, so a classifier-approved memory was
+    # silently lost with no retry. Checking FLAG alone isn't enough to detect classifier
+    # success: `jq -r '.flag // false'` also yields "false" when parsing fails outright,
+    # indistinguishable from a genuine flag=false — so validity is checked separately via
+    # `jq -e .` first. Leaving STATE_FILE untouched on any failure folds the delta into the
+    # next Stop event's (larger) increment instead, mirroring the throttle's and content-gate's
+    # carry-forward behavior above. Trade-off: a Stop event that fires again before this job
+    # finishes will re-read the same not-yet-advanced offset and may re-classify/re-send an
+    # overlapping delta — accepted, since the server's dedup/merge pipeline
+    # (src/services/candidates.ts) collapses duplicate candidates instead of writing them twice.
+    CLASSIFIER_OK=0
     if [ "$CLAUDE_STATUS" -eq 0 ] && echo "$RESP_SINGLE_LINE" | jq -e . >/dev/null 2>&1; then
-      echo "$TOTAL" >"$STATE_FILE"
+      CLASSIFIER_OK=1
     fi
     FLAG=$(echo "$RESP_SINGLE_LINE" | jq -r '.flag // false' 2>/dev/null)
     if [ "$FLAG" = "true" ]; then
@@ -393,8 +397,14 @@ Output your FINAL answer as compact JSON only, no other prose before or after it
       # (never decisions) — see isUnsupervisedSource() in src/services/candidateDecision.ts.
       ACTION=$(echo "$ADD_RESP" | jq -r 'if (.decisions // [] | length) > 0 then .decisions[0].action elif (.reviews // [] | length) > 0 then "review" else "failed" end' 2>/dev/null)
       [ -z "$ACTION" ] && ACTION="failed"
+      if [ "$ACTION" != "failed" ]; then
+        echo "$TOTAL" >"$STATE_FILE"
+      fi
       FINAL_JSON=$(jq -cn --arg action "$ACTION" --arg memory "$TEXT_FIELD" '{action: $action, memory: $memory, reason: ""}')
     else
+      if [ "$CLASSIFIER_OK" -eq 1 ]; then
+        echo "$TOTAL" >"$STATE_FILE"
+      fi
       REASON_FIELD=$(echo "$RESP_SINGLE_LINE" | jq -r '.reason // ""' 2>/dev/null)
       FINAL_JSON=$(jq -cn --arg reason "$REASON_FIELD" '{action: "skipped", memory: "", reason: $reason}')
     fi

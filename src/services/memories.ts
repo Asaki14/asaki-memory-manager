@@ -348,9 +348,14 @@ export async function updateMemory(env: Env, id: string, input: UpdateMemoryInpu
   if (updated.scope === 'project' && !updated.project_id) throw new Error('project_id is required when scope is project.');
   if (updated.scope === 'session' && !updated.session_id) throw new Error('session_id is required when scope is session.');
 
+  // Reactivation must reindex even without field changes: softDeleteMemory() removed the
+  // Vectorize entry but left index_status='indexed', so a pure status flip back to 'active'
+  // would otherwise leave the memory permanently invisible to vector search (backfill only
+  // scans 'pending'/'failed').
   const shouldReindex =
     updated.status === 'active' &&
-    (updated.content !== existing.content ||
+    (existing.status !== 'active' ||
+      updated.content !== existing.content ||
       updated.scope !== existing.scope ||
       updated.project_id !== existing.project_id ||
       updated.session_id !== existing.session_id ||

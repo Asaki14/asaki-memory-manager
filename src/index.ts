@@ -66,6 +66,9 @@ app.post('/v1/memories', async (c) => {
   const validation = validateCreateMemory(body.body);
   if (!validation.ok) return c.json({ error: validation.error }, 400);
 
+  const rateLimited = await checkRateLimit(c, `create:${validation.data.user_id}`);
+  if (rateLimited) return rateLimited;
+
   const memory = await createMemory(c.env, validation.data);
   return c.json({ memory }, 201);
 });
@@ -244,6 +247,9 @@ app.patch('/v1/memories/:id', async (c) => {
 
   const validation = validateUpdateMemory(body.body);
   if (!validation.ok) return c.json({ error: validation.error }, 400);
+
+  const rateLimited = await checkRateLimit(c, `update:${validation.data.user_id}`);
+  if (rateLimited) return rateLimited;
 
   try {
     const memory = await updateMemory(c.env, c.req.param('id'), validation.data);
