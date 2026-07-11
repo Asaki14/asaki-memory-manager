@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono';
 import type { Env } from './types';
+import { handleMcpRequest } from './mcp';
 import { dedupeCandidateBatch, isAutoAddEligible, isUnsupervisedSource, processMemoryCandidates } from './services/candidates';
 import { extractMemoryCandidates } from './services/extraction';
 import { backfillPendingIndex, createMemory, deleteMemory, getMemory, listMemories, pruneStaleMemories, purgeMemory, searchMemories, updateMemory } from './services/memories';
@@ -29,7 +30,11 @@ async function checkRateLimit(c: Context<{ Bindings: Bindings }>, key: string): 
   return null;
 }
 
-app.use('/v1/*', async (c, next) => {
+// Shared bearer auth: guards both the /v1/* REST surface and the /mcp remote MCP
+// endpoint with the same ADMIN_API_KEY. The /mcp handler bridges tool calls into
+// /v1/* via app.fetch(), which re-runs this middleware on the subrequest — hence
+// the incoming Authorization header must be forwarded there.
+const requireBearer = async (c: Context<{ Bindings: Bindings }>, next: () => Promise<void>) => {
   const configuredKey = c.env.ADMIN_API_KEY;
   if (!configuredKey) {
     return c.json({ error: 'Service misconfigured: ADMIN_API_KEY is not set.' }, 503);
@@ -39,7 +44,12 @@ app.use('/v1/*', async (c, next) => {
     return c.json({ error: 'Unauthorized.' }, 401);
   }
   return next();
-});
+};
+
+app.use('/v1/*', requireBearer);
+app.use('/mcp', requireBearer);
+
+app.post('/mcp', (c) => handleMcpRequest(app, c));
 
 app.get('/health', (c) => {
   return c.json({
