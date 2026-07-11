@@ -275,9 +275,11 @@ if [ "$AUTO_EXTRACT" = "1" ]; then
 
   # Keep the tail of the delta, not the head — the highest-value content in a long turn (a final
   # "verified working" / "decided to use X" conclusion) tends to land at the end; the head is
-  # more often process noise. NOTE: the leading space in "${TEXT: -20000}" is load-bearing —
-  # "${TEXT:-20000}" (no space) is bash's unset-or-empty default-value syntax, an unrelated form.
-  TEXT="${TEXT: -20000}"
+  # more often process noise. Must NOT use "${TEXT: -20000}": macOS ships bash 3.2, where a
+  # negative offset whose magnitude exceeds the string length yields an empty string (bash 4.2+
+  # returns the whole string) — that silently emptied every sub-20000-char delta. Slice with a
+  # positive offset instead, and only when actually longer than the cap.
+  [ "${#TEXT}" -gt 20000 ] && TEXT="${TEXT:$((${#TEXT} - 20000))}"
 
   # No "scope" here on purpose — let the server infer global vs project per candidate.
   # project_id is still sent as a hint for whichever candidates resolve to project scope.
@@ -313,8 +315,8 @@ else
   # flagging, and this classifier has no write access, so a false positive only costs one extra
   # agent turn, not a bad write.
   # Keep the tail of the delta, not the head — see the matching comment in the AUTO_EXTRACT=1
-  # branch above for why, and why the leading space in "${TEXT: -20000}" is load-bearing.
-  TEXT="${TEXT: -20000}"
+  # branch above for why, and for the bash-3.2 empty-string pitfall this positive-offset form avoids.
+  [ "${#TEXT}" -gt 20000 ] && TEXT="${TEXT:$((${#TEXT} - 20000))}"
 
   CLASSIFIER_MODEL="${ASAKI_MEMORY_CLASSIFIER_MODEL:-claude-haiku-4-5-20251001}"
   # --json-schema forces the CLI to constrain decoding to this shape (not just prompt-requested
