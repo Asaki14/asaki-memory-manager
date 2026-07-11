@@ -122,7 +122,7 @@ Pi doesn't support remote MCP, so it ships as a self-contained single-file exten
 pi install npm:@asaki14/pi-memory
 ```
 
-On every `session_start` it injects a compact status banner (user, project, memory count, pending reviews, auto-extract/classifier state) plus the top highest-importance memories as hidden startup context. On `agent_end` it runs a background classifier that pre-distills one candidate and writes it to the review queue — throttled, and skipping anything that trips the sensitive-text gate.
+On every `session_start` it renders a compact, transcript-local `[Memory]` status banner (user, project, memory count, pending reviews, auto-extract/classifier state). It appears with Pi's startup resource information, scrolls away with the conversation, and does not enter LLM context. On `agent_end` it runs a background classifier that pre-distills one candidate and writes it to the review queue — throttled, and skipping anything that trips the sensitive-text gate.
 
 <details>
 <summary><b>Common Pi environment variables</b></summary>
@@ -138,8 +138,6 @@ export ASAKI_MEMORY_AUTO_EXTRACT="0"
 export ASAKI_MEMORY_AUTO_CLASSIFIER="1"
 export ASAKI_MEMORY_CLASSIFIER_MODEL="opencode/deepseek-v4-flash-free"
 export ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS="300"
-export ASAKI_MEMORY_STARTUP_INJECT="1"
-export ASAKI_MEMORY_STARTUP_TOP_K="6"
 ```
 
 The classifier model can also be set via `classifierModel` in `~/.pi/agent/asaki-memory.json`. When `ASAKI_MEMORY_AUTO_EXTRACT=1`, Pi instead sends only user/assistant text (no tool calls/results/thinking) to `/v1/memories/extract` for server-side extraction.
