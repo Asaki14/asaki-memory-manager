@@ -62,8 +62,8 @@ environment (never hardcoded / never committed). Set them once in
     appended since the last processed transcript offset to
     `/v1/memories/extract` for server-side LLM-based background extraction.
     This intentionally sends conversation text off-machine to the Worker.
-  - default `ASAKI_MEMORY_AUTO_EXTRACT=0`: cloud auto-extract stays off, but the
-    hook runs a local classifier via `claude -p --safe-mode` (no tools) in the
+  - default `ASAKI_MEMORY_AUTO_EXTRACT=0`: deprecated cloud auto-extract stays off; the
+    active hook path runs a local classifier via `claude -p --safe-mode` (no tools) in the
     background. This still sends the conversation delta to the Claude
     CLI/model provider for judgment only. It judges the delta against the
     6-criteria checklist and, if it qualifies, pre-distills it into

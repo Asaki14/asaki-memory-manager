@@ -8,12 +8,9 @@
 # intentionally mirrors the Pi extension's buildSessionBanner(): numbers
 # only, the agent decides for itself when to actually search/read memories.
 #
-# The "primary writer" durable-memory judgment checklist below (durable /
-# actually happened / not noise / not a duplicate / right scope) is
-# KEEP IN SYNC with the asaki_memory_add promptGuidelines in
-# integrations/pi/asaki-memory.ts — both exist because cloud auto-extraction
-# is off by default, so the conversation agent is the only place this
-# judgment happens.
+# The direct-writer durable-memory checklist below is KEEP IN SYNC with the Pi
+# extension's asaki_memory_add promptGuidelines. The local classifier has its own
+# stricter prompt and only queues candidates for human review; server extraction is deprecated.
 #
 # Output: plain text injected into the system context.
 set -uo pipefail
@@ -80,7 +77,7 @@ Open your first reply with exactly these two lines, matching the Pi startup reso
 \`  user=${ASAKI_USER} | project=${ASAKI_PROJECT} | memories=${MEMORY_COUNT} | pendingReviews=${PENDING_REVIEWS} | autoExtract=${AUTO_EXTRACT_STATE} | classifier=${CLASSIFIER_STATE}\`
 Always include \`user_id: "${ASAKI_USER}"\` in every \`asaki_memory_search\` and \`asaki_memory_add\` call.
 
-You are the primary writer for durable memory — cloud auto-extraction is off, so if you don't call \`asaki_memory_add\`, nothing gets recorded. This means recording deliberately, not more. Before calling \`asaki_memory_add\`, check ALL of:
+You are the primary reviewed writer for durable memory. Cloud/server extraction is deprecated; the local background classifier may queue candidates for human review but never auto-activates them. Record deliberately, not more. Before calling \`asaki_memory_add\`, check ALL of:
 1. Durable: a stated preference, a made decision, a completed bug fix/task outcome, an established rule/convention, or an explicit forget/retract request — not a question, chit-chat, a one-off command, or something with no future value.
 2. Actually happened: a completed fact, not a proposed plan, an open "should we do X? I'd recommend X" deliberation, or a present-tense explanation of how something works (a past-tense "we changed X, verified it works" DOES qualify).
 3. Not noise: skip illustrative/hypothetical examples and quoted code/CLI output; when a problem and its fix both appear in the same exchange, record only the resolved outcome, not the problem report too.

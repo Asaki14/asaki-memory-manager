@@ -6,7 +6,7 @@
 
 - Search eval 集：`eval/search-cases.json`（51 条），`npm run eval:search` 会给出 `search_min_score`/`auto_inject_min_score` 建议值。
 - Candidate dedupe eval：`test/fixtures/candidate-decisions.json`，`npm run eval:candidates`。
-- Extraction guardrail eval：`npm run eval:extraction` / `eval:extraction-guardrails`。
+- 已弃用的 server extraction 兼容路径仍保留 guardrail eval：`npm run eval:extraction` / `eval:extraction-guardrails`；日常回归以 `npm run eval:classifier` 为准。
 - 启动时高优先级记忆自动注入，默认开启，无需手动配置。
 - 候选决策已优化，避免不必要的 LLM 调用。
 - auto-inject score 阈值三处默认值 + 文档统一为 eval 建议的 `0.67`。
@@ -19,8 +19,8 @@
 1. ~~控制注入记忆的上下文负担与注意力噪音~~ — 已完成
    - Pi startup top memories、Pi `asaki_memory_search`、MCP `asaki_memory_search` 的单条内容输出统一 cap 到 280 chars，保留 id/scope/kind/importance/score 等元数据，避免长记忆整段注入上下文。
    - `/memory` 审计工作流新增 overlong 检查：>300 中文字符或约 600 ASCII chars 时建议压缩、拆分或改成文档路径引用。
-   - Pi/Claude/Codex agent 写入提示、Pi/MCP 参数说明、Pi/Claude classifier prompt、云端 extraction prompt 均收紧长度约束：preference/rule 约 40-160 chars；decision/workflow/bug_fix/task_learning 1-2 句且最多约 200-300 chars。
-   - 已验证：`npm run typecheck`、`npm run eval:classifier`、`npm run eval:extraction` 全绿。
+   - Pi/Claude/Codex agent 写入提示、Pi/MCP 参数说明和 Pi/Claude classifier prompt 均收紧长度约束：preference/rule 约 40-160 chars；decision/workflow/bug_fix/task_learning 1-2 句且最多约 200-300 chars。云端 extraction prompt 仅作为已弃用兼容路径维护。
+   - active path 已验证：`npm run typecheck`、`npm run eval:classifier` 全绿；`npm run eval:extraction` 仅在兼容路径改动时运行。
 
 
 1. ~~`expires_at` 字段没有被任何查询读取~~ — 已完成（选方向 b：删掉）
@@ -46,7 +46,7 @@
 1. ~~云端抽取降级为 shadow-run 校准工具~~ — 已完成
    - `scripts/shadow-run-extraction.ts`（`npm run shadow-run:extraction -- <transcript.jsonl> --user <id> --project <id>`）：读取 Claude Code transcript，调 `/v1/memories/extract`（新增 `dry_run` 参数，见 `src/index.ts`）拿云端候选但不写库，再跟同窗口内 agent 直接 `asaki_memory_add` 的记忆做 `lexicalSimilarity` diff，只读输出 covered/gap 报告；`--create-reviews` 可选择把 gap 候选推进 review 队列（默认不推，只报告）。
    - 已用本地 `wrangler dev` 验证：dry_run 不写库、直接 add 的记忆能被正确识别为窗口内的 direct add；diff 算法单独验证过 covered/gap 判定正确。
-   - 待办的"跑几次攒数据再决定"从没被执行，`ASAKI_MEMORY_AUTO_EXTRACT` 一直开着，实际统计显示云端 auto-extract 已经变成主要记忆来源（163 条 vs. 本地 Agent 直接 `asaki_memory_add` 27 小时无调用），跟"云端是事后审计、本地 Agent 是主要写手"的设计意图相反。已决定：`ASAKI_MEMORY_AUTO_EXTRACT` 默认关闭（`~/.claude/settings.json` 和 `~/.pi/agent/asaki-memory.json` 均已改为 off），`session-start.sh` 和 Pi 的 `asaki_memory_add` 提示语气从"decide yourself"改为"你是主要写手，不写就没有记录"。`shadow-run-extraction.ts` 保留作为周期性手动审计工具，不再是默认自动通路。
+   - 历史统计曾显示云端 auto-extract 成为主要来源，因此已关闭 `ASAKI_MEMORY_AUTO_EXTRACT`。当前生产记忆绝大部分来自本地 classifier；classifier 候选统一进 review queue，server extraction 已弃用并只保留兼容入口。`shadow-run-extraction.ts` 仅用于遗留兼容调查，不再作为日常审计通路。
 
 2. ~~观测补字段~~ — 部分完成
    - `search` 事件（`src/services/memories.ts:223-233`）现在记录 `query`/`top_k`/`min_score`/`result_count`/`result_ids`/`score_details`。本地 `wrangler dev` + 直接查 D1 `memory_events` 表验证过字段真落地。

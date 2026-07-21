@@ -29,10 +29,10 @@ AI coding agents are far more useful when they remember. But most memory stacks 
 - **REST-first, MCP-ready** — a small HTTP API, plus the same tool surface served over remote MCP straight from the Worker.
 - **Scoped memory** — `global` / `project` / `session` with strict project & session isolation.
 - **Hybrid retrieval** — Vectorize semantic search fused with a D1 lexical fallback, so search still works when AI/Vectorize are down.
-- **Two capture paths** — agents submit pre-distilled candidates, *or* hand raw text to a server-side LLM extractor. Either way Cloudflare dedupes, merges, indexes, and stores.
+- **Classifier-first capture** — agents submit pre-distilled candidates directly; local background classifiers queue unsupervised candidates for human review. Server-side raw-text extraction is deprecated compatibility only.
 - **Human-in-the-loop** — unsupervised background classifiers never auto-write; their candidates land in a review queue you approve via a `/memory` audit.
 - **Deterministic dedup guards** — exact, subset, and technical-token paraphrase checks run *before* any LLM decision.
-- **Self-improving** — a regression-eval harness (`eval:extraction`, `eval:classifier`) turns every audit miss into a permanent few-shot test case.
+- **Self-improving** — classifier regression eval turns audit misses into permanent few-shot cases; the extraction eval remains only for the deprecated compatibility path.
 - **First-class agent integrations** — a Claude Code plugin, a Pi extension, and a stdio MCP server for Codex.
 
 ## Architecture
@@ -140,7 +140,7 @@ export ASAKI_MEMORY_CLASSIFIER_MODEL="openai-codex/gpt-5.6-luna"
 export ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS="300"
 ```
 
-The classifier model can also be set via `classifierModel` in `~/.pi/agent/asaki-memory.json`. When `ASAKI_MEMORY_AUTO_EXTRACT=1`, Pi instead sends only user/assistant text (no tool calls/results/thinking) to `/v1/memories/extract` for server-side extraction.
+The classifier model can also be set via `classifierModel` in `~/.pi/agent/asaki-memory.json`. Keep `ASAKI_MEMORY_AUTO_EXTRACT=0`: server-side `/v1/memories/extract` is deprecated compatibility behavior and must not be enabled for routine capture.
 
 </details>
 
@@ -285,7 +285,7 @@ curl -X POST http://127.0.0.1:8787/v1/memories/candidates \
   }'
 ```
 
-Agents extract durable memories from their own context and submit concise candidates here — the Worker does not accept full transcripts for extraction. Candidates from an unsupervised background classifier (`source: "pi:agent-end-classifier"` or `"claude-code:stop-classifier"`) always land in `reviews`, never `decisions`: only a human-in-the-loop write can auto-add/merge/update/delete.
+Agents submit concise candidates from their own context. Local background classifiers (`source: "pi:agent-end-classifier"` or `"claude-code:stop-classifier"`) are the active/default automated source and always land in `reviews`, never `decisions`. The legacy `/v1/memories/extract` endpoint remains for backward compatibility but is deprecated and must not receive routine/full-transcript capture.
 
 </details>
 
@@ -356,8 +356,8 @@ Resolve actions: `add`, `merge`, `update`, `delete`, `ignore`. `merge`/`update`/
 ```bash
 npm run typecheck        # tsc --noEmit
 npm run eval:candidates  # offline dedup heuristics
-npm run eval:extraction  # server extraction (needs a live Worker)
-npm run eval:classifier  # local Claude Code classifier
+npm run eval:extraction  # deprecated server-extraction compatibility path; needs a live Worker
+npm run eval:classifier  # active local classifier regression suite
 npm run smoke:management  # management API smoke test
 npm run db:migrate:local
 npm run dev

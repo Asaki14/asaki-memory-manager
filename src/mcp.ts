@@ -43,11 +43,13 @@ function formatLine(item: Record<string, unknown>, index?: number, maxContentCha
   const kind = item.kind ? ` kind=${item.kind}` : '';
   const status = item.status ? ` status=${item.status}` : '';
   const importance = typeof item.importance === 'number' ? ` importance=${item.importance.toFixed(2)}` : '';
+  const source = item.source ? ` source=${item.source}` : '';
+  const createdAt = item.created_at ? ` created_at=${item.created_at}` : '';
   const updatedAt = item.updated_at ? ` updated_at=${item.updated_at}` : '';
   const content = item.content ?? item.memory ?? item.text;
   const text = typeof content === 'string' ? content : JSON.stringify(item);
   const shown = maxContentChars == null ? text : truncateText(text, maxContentChars);
-  return `${prefix}${shown}${id}${scope}${kind}${status}${importance}${updatedAt}`;
+  return `${prefix}${shown}${id}${scope}${kind}${status}${importance}${source}${createdAt}${updatedAt}`;
 }
 
 function formatScoreDetails(details: unknown): string {
@@ -66,6 +68,8 @@ function formatReviewLine(item: Record<string, unknown>, index?: number): string
   const status = item.status ? ` status=${item.status}` : '';
   const action = item.resolved_action ? ` action=${item.resolved_action}` : '';
   const memoryId = item.memory_id ? ` memory_id=${item.memory_id}` : '';
+  const source = item.source ? ` source=${item.source}` : '';
+  const createdAt = item.created_at ? ` created_at=${item.created_at}` : '';
   const updatedAt = item.updated_at ? ` updated_at=${item.updated_at}` : '';
   const candidate = item.candidate && typeof item.candidate === 'object' ? (item.candidate as Record<string, unknown>) : {};
   const scope = candidate.scope ? ` scope=${candidate.scope}` : '';
@@ -75,7 +79,7 @@ function formatReviewLine(item: Record<string, unknown>, index?: number): string
   const dup = potentialDuplicate
     ? ` potential_duplicate=[memory_id=${potentialDuplicate.memory_id} suggested=${potentialDuplicate.action} reason="${potentialDuplicate.reason}"]`
     : '';
-  return `${prefix}${typeof content === 'string' ? content : JSON.stringify(candidate || item)}${id}${status}${action}${memoryId}${scope}${kind}${updatedAt}${dup}`;
+  return `${prefix}${typeof content === 'string' ? content : JSON.stringify(candidate || item)}${id}${status}${action}${memoryId}${scope}${kind}${source}${createdAt}${updatedAt}${dup}`;
 }
 
 type BudgetedJoin = { text: string; shown: number; total: number };
@@ -202,7 +206,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'asaki_memory_extract',
     description:
-      'Extract and store durable memories from a raw text blob (e.g. a conversation excerpt) via LLM-based extraction, instead of a single pre-distilled statement. Use when you have unstructured text rather than an already-concise memory.',
+      'Deprecated compatibility tool for server-side raw-text extraction. Do not use for routine capture or full transcripts; prefer pre-distilled candidates and the local classifier review path.',
     inputSchema: {
       type: 'object',
       properties: {
