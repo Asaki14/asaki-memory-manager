@@ -113,5 +113,52 @@
     "name": "pos: superseded intermediate config retains only final state",
     "text": "Assistant: Herdr 中运行 Yazi 时先强制使用 Chafa；后续确认 Herdr 已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp。",
     "expectFlag": true
+  },
+  {
+    "name": "pos: machine-local fish secret path is project-scoped",
+    "text": "Assistant: 用户偏好：环境变量/API密钥统一存放在 ~/.config/fish/conf.d/api_keys.local.fish（该文件已 gitignore，用 set -x / set -gx 语法）。不要写入 ~/.config/fish/config.fish 或 ~/.zshrc（用户用 fish shell，非 zsh/bash）。以后任何需要给 shell 加密钥/环境变量的场景，都应写入这个文件。",
+    "expectFlag": true,
+    "expectScope": "project",
+    "expectMaxTextLength": 300,
+    "expectTextIncludes": ["api_keys.local.fish"]
+  },
+  {
+    "name": "pos: cross-project scratchpad preference stays concise and global",
+    "text": "Assistant: 用户偏好：周会汇报等一次性使用的文档产物不要写入项目仓库目录，放 scratchpad/临时目录即可；项目目录只留正式产出与治理文档。",
+    "expectFlag": true,
+    "expectScope": "global",
+    "expectMaxTextLength": 160,
+    "expectTextIncludes": ["scratchpad"]
+  },
+  {
+    "name": "pos: concrete dotfiles layout outcome is project-scoped",
+    "text": "Assistant: 修复：paneru四边padding 4→10，配对齐sketchybar左侧10px边距。",
+    "expectFlag": true,
+    "expectScope": "project",
+    "expectMaxTextLength": 160,
+    "expectTextIncludes": ["10"]
+  },
+  {
+    "name": "pos: overlong app implementation is compressed and project-scoped",
+    "text": "Assistant: In ~/.config sketchybar config, WiFi and volume clicks were changed to SketchyBar custom popups backed by sketchybar/plugins/status_popup.sh. WiFi popup lists preferred/saved networks and uses networksetup -setairportnetwork to switch; Bluetooth popup lists devices from system_profiler and toggles paired device connections via an inline Swift IOBluetooth call. macOS 26 may redact current/nearby SSIDs, so the popup falls back to '已连接（SSID 被系统隐藏）' when link is active but SSID is unavailable.",
+    "expectFlag": true,
+    "expectScope": "project",
+    "expectMaxTextLength": 300,
+    "expectTextIncludes": ["status_popup.sh"]
+  },
+  {
+    "name": "neg: one-off Claude Design API procedure dump",
+    "text": "Assistant: Claude Design 画布页（.dc.html）不在 DesignSync MCP 文件树里（get_file 404）。浏览器登录态下可直接调 Omelette API：读取 GetFile，写回用 UploadFile，DeleteFile 删文件；大段 HTML 下载用 Blob+anchor，上传方向页内 fetch 后再 SHA-256 对齐本地。",
+    "expectFlag": false
+  },
+  {
+    "name": "neg: incomplete Herdr preference lacks standalone meaning",
+    "text": "Assistant: 用户希望不使用嵌套并复用同一个 herdr 进程和 server。",
+    "expectFlag": false
+  },
+  {
+    "name": "neg: transient manual Ghostty window adjustment",
+    "text": "Assistant: 用户决定调整 Ghostty 窗口高度以匹配其他应用的布局，手动拖高或修改终端行数以撑满额外底部缺口。",
+    "expectFlag": false
   }
 ]
