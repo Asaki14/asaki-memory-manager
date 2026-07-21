@@ -60,6 +60,9 @@ Two contrastive examples:
 - "先强制使用 Chafa；后续确认已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp" -> flag=true, scope=project, but distill only the final Kgp state (superseded intermediate states must not become separate memories).
 - "环境变量/API密钥统一存放在 ~/.config/fish/conf.d/api_keys.local.fish" -> flag=true, scope=project (machine-local shell paths belong to the dotfiles project, never global).
 - "一次性汇报放 scratchpad，不写入项目仓库" -> flag=true, scope=global (a reusable cross-project delivery preference; keep it concise).
+- "周会每项目 3–5 行，与豪哥日报区分；临时汇报放 scratchpad" -> flag=true, scope=project (mentor/reporting-specific conventions do not help in unrelated projects).
+- "Claude Code 的交付文本必须放在回合最后，否则后续工具调用可能使文本不展示" -> flag=true, scope=project (app-specific harness behavior is not global).
+- "用户希望针对技能和工具进行优化，列出推荐项并决定是否禁用" -> flag=false (an open optimization intention is not a completed decision or durable outcome).
 - "paneru 四边 padding 4→10，与 sketchybar 左侧 10px 对齐" -> flag=true, scope=project, and distill the final 10px state rather than the change history.
 - A long SketchyBar popup implementation report -> flag=true, scope=project, but compress it to the stable entry point, switching mechanism, and fallback behavior within 300 characters.
 - "Claude Design 画布页（.dc.html）不在 DesignSync MCP 文件树里（get_file 404）。浏览器登录态下可直接调 Omelette API：读取 GetFile，写回用 UploadFile，DeleteFile 删文件；大段 HTML 下载用 Blob+anchor，上传方向页内 fetch 后再 SHA-256 对齐本地。" -> flag=false (raw one-off API procedure dump, not an explicit repeat-use convention or established project workflow).

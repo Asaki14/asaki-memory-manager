@@ -289,10 +289,12 @@ function formatMemoryLine(item: any, index?: number, maxContentChars?: number): 
   const status = item.status ? ` status=${item.status}` : "";
   const importance = typeof item.importance === "number" ? ` importance=${item.importance.toFixed(2)}` : "";
   const confidence = typeof item.confidence === "number" ? ` confidence=${item.confidence.toFixed(2)}` : "";
+  const source = item.source ? ` source=${item.source}` : "";
+  const createdAt = item.created_at ? ` created_at=${item.created_at}` : "";
   const updatedAt = item.updated_at ? ` updated_at=${item.updated_at}` : "";
   const rawContent = item.content || item.memory || item.text || JSON.stringify(item);
   const content = maxContentChars == null ? rawContent : truncateText(String(rawContent), maxContentChars);
-  return `${prefix}${content}${id}${scope}${kind}${status}${importance}${confidence}${updatedAt}`;
+  return `${prefix}${content}${id}${scope}${kind}${status}${importance}${confidence}${source}${createdAt}${updatedAt}`;
 }
 
 function formatScoreDetails(details: any): string {
@@ -310,6 +312,8 @@ function formatReviewLine(item: any, index?: number): string {
   const status = item.status ? ` status=${item.status}` : "";
   const action = item.resolved_action ? ` action=${item.resolved_action}` : "";
   const memoryId = item.memory_id ? ` memory_id=${item.memory_id}` : "";
+  const source = item.source ? ` source=${item.source}` : "";
+  const createdAt = item.created_at ? ` created_at=${item.created_at}` : "";
   const updatedAt = item.updated_at ? ` updated_at=${item.updated_at}` : "";
   const candidate = item.candidate || {};
   const scope = candidate.scope ? ` scope=${candidate.scope}` : "";
@@ -321,7 +325,7 @@ function formatReviewLine(item: any, index?: number): string {
   const dup = potentialDuplicate
     ? ` potential_duplicate=[memory_id=${potentialDuplicate.memory_id} suggested=${potentialDuplicate.action} reason="${potentialDuplicate.reason}"]`
     : "";
-  return `${prefix}${content}${id}${status}${action}${memoryId}${scope}${kind}${importance}${confidence}${updatedAt}${dup}`;
+  return `${prefix}${content}${id}${status}${action}${memoryId}${scope}${kind}${importance}${confidence}${source}${createdAt}${updatedAt}${dup}`;
 }
 
 type AutoInjectMemoryResult = {
@@ -497,6 +501,9 @@ Two contrastive examples:
 - "先强制使用 Chafa；后续确认已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp" -> flag=true, scope=project, but distill only the final Kgp state (superseded intermediate states must not become separate memories).
 - "环境变量/API密钥统一存放在 ~/.config/fish/conf.d/api_keys.local.fish" -> flag=true, scope=project (machine-local shell paths belong to the dotfiles project, never global).
 - "一次性汇报放 scratchpad，不写入项目仓库" -> flag=true, scope=global (a reusable cross-project delivery preference; keep it concise).
+- "周会每项目 3–5 行，与豪哥日报区分；临时汇报放 scratchpad" -> flag=true, scope=project (mentor/reporting-specific conventions do not help in unrelated projects).
+- "Claude Code 的交付文本必须放在回合最后，否则后续工具调用可能使文本不展示" -> flag=true, scope=project (app-specific harness behavior is not global).
+- "用户希望针对技能和工具进行优化，列出推荐项并决定是否禁用" -> flag=false (an open optimization intention is not a completed decision or durable outcome).
 - "paneru 四边 padding 4→10，与 sketchybar 左侧 10px 对齐" -> flag=true, scope=project, and distill the final 10px state rather than the change history.
 - A long SketchyBar popup implementation report -> flag=true, scope=project, but compress it to the stable entry point, switching mechanism, and fallback behavior within 300 characters.
 - "Claude Design 画布页（.dc.html）不在 DesignSync MCP 文件树里（get_file 404）。浏览器登录态下可直接调 Omelette API：读取 GetFile，写回用 UploadFile，DeleteFile 删文件；大段 HTML 下载用 Blob+anchor，上传方向页内 fetch 后再 SHA-256 对齐本地。" -> flag=false (raw one-off API procedure dump, not an explicit repeat-use convention or established project workflow).
@@ -754,7 +761,7 @@ Scope:
 - global memories
 - current project memories
 ${trimmedArgs ? `User focus: ${trimmedArgs}\n` : ""}
-Global scope discipline (the recurring failure mode this exists to catch): global memories get pulled into every project's context, so the bar is "genuinely useful in ANY conversation regardless of project" — cross-project dev preferences, communication/output style, secret-handling rules, this memory system's own operating rules, and durable personal/identity facts. It is NOT a dumping ground for system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs) that only happened to be captured while not inside a recognizable git repo — that content belongs in scope=project with project_id set to the relevant repo's basename (e.g. a dotfiles repo), even if it was captured elsewhere. For every global item ask "would this help in an unrelated project?" — if no, propose RESCOPE (UPDATE scope+project_id) rather than leaving it global. (This text is mirrored in commands/memory.md's /memory command and, condensed, in src/services/extraction.ts's SYSTEM_PROMPT — keep those in sync.)
+Global scope discipline (the recurring failure mode this exists to catch): global memories get pulled into every project's context, so the bar is "genuinely useful in ANY conversation regardless of project" — cross-project dev preferences, communication/output style, secret-handling rules, this memory system's own operating rules, and durable personal/identity facts. It is NOT a dumping ground for system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs) that only happened to be captured while not inside a recognizable git repo — that content belongs in scope=project with project_id set to the relevant repo's basename (e.g. a dotfiles repo), even if it was captured elsewhere. For every global item ask "would this help in an unrelated project?" — if no, propose RESCOPE (UPDATE scope+project_id) rather than leaving it global. (This text is mirrored in commands/memory.md and the active classifier prompts; src/services/extraction.ts is legacy compatibility only.)
 
 Workflow:
 1. Use asaki_memory_review_list to inspect pending reviews. For any review with created_at older than 14 days, flag it explicitly in your output as "stale — pending review needs a decision" rather than treating it identically to a fresh review.
@@ -764,7 +771,7 @@ Workflow:
 5. Use questionnaire before any write. Offer options like apply all high-confidence changes, resolve selected reviews, only deletes, only updates/additions, or skip.
 6. Execute approved changes using asaki_memory_review_resolve, asaki_memory_update, asaki_memory_delete, and asaki_memory_add.
 7. Use asaki_memory_review_create instead of asaki_memory_add for high-risk uncertain memories.
-8. Close the loop (few-shot self-iteration): for every DELETE/RESCOPE/compression you just executed on a memory whose source shows it came from the extraction or classifier pipeline, turn that miss into a regression case + few-shot example so it is caught automatically next time — do not stop at deleting the symptom. Follow AGENTS.md "Few-shot self-iteration" for the source-to-surface map and the TDD flow (add the failing fixture case, update the matching prompt copies, run the eval to green). If this audit is running inside the asaki-memory-manager repo, apply those edits under the same approval as the memory writes; otherwise emit the distilled contrastive cases as a copy-pasteable block to apply in that repo later. Never make these edits in report mode.
+8. Close the loop (few-shot self-iteration): classifier is the active/default background source; server extraction is deprecated. For every DELETE/RESCOPE/compression of a classifier-sourced memory, add a classifier regression case + matching few-shot in all prompt copies. Route to the legacy extraction eval only when source explicitly identifies the deprecated extraction path. Follow AGENTS.md "Few-shot self-iteration" and its TDD flow. If this audit is outside asaki-memory-manager, emit copy-pasteable classifier cases instead of editing. Never make these edits in report mode.
 9. Report final changes and remaining recommendations.
 
 Safety:
@@ -872,14 +879,15 @@ Safety:
   // not a duplicate) is KEEP IN SYNC with the equivalent checklist in
   // integrations/claude-code/session-start.sh's banner text — both exist because cloud
   // auto-extraction is off by default, so the conversation agent is the only place this
-  // judgment happens.
+  // judgment happens for direct agent writes; the background classifier may independently queue
+  // review candidates but never activates them without human approval.
   pi.registerTool({
     name: "asaki_memory_add",
     label: "Asaki Memory Add",
     description: "Store a durable memory in Asaki personal memory via the Cloudflare Worker backend.",
     promptSnippet: "Save durable task outcomes and decisions to Asaki personal memory after significant work.",
     promptGuidelines: [
-      "The current conversation agent is the primary writer for durable memory; cloud auto-extraction is off by default, so if you don't call this tool, nothing gets recorded — do not send full conversation transcripts to the Worker for extraction.",
+      "The current conversation agent is the primary reviewed writer for durable memory. The active background path is the local classifier, which may queue candidates for human review but never auto-activates them; cloud/server extraction is deprecated and must not receive full conversation transcripts.",
       "This means recording deliberately, not more. Before calling, check ALL of: (1) durable — a stated preference, a made decision, a completed bug fix/task outcome, an established rule/convention, or an explicit forget/retract request, not a question, chit-chat, a one-off command, or something with no future value; (2) actually happened — a completed fact, not a proposed plan, an open 'should we do X? I'd recommend X' deliberation, or a present-tense explanation of how something works (a past-tense 'we changed X, verified it' DOES qualify); (3) not noise — skip illustrative/hypothetical examples and quoted code/CLI output, and when a problem and its fix both appear in the same exchange, record only the resolved outcome; (4) not a duplicate or stale-making — asaki_memory_search first: update/skip a near-duplicate, and separately, if this change makes an OLDER differently-worded memory factually wrong (e.g. you just disabled a mechanism an old memory still describes as active), update that old memory too; (5) self-contained — no pronoun or bare reference (this/that/该/这个/主公) whose target isn't named in the same sentence, understandable with zero conversation context.",
       "If nothing in the exchange clears this bar, call nothing — silence is a correct outcome, not a shortfall.",
       "Keep each memory concise: preference/rule should be roughly 40-160 chars; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 chars. Summarize the durable takeaway only — never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives.",

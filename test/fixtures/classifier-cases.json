@@ -160,5 +160,26 @@
     "name": "neg: transient manual Ghostty window adjustment",
     "text": "Assistant: 用户决定调整 Ghostty 窗口高度以匹配其他应用的布局，手动拖高或修改终端行数以撑满额外底部缺口。",
     "expectFlag": false
+  },
+  {
+    "name": "pos: mentor-specific reporting conventions are project-scoped",
+    "text": "Assistant: 周会每项目 3–5 行，与豪哥日报区分；临时汇报放 scratchpad。",
+    "expectFlag": true,
+    "expectScope": "project",
+    "expectMaxTextLength": 160,
+    "expectTextIncludes": ["豪哥"]
+  },
+  {
+    "name": "pos: Claude Code delivery behavior is app-specific and project-scoped",
+    "text": "Assistant: Claude Code 的交付文本必须放在回合最后，否则后续工具调用可能使文本不展示。",
+    "expectFlag": true,
+    "expectScope": "project",
+    "expectMaxTextLength": 160,
+    "expectTextIncludes": ["Claude Code"]
+  },
+  {
+    "name": "neg: vague optimization intention is not a completed decision",
+    "text": "Assistant: 用户希望针对技能和工具进行优化，列出推荐项并决定是否禁用。",
+    "expectFlag": false
   }
 ]
