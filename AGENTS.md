@@ -80,6 +80,7 @@ Remote operations:
 
 ```bash
 npm run db:migrate:remote
+npm run eval:review-dedup
 npx wrangler dev --remote
 npm run deploy
 ```

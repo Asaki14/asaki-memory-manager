@@ -1,5 +1,5 @@
 import { generateEmbedding } from '../ai/embeddings';
-import type { CreateMemoryInput, Env, ListMemoriesInput, MemoryRow, SearchMemoriesInput, SearchResult, UpdateMemoryInput } from '../types';
+import type { CreateMemoryInput, Env, ListMemoriesInput, MemoryKind, MemoryRow, SearchMemoriesInput, SearchResult, UpdateMemoryInput } from '../types';
 import { UserFacingError } from '../utils/errors';
 import { writeMemoryEvent } from './memoryEvents';
 import { scoreMemoryForSearch } from './searchScoring';
@@ -214,7 +214,8 @@ export async function searchMemories(env: Env, input: Required<Pick<SearchMemori
   const merged = vectorResults ? mergeSearchResults([vectorResults, lexicalResults], input.top_k) : lexicalResults;
   const results = typeof input.min_score === 'number' ? merged.filter((result) => result.score >= input.min_score!) : merged;
 
-  if (results.length > 0) {
+  const trackAccess = input.track_access !== false;
+  if (trackAccess && results.length > 0) {
     const timestamp = nowIso();
     await Promise.all(
       results.map((memory) => env.DB.prepare('UPDATE memories SET last_accessed_at = ?1 WHERE id = ?2').bind(timestamp, memory.id).run())
@@ -223,7 +224,7 @@ export async function searchMemories(env: Env, input: Required<Pick<SearchMemori
 
   await writeMemoryEvent(env, {
     userId: input.user_id,
-    eventType: 'search',
+    eventType: trackAccess ? 'search' : 'suggestion_search',
     payload: {
       query_length: input.query.length,
       top_k: input.top_k,
@@ -237,19 +238,35 @@ export async function searchMemories(env: Env, input: Required<Pick<SearchMemori
   return results;
 }
 
-export async function updateMemoryContent(env: Env, memory: MemoryRow, input: { content: string; importance: number; confidence: number }): Promise<MemoryRow> {
+// `kind` is optional and only written when supplied: a correction resolved as `update` carries a
+// new kind (e.g. a `rule` superseding a `fact`), and leaving the target typed as before would make
+// the row lie about what it now holds. Scope is deliberately NOT touched here — rescoping stays an
+// explicit audit action (asaki_memory_update).
+export async function updateMemoryContent(env: Env, memory: MemoryRow, input: { content: string; importance: number; confidence: number; kind?: MemoryKind }): Promise<MemoryRow> {
   const updatedAt = nowIso();
   const updated: MemoryRow = {
     ...memory,
     content: input.content,
     importance: input.importance,
     confidence: input.confidence,
+    kind: input.kind ?? memory.kind,
     index_status: 'pending',
     updated_at: updatedAt,
   };
   const embedding = await generateEmbedding(env, updated.content);
   const indexStatus = await upsertVector(env, updated, embedding);
   updated.index_status = indexStatus;
+
+  if (input.kind) {
+    await env.DB.prepare(
+      `UPDATE memories
+       SET content = ?1, importance = ?2, confidence = ?3, kind = ?4, index_status = ?5, updated_at = ?6
+       WHERE id = ?7 AND user_id = ?8`
+    )
+      .bind(updated.content, updated.importance, updated.confidence, updated.kind, updated.index_status, updated.updated_at, updated.id, updated.user_id)
+      .run();
+    return updated;
+  }
 
   await env.DB.prepare(
     `UPDATE memories

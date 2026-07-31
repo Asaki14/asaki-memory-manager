@@ -203,5 +203,119 @@
       "scope": "project",
       "kind": "fact"
     }
+  },
+  {
+    "name": "merge but defer to LLM: Chinese 改回 overrides the existing preference",
+    "expected": "merge",
+    "expectUsableMatch": true,
+    "expectNeedsLlm": true,
+    "candidate": {
+      "content": "用户偏好使用 npm 管理依赖，现在改回 pnpm",
+      "scope": "global",
+      "kind": "preference"
+    },
+    "existing": {
+      "content": "用户偏好使用 npm 管理依赖",
+      "scope": "global",
+      "kind": "preference"
+    }
+  },
+  {
+    "name": "merge but defer to LLM: Chinese 作废 retracts the existing decision",
+    "expected": "merge",
+    "expectUsableMatch": true,
+    "expectNeedsLlm": true,
+    "candidate": {
+      "content": "该项目使用 A 方案这条作废",
+      "scope": "project",
+      "kind": "decision"
+    },
+    "existing": {
+      "content": "该项目使用 A 方案",
+      "scope": "project",
+      "kind": "decision"
+    }
+  },
+  {
+    "name": "bare Chinese negation is not a supersession signal",
+    "expected": "merge",
+    "expectUsableMatch": true,
+    "expectNeedsLlm": false,
+    "candidate": {
+      "content": "该项目使用 A 方案，这不是 bug",
+      "scope": "project",
+      "kind": "decision"
+    },
+    "existing": {
+      "content": "该项目使用 A 方案",
+      "scope": "project",
+      "kind": "decision"
+    }
+  },
+  {
+    "name": "high-overlap Chinese negation reaches a usable match and defers to the LLM",
+    "expected": "add",
+    "expectUsableMatch": true,
+    "expectNeedsLlm": true,
+    "candidate": {
+      "content": "用户偏好不要使用 npm 管理依赖",
+      "scope": "global",
+      "kind": "preference"
+    },
+    "existing": {
+      "content": "用户偏好使用 npm 管理依赖",
+      "scope": "global",
+      "kind": "preference"
+    }
+  },
+  {
+    "name": "low-overlap rephrased rule finds no usable match (supersedes_query territory, not regex)",
+    "expected": "add",
+    "expectUsableMatch": false,
+    "expectNeedsLlm": false,
+    "candidate": {
+      "content": "不要在未获得确认前自动 commit 本仓库的改动",
+      "scope": "global",
+      "kind": "rule"
+    },
+    "existing": {
+      "content": "每次编辑完成后自动 commit 并推送",
+      "scope": "global",
+      "kind": "rule"
+    }
+  },
+  {
+    "name": "usableMatches keeps only the passing matches, best-first",
+    "candidate": {
+      "content": "用户偏好使用 npm 管理依赖",
+      "scope": "global",
+      "kind": "preference"
+    },
+    "matches": [
+      {
+        "content": "周报使用简体中文撰写",
+        "scope": "global",
+        "kind": "preference"
+      },
+      {
+        "content": "团队偏好使用 npm 管理依赖工具",
+        "scope": "global",
+        "kind": "preference"
+      },
+      {
+        "content": "项目部署到 Cloudflare Workers",
+        "scope": "global",
+        "kind": "decision"
+      },
+      {
+        "content": "用户偏好不要使用 npm 管理依赖",
+        "scope": "global",
+        "kind": "preference"
+      }
+    ],
+    "expectUsableMatchContents": [
+      "用户偏好不要使用 npm 管理依赖",
+      "团队偏好使用 npm 管理依赖工具"
+    ]
   }
 ]

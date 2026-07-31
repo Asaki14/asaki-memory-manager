@@ -325,9 +325,9 @@ export function validateProcessCandidates(value: unknown): { ok: true; data: Arr
 
 export const validateCreateMemoryReviews = validateProcessCandidates;
 
-export function validateListMemoryReviews(value: unknown): { ok: true; data: { user_id: string; status: 'pending' | 'resolved' | 'all'; project_id?: string | null; session_id?: string | null; source?: string | null; limit: number; offset: number; include_suggestions: boolean } } | { ok: false; error: string } {
+export function validateListMemoryReviews(value: unknown): { ok: true; data: { user_id: string; status: 'pending' | 'resolved' | 'all'; project_id?: string | null; session_id?: string | null; source?: string | null; signal?: CandidateSignal | null; limit: number; offset: number; include_suggestions: boolean } } | { ok: false; error: string } {
   if (!value || typeof value !== 'object') return { ok: false, error: 'Body must be a JSON object.' };
-  const input = value as { user_id?: unknown; status?: unknown; project_id?: unknown; session_id?: unknown; source?: unknown; limit?: unknown; offset?: unknown; include_suggestions?: unknown };
+  const input = value as { user_id?: unknown; status?: unknown; project_id?: unknown; session_id?: unknown; source?: unknown; signal?: unknown; limit?: unknown; offset?: unknown; include_suggestions?: unknown };
   const userId = validateUserId(input.user_id);
   if (!userId) return { ok: false, error: 'user_id is required.' };
   const status = input.status ?? 'pending';
@@ -335,6 +335,11 @@ export function validateListMemoryReviews(value: unknown): { ok: true; data: { u
   if (input.project_id != null && (typeof input.project_id !== 'string' || input.project_id.trim().length === 0)) return { ok: false, error: 'project_id must be a non-empty string when provided.' };
   if (input.session_id != null && (typeof input.session_id !== 'string' || input.session_id.trim().length === 0)) return { ok: false, error: 'session_id must be a non-empty string when provided.' };
   if (input.source != null && (typeof input.source !== 'string' || input.source.trim().length === 0)) return { ok: false, error: 'source must be a non-empty string when provided.' };
+  // Unlike the candidate-write path (where an unknown enum is coerced, never rejected), this is a
+  // human/agent query: a typo'd filter should say so instead of silently returning everything.
+  if (input.signal != null && (typeof input.signal !== 'string' || !candidateSignals.has(input.signal as CandidateSignal))) {
+    return { ok: false, error: 'signal must be correction, preference, outcome, or none when provided.' };
+  }
   const limit = input.limit == null ? 50 : input.limit;
   if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 100) return { ok: false, error: 'limit must be an integer between 1 and 100.' };
   const offset = input.offset == null ? 0 : input.offset;
@@ -348,6 +353,7 @@ export function validateListMemoryReviews(value: unknown): { ok: true; data: { u
       project_id: typeof input.project_id === 'string' ? input.project_id.trim() : null,
       session_id: typeof input.session_id === 'string' ? input.session_id.trim() : null,
       source: typeof input.source === 'string' ? input.source.trim() : null,
+      signal: typeof input.signal === 'string' ? (input.signal as CandidateSignal) : null,
       limit,
       offset,
       include_suggestions: input.include_suggestions === true,
