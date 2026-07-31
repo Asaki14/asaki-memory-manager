@@ -7,18 +7,30 @@
 # no network call — so this eval runs entirely offline against
 # test/fixtures/sensitive-pattern-cases.json, no API key or Worker needed.
 #
-# KEEP IN SYNC: this pattern must match SENSITIVE_PATTERN in integrations/claude-code/stop-extract.sh
-# (the copy exercised here — the production code path for the Stop hook). It should also stay
-# equivalent to SENSITIVE_RE in integrations/claude-code/user-prompt.sh, SENSITIVE_RE_LIST in
-# integrations/pi/asaki-memory.ts and scripts/shadow-run-extraction.ts, and the server-side
-# canonical list in src/utils/sensitiveContent.ts; drift against those copies must still be caught
-# by comparing the patterns at review time.
+# Two copies are exercised per case and both must agree with the fixture:
+#   1. the canonical server gate, containsSensitiveContent() in src/utils/sensitiveContent.ts;
+#   2. the shell pattern below, which mirrors that canonical list for the Stop-hook shape.
+#
+# KEEP IN SYNC: the pattern below tracks the canonical server list. The client copies
+# (SENSITIVE_PATTERN in integrations/claude-code/stop-extract.sh, SENSITIVE_RE in
+# integrations/claude-code/user-prompt.sh, SENSITIVE_RE_LIST in integrations/pi/asaki-memory.ts and
+# scripts/shadow-run-extraction.ts) still carry the pre-fix keyword/`set -gx` rules and are
+# deliberately behind until the client batch of the correction-classifier plan lands; drift against
+# them must still be caught by comparing the patterns at review time.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIXTURES="$ROOT/test/fixtures/sensitive-pattern-cases.json"
 
-SENSITIVE_PATTERN='-----BEGIN [A-Z ]*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b|\bsk-[A-Za-z0-9-]{10,}\b|\b(ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{16,}\b|\bAKIA[0-9A-Z]{16}\b|\bxox[baprs]-[A-Za-z0-9-]{10,}\b|\bAIza[0-9A-Za-z_-]{20,}\b|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b|://[^/[:space:]:]+:[^/[:space:]@]{6,}@|\b(api[_-]?key|token|secret|password|passwd|authorization)\b\s*[:=]\s*"?[^"'"'"' ]{8,}|set\s+-gx\s+[[:alnum:]_]*(KEY|TOKEN|SECRET|PASSWORD)[[:alnum:]_]*\s+[^$[:space:]][^[:space:]]{8,}'
+SENSITIVE_PATTERN='-----BEGIN [A-Z ]*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b|\bsk-[A-Za-z0-9-]{10,}\b|\b(ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{16,}\b|\bAKIA[0-9A-Z]{16}\b|\bxox[baprs]-[A-Za-z0-9-]{10,}\b|\bAIza[0-9A-Za-z_-]{20,}\b|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b|://[^/[:space:]:]+:[^/[:space:]@]{6,}@|(^|[^[:alnum:]])[[:alnum:]_-]{0,64}(api[_-]?key|token|secret|password|passwd|authorization)([_-][[:alnum:]_-]{0,64})?\s*[:=]\s*"?[^"'"'"' ]{8,}|set(\s+--?[[:alpha:]][[:alnum:]-]*)+\s+[[:alnum:]_]*(KEY|TOKEN|SECRET|PASSWORD|PASSWD)[[:alnum:]_]*\s+[^$[:space:]][^[:space:]]{8,}'
+
+# Canonical gate verdicts, one per fixture case, in fixture order.
+CANONICAL_VERDICTS=$(cd "$ROOT" && node --experimental-strip-types --no-warnings -e '
+import { readFileSync } from "node:fs";
+const { containsSensitiveContent } = await import("./src/utils/sensitiveContent.ts");
+const cases = JSON.parse(readFileSync("test/fixtures/sensitive-pattern-cases.json", "utf8"));
+for (const item of cases) console.log(containsSensitiveContent(item.text) ? "true" : "false");
+')
 
 PASS=0
 FAIL=0
@@ -36,12 +48,13 @@ for i in $(seq 0 $((CASE_COUNT - 1))); do
   else
     MATCHED=false
   fi
+  CANONICAL=$(echo "$CANONICAL_VERDICTS" | sed -n "$((i + 1))p")
 
-  if [ "$MATCHED" = "$EXPECT_MATCH" ]; then
+  if [ "$MATCHED" = "$EXPECT_MATCH" ] && [ "$CANONICAL" = "$EXPECT_MATCH" ]; then
     PASS=$((PASS + 1))
   else
     FAIL=$((FAIL + 1))
-    FAILURES+=("$NAME: expected match=$EXPECT_MATCH, got match=$MATCHED")
+    FAILURES+=("$NAME: expected match=$EXPECT_MATCH, got shell=$MATCHED canonical=$CANONICAL")
   fi
 done
 

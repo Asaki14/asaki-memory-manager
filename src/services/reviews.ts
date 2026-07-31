@@ -99,6 +99,10 @@ export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCan
     const similar = await findSimilarPendingReview(env, candidate);
 
     if (similar) {
+      // The merged object keeps the EXISTING candidate's correction-evidence fields (signal,
+      // correction, supersedes_query, antecedent_source): newest-evidence-wins merging, and the
+      // rule that a correction never merges into a non-correction row, land with the
+      // correction-aware dedup work — not here.
       const existing = JSON.parse(similar.candidate_json) as ProcessMemoryCandidateInput;
       const merged: ProcessMemoryCandidateInput = {
         ...existing,
@@ -129,6 +133,10 @@ export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCan
       continue;
     }
 
+    // candidate_json is free-form TEXT, so the whole validated candidate — including the
+    // correction-evidence fields — is persisted verbatim with no schema change. The row's
+    // project_id stays the candidate's real project_id: `project_context` is a scope-neutral
+    // display/lookup hint and must never drive the column, scope validation, or visibility.
     const id = crypto.randomUUID();
     await env.DB.prepare(
       `INSERT INTO memory_reviews (

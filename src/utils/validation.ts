@@ -1,4 +1,5 @@
-import type { CreateMemoryInput, ExtractMemoriesInput, ListMemoriesInput, MemoryIdInput, MemoryKind, MemoryScope, MemoryStatus, SearchMemoriesInput, UpdateMemoryInput } from '../types';
+import type { CandidateAntecedentSource, CandidateCorrectionEvidence, CandidateEvidenceFields, CandidateRuleForm, CandidateSignal, CandidateSignalSubtype, CreateMemoryInput, ExtractMemoriesInput, ListMemoriesInput, MemoryIdInput, MemoryKind, MemoryScope, MemoryStatus, SearchMemoriesInput, UpdateMemoryInput } from '../types';
+import { confidenceForAntecedent, importanceForSignal } from '../services/candidateDecision';
 import { containsSensitiveContent } from './sensitiveContent';
 
 const SENSITIVE_CONTENT_ERROR = 'content looks like it contains a secret or credential; refusing to store it.';
@@ -8,6 +9,94 @@ const kinds = new Set<MemoryKind>(['preference', 'rule', 'fact', 'decision', 'ta
 const statuses = new Set<MemoryStatus>(['active', 'archived', 'deleted']);
 const reviewStatuses = new Set(['pending', 'resolved']);
 const reviewActions = new Set(['add', 'merge', 'update', 'delete', 'ignore']);
+
+const candidateSignals = new Set<CandidateSignal>(['correction', 'preference', 'outcome', 'none']);
+const candidateSignalSubtypes = new Set<CandidateSignalSubtype | ''>(['explicit_negation', 'override_of_action', 'terse_redirect', 'repeat_complaint', 'approval_after_change', 'futility_verdict']);
+const candidateRuleForms = new Set<CandidateRuleForm>(['prohibition', 'preference', 'procedure', 'retract']);
+const candidateAntecedentSources = new Set<CandidateAntecedentSource>(['prose', 'trace', 'prior_tail', 'candidate', 'none']);
+
+// Evidence strings are truncated, never rejected for length: a deterministic 400 on this path
+// costs the classifier a consumed transcript delta, which is a worse outcome than a clipped quote.
+// A secret is the one exception — refusing to store that is correct (handled below).
+const EVIDENCE_MAX_CHARS = 300;
+const SUPERSEDES_REVIEW_ID_MAX_CHARS = 64;
+const PROJECT_CONTEXT_MAX_CHARS = 128;
+
+function truncate(value: string, max: number): string {
+  return value.length > max ? value.slice(0, max) : value;
+}
+
+function coerceEvidenceString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+// Trimmed, capped, or null — never a 400.
+function coerceOptionalId(value: unknown, max: number): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? truncate(trimmed, max) : null;
+}
+
+// Enum coercion is deliberately total: an unrecognised value degrades to the inert member of its
+// enum rather than rejecting the candidate. An absent field stays absent, so "no signal" and
+// "signal: none" are both representable and both mean "run no server-side derivation".
+function coerceEnum<T extends string>(value: unknown, allowed: Set<T>, fallback: T): T {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  return allowed.has(raw as T) ? (raw as T) : fallback;
+}
+
+// Threads the correction-classifier evidence fields through instead of letting the whitelist below
+// drop them. The sensitive gate applies to all four evidence strings (agent_did, captain_verdict,
+// redirect_target AND supersedes_query) and runs on the ORIGINAL string, before truncation, so a
+// cap can never bisect a credential into a non-matching prefix.
+function validateCandidateEvidence(input: CreateMemoryInput): { ok: true; data: CandidateEvidenceFields } | { ok: false; error: string } {
+  const data: CandidateEvidenceFields = {};
+
+  if (input.signal !== undefined && input.signal !== null) {
+    const raw = typeof input.signal === 'string' ? input.signal.trim() : '';
+    if (raw.length > 0) data.signal = coerceEnum<CandidateSignal>(raw, candidateSignals, 'none');
+  }
+  if (input.signal_subtype !== undefined && input.signal_subtype !== null) {
+    data.signal_subtype = coerceEnum<CandidateSignalSubtype | ''>(input.signal_subtype, candidateSignalSubtypes, '');
+  }
+  if (input.rule_form !== undefined && input.rule_form !== null) {
+    data.rule_form = coerceEnum<CandidateRuleForm>(input.rule_form, candidateRuleForms, 'preference');
+  }
+  if (input.antecedent_source !== undefined && input.antecedent_source !== null) {
+    data.antecedent_source = coerceEnum<CandidateAntecedentSource>(input.antecedent_source, candidateAntecedentSources, 'none');
+  }
+
+  if (input.correction !== undefined && input.correction !== null) {
+    const raw = (typeof input.correction === 'object' ? input.correction : {}) as Partial<CandidateCorrectionEvidence>;
+    const parts: CandidateCorrectionEvidence = {
+      agent_did: coerceEvidenceString(raw.agent_did),
+      captain_verdict: coerceEvidenceString(raw.captain_verdict),
+      redirect_target: coerceEvidenceString(raw.redirect_target),
+    };
+    for (const part of Object.values(parts)) {
+      if (containsSensitiveContent(part)) return { ok: false, error: SENSITIVE_CONTENT_ERROR };
+    }
+    data.correction = {
+      agent_did: truncate(parts.agent_did, EVIDENCE_MAX_CHARS),
+      captain_verdict: truncate(parts.captain_verdict, EVIDENCE_MAX_CHARS),
+      redirect_target: truncate(parts.redirect_target, EVIDENCE_MAX_CHARS),
+    };
+  }
+
+  if (input.supersedes_query !== undefined) {
+    const raw = coerceEvidenceString(input.supersedes_query);
+    if (containsSensitiveContent(raw)) return { ok: false, error: SENSITIVE_CONTENT_ERROR };
+    data.supersedes_query = raw.trim().length > 0 ? truncate(raw, EVIDENCE_MAX_CHARS) : null;
+  }
+  if (input.supersedes_pending_review_id !== undefined) {
+    data.supersedes_pending_review_id = coerceOptionalId(input.supersedes_pending_review_id, SUPERSEDES_REVIEW_ID_MAX_CHARS);
+  }
+  if (input.project_context !== undefined) {
+    data.project_context = coerceOptionalId(input.project_context, PROJECT_CONTEXT_MAX_CHARS);
+  }
+
+  return { ok: true, data };
+}
 
 function validateUserId(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
@@ -35,11 +124,23 @@ export function validateCreateMemory(value: unknown): { ok: true; data: Required
   const kind = input.kind ?? 'fact';
   if (!kinds.has(kind)) return { ok: false, error: 'kind is invalid.' };
 
-  const importance = input.importance ?? 0.5;
-  if (typeof importance !== 'number' || importance < 0 || importance > 1) return { ok: false, error: 'importance must be between 0 and 1.' };
+  const evidence = validateCandidateEvidence(input);
+  if (!evidence.ok) return evidence;
 
-  const confidence = input.confidence ?? 1;
-  if (typeof confidence !== 'number' || confidence < 0 || confidence > 1) return { ok: false, error: 'confidence must be between 0 and 1.' };
+  // A supplied importance/confidence always wins, so the supervised asaki_memory_add path and every
+  // existing caller are untouched. Only a candidate carrying a recognised signal / antecedent_source
+  // gets a derived number; everything else falls through to today's defaults.
+  const suppliedImportance = input.importance ?? null;
+  if (suppliedImportance !== null && (typeof suppliedImportance !== 'number' || suppliedImportance < 0 || suppliedImportance > 1)) {
+    return { ok: false, error: 'importance must be between 0 and 1.' };
+  }
+  const importance = suppliedImportance ?? importanceForSignal(evidence.data.signal, evidence.data.signal_subtype, kind) ?? 0.5;
+
+  const suppliedConfidence = input.confidence ?? null;
+  if (suppliedConfidence !== null && (typeof suppliedConfidence !== 'number' || suppliedConfidence < 0 || suppliedConfidence > 1)) {
+    return { ok: false, error: 'confidence must be between 0 and 1.' };
+  }
+  const confidence = suppliedConfidence ?? confidenceForAntecedent(evidence.data.antecedent_source) ?? 1;
 
   return {
     ok: true,
@@ -53,6 +154,7 @@ export function validateCreateMemory(value: unknown): { ok: true; data: Required
       importance,
       confidence,
       source: input.source ?? null,
+      ...evidence.data,
     },
   };
 }
