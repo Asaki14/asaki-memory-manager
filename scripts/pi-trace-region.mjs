@@ -1,4 +1,5 @@
-// Loads the Pi extension's trace-builder region as a real, executable module.
+// Loads pure regions of the Pi extension as real, executable modules (trace builder, review
+// formatter).
 //
 // integrations/pi/asaki-memory.ts must stay a SINGLE file (scripts/build-pi-package.ts publishes
 // exactly that one file, so it can never import a sibling), and it imports Pi host modules that
@@ -32,24 +33,21 @@ const EXPORTED = [
   'buildExtractionText',
 ];
 
-export function extractPiTraceRegions(source = readFileSync(PI_SOURCE, 'utf8')) {
-  const regions = [...source.matchAll(/\/\/ #region asaki-trace-builder\n([\s\S]*?)\n\/\/ #endregion/g)].map((m) => m[1]);
-  if (regions.length === 0) throw new Error('no `// #region asaki-trace-builder` block found in integrations/pi/asaki-memory.ts');
+export function extractPiRegions(name, source = readFileSync(PI_SOURCE, 'utf8')) {
+  const marker = new RegExp(`// #region ${name}\\n([\\s\\S]*?)\\n// #endregion`, 'g');
+  const regions = [...source.matchAll(marker)].map((m) => m[1]);
+  if (regions.length === 0) throw new Error(`no \`// #region ${name}\` block found in integrations/pi/asaki-memory.ts`);
   return regions;
 }
 
-// Returns { module, dispose } — call dispose() to remove the temp dir.
-export async function loadPiTraceBuilder() {
-  const regions = extractPiTraceRegions();
+export function extractPiTraceRegions(source = readFileSync(PI_SOURCE, 'utf8')) {
+  return extractPiRegions('asaki-trace-builder', source);
+}
+
+async function loadRegionModule(regions, preamble, exported) {
   const dir = mkdtempSync(join(tmpdir(), 'asaki-pi-region-'));
-  const file = join(dir, 'pi-trace-region.ts');
-  const body = [
-    'import { homedir } from "node:os";',
-    'import { isAbsolute, relative, resolve, sep } from "node:path";',
-    ...regions,
-    `export { ${EXPORTED.join(', ')} };`,
-  ].join('\n\n');
-  writeFileSync(file, body);
+  const file = join(dir, 'pi-region.ts');
+  writeFileSync(file, [...preamble, ...regions, `export { ${exported.join(', ')} };`].join('\n\n'));
   try {
     const module = await import(pathToFileURL(file).href);
     return { module, dispose: () => rmSync(dir, { recursive: true, force: true }) };
@@ -57,4 +55,19 @@ export async function loadPiTraceBuilder() {
     rmSync(dir, { recursive: true, force: true });
     throw error;
   }
+}
+
+// Returns { module, dispose } for the review-formatter region (plan E9). The region is
+// dependency-free, so it needs no preamble.
+export async function loadPiReviewFormatter() {
+  return loadRegionModule(extractPiRegions('asaki-review-format'), [], ['formatReviewLine', 'correctionBlockLines']);
+}
+
+// Returns { module, dispose } — call dispose() to remove the temp dir.
+export async function loadPiTraceBuilder() {
+  return loadRegionModule(
+    extractPiTraceRegions(),
+    ['import { homedir } from "node:os";', 'import { isAbsolute, relative, resolve, sep } from "node:path";'],
+    EXPORTED,
+  );
 }

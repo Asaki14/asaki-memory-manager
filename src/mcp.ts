@@ -62,7 +62,58 @@ function formatScoreDetails(details: unknown): string {
   return parts.length ? ` [${parts.join(' ')}]` : '';
 }
 
-function formatReviewLine(item: Record<string, unknown>, index?: number): string {
+// How much of a supersession target's content is quoted on its suggestion line.
+const SUPERSEDE_CONTENT_CHARS = 160;
+
+// Correction-aware review presentation. A `signal: "correction"` candidate is rendered as a block
+// instead of one line: the rule he is accepting or rejecting first, then the moment that produced it
+// (what the agent did → the captain's verdict) plus WHERE the antecedent came from, so a
+// trace-inferred rule visibly reads weaker than a prose-inferred one, then the supersession
+// suggestion carrying the target's CURRENT scope/kind/confidence — resolving a review never
+// rescopes the target automatically, and a 0.95 → 0.70 confidence overwrite has to be visible at
+// decision time. Accept the suggestion with `asaki_memory_review_resolve {action:"update",
+// memory_id:<the id on that line>}`; `suggested_action: "delete"` means the rule form was `retract`.
+// Non-correction rows keep today's single line, byte-for-byte.
+//
+// KEEP the emitted text byte-identical to the copy in integrations/pi/asaki-memory.ts (marked
+// `// #region asaki-review-format`) — `npm run eval:review-format` fails on any drift, and it also
+// pins the deliberate asymmetry on the FALLBACK line, where only the Pi copy prints
+// importance/confidence. integrations/mcp/asaki-memory.ts (the stdio server for Codex) deliberately
+// does NOT carry this block: its `asaki_memory_review_list` never sends `include_suggestions`, so it
+// has no supersession data to render and keeps the plain line for every row.
+function correctionBlockLines(item: Record<string, unknown>, candidate: Record<string, unknown>): string[] | null {
+  if (candidate.signal !== 'correction') return null;
+
+  const text = (value: unknown): string => (typeof value === 'string' && value.trim() ? value.trim() : '(unrecorded)');
+  const num = (value: unknown): string => (typeof value === 'number' ? value.toFixed(2) : '?');
+  const correction = candidate.correction && typeof candidate.correction === 'object' ? (candidate.correction as Record<string, unknown>) : {};
+  const antecedent = typeof candidate.antecedent_source === 'string' && candidate.antecedent_source ? candidate.antecedent_source : 'none';
+
+  const lines = [`   ⤷ agent: ${text(correction.agent_did)}   →   captain: ${text(correction.captain_verdict)}   (antecedent: ${antecedent})`];
+
+  const supersedes = item.supersedes_candidates;
+  if (supersedes === null) {
+    lines.push('   ⤷ supersedes: not computed (suggestion cap reached on this page; re-list with a narrower filter)');
+  } else if (Array.isArray(supersedes)) {
+    for (const raw of supersedes) {
+      const s = raw as Record<string, unknown>;
+      const content = typeof s.content === 'string' ? s.content : '';
+      const shown = content.length > SUPERSEDE_CONTENT_CHARS ? `${content.slice(0, SUPERSEDE_CONTENT_CHARS)}…` : content;
+      lines.push(
+        `   ⤷ supersedes: ${s.memory_id} [scope=${s.target_scope} kind=${s.target_kind} confidence=${num(s.target_confidence)}] "${shown}"  (score=${num(s.score)} suggest: ${s.suggested_action})`
+      );
+    }
+  }
+
+  // Written server-side when this correction refused to merge into the pending row it contradicts;
+  // that row's text is not carried on this response, so the id is what there is to print.
+  if (typeof candidate.supersedes_pending_review_id === 'string' && candidate.supersedes_pending_review_id) {
+    lines.push(`   ⤷ contradicts pending review ${candidate.supersedes_pending_review_id}`);
+  }
+  return lines;
+}
+
+export function formatReviewLine(item: Record<string, unknown>, index?: number): string {
   const prefix = index == null ? '' : `${index + 1}. `;
   const id = item.id ? ` id=${item.id}` : '';
   const status = item.status ? ` status=${item.status}` : '';
@@ -79,7 +130,23 @@ function formatReviewLine(item: Record<string, unknown>, index?: number): string
   const dup = potentialDuplicate
     ? ` potential_duplicate=[memory_id=${potentialDuplicate.memory_id} suggested=${potentialDuplicate.action} reason="${potentialDuplicate.reason}"]`
     : '';
-  return `${prefix}${typeof content === 'string' ? content : JSON.stringify(candidate || item)}${id}${status}${action}${memoryId}${scope}${kind}${source}${createdAt}${updatedAt}${dup}`;
+  const shownContent = typeof content === 'string' ? content : JSON.stringify(candidate || item);
+
+  const correctionLines = correctionBlockLines(item, candidate);
+  if (correctionLines) {
+    const subtype = typeof candidate.signal_subtype === 'string' && candidate.signal_subtype ? candidate.signal_subtype : 'unspecified';
+    const ruleForm = typeof candidate.rule_form === 'string' && candidate.rule_form ? candidate.rule_form : 'unspecified';
+    const importance = typeof candidate.importance === 'number' ? ` importance=${candidate.importance.toFixed(2)}` : '';
+    const confidence = typeof candidate.confidence === 'number' ? ` confidence=${candidate.confidence.toFixed(2)}` : '';
+    const meta = `${id}${status}${action}${memoryId}${scope}${kind}${importance}${confidence}`.trim();
+    const provenance = `${source}${createdAt}${updatedAt}${dup}`.trim();
+    return [`${prefix}[correction · ${subtype} · ${ruleForm}] ${shownContent}`, ...correctionLines]
+      .concat(meta ? [`   ${meta}`] : [])
+      .concat(provenance ? [`   ${provenance}`] : [])
+      .join('\n');
+  }
+
+  return `${prefix}${shownContent}${id}${status}${action}${memoryId}${scope}${kind}${source}${createdAt}${updatedAt}${dup}`;
 }
 
 type BudgetedJoin = { text: string; shown: number; total: number };
@@ -330,9 +397,10 @@ const TOOLS: ToolDef[] = [
         project_id: { type: 'string' },
         session_id: { type: 'string' },
         source: { type: 'string' },
+        signal: { type: 'string', enum: ['correction', 'preference', 'outcome', 'none'], description: 'Filter by candidate signal. Corrections sort first regardless; use signal=correction to see only them during an audit.' },
         limit: { type: 'integer', minimum: 1, maximum: 100 },
         offset: { type: 'integer', minimum: 0 },
-        include_suggestions: { type: 'boolean', description: 'Attach a potential_duplicate hint per pending review. Default off.' },
+        include_suggestions: { type: 'boolean', description: 'Attach a potential_duplicate hint per pending review, plus supersedes_candidates on correction rows. Default off.' },
       },
     },
     toRequest(args, userId) {
@@ -341,6 +409,7 @@ const TOOLS: ToolDef[] = [
       if (args.session_id) body.session_id = args.session_id;
       if (args.status) body.status = args.status;
       if (args.source) body.source = args.source;
+      if (args.signal) body.signal = args.signal;
       if (args.limit != null) body.limit = args.limit;
       if (args.offset != null) body.offset = args.offset;
       if (args.include_suggestions) body.include_suggestions = true;

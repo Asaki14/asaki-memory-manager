@@ -1,6 +1,6 @@
 {
   "name": "asaki-memory-manager",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --local",
@@ -19,6 +19,7 @@
     "eval:trace-sensitive": "bash scripts/eval-trace-sensitive.sh",
     "eval:trace-builder": "node scripts/eval-trace-builder.mjs",
     "eval:throttle-state": "bash scripts/eval-throttle-state.sh",
+    "eval:review-format": "node --experimental-strip-types scripts/eval-review-format.ts",
     "eval:standing-rules": "node --experimental-strip-types scripts/eval-standing-rules.ts",
     "eval:review-dedup": "bash scripts/eval-review-dedup.sh",
     "shadow-run:extraction": "node --experimental-strip-types scripts/shadow-run-extraction.ts",
