@@ -43,6 +43,7 @@ The Claude Code plugin is consumed straight from this repo; the Pi extension is 
 - `src/utils/validation.ts`: request validation. `validateCreateMemory` also threads the correction-classifier evidence fields (`signal`, `signal_subtype`, `rule_form`, `antecedent_source`, `correction`, `supersedes_query`, `supersedes_pending_review_id`, `project_context`) — enum coercion is total (unknown → the inert member, never a 400), evidence strings are truncated rather than rejected, and the only 400 they can cause is the sensitive gate.
 - `src/utils/errors.ts`: `UserFacingError` — the only service-thrown error class whose message route handlers forward to API clients; any other exception falls through to the sanitized generic 500.
 - `src/utils/sensitiveContent.ts`: server-side secret/credential detection gate, applied in `validateCreateMemory`/`validateUpdateMemory`/`validateExtractMemories` before any Workers AI call or D1/Vectorize write. Client-side copies in `integrations/pi/asaki-memory.ts`, `integrations/claude-code/stop-extract.sh`, and `scripts/shadow-run-extraction.ts` are a separate, known-stale pattern set — not kept in sync with this file. `npm run eval:sensitive-pattern` exercises this canonical gate directly plus the mirrored shell pattern inside `scripts/eval-sensitive-pattern.sh`; the client copies still carry the pre-fix keyword/`set -gx` rules and are updated in the client batch of the correction-classifier work.
+- `src/services/standingRules.ts`: **canonical** selection/rendering for the session-start standing-rule block (ACTIVE `rule`/`preference` memories injected as directives). The Worker does not serve it; the clients build it from the `/v1/memories/list` response they already fetch. The region between the `standing-rules:begin`/`standing-rules:end` markers is copied VERBATIM into `integrations/pi/asaki-memory.ts` and re-implemented in `integrations/claude-code/standing-rules.jq` — run `npm run eval:standing-rules` after touching any of the three; it fails on byte-level drift.
 - `src/services/extraction.ts`: deprecated server-extraction compatibility path; not an active/default memory source.
 - `integrations/pi/asaki-memory.ts`: optional Pi extension.
 - `commands/memory.md`: Claude Code plugin `/memory` slash command (audit workflow; mirrors the Pi extension's `registerCommand("memory", ...)`).
@@ -64,6 +65,7 @@ npm run eval:candidate-fields
 npm run eval:sensitive-pattern
 npm run eval:extraction
 npm run eval:classifier
+npm run eval:standing-rules
 npm run shadow-run:extraction -- <transcript.jsonl> --user <id> --project <id>
 npm run backfill:index -- --limit 50
 npm run prune:stale -- --days 90
@@ -97,6 +99,7 @@ npm run deploy
 - If Vectorize upsert fails, keep the D1 write and mark `index_status=pending` or `failed`.
 - Search should keep hybrid Vectorize + D1 lexical fallback behavior.
 - Active writes use two paths: the conversation agent submits pre-distilled memories through `asaki_memory_add`, while the default background classifier (`pi:agent-end-classifier` or `claude-code:stop-classifier`) pre-distills at most one candidate and sends it to `POST /v1/memories/candidates`. Classifier candidates always enter the review queue and never auto-add/merge/update/delete. Production history is predominantly classifier-sourced, so audit misses normally belong to the classifier eval/prompt surface. Server extraction (`POST /v1/memories/extract`, `asaki_memory_extract`, `*:auto-extract`) is deprecated and retained only for backward compatibility/manual investigation; do not enable it or send full transcripts through it.
+- Session start injects standing rules, not a memory dump: ACTIVE `rule`/`preference` memories go into the opening context framed as directives to obey (global always, project on match, session never), capped and deterministically ordered by `src/services/standingRules.ts`. Everything else stays retrieval-only. Run `npm run eval:standing-rules` after touching the canonical module, the Pi copy, or `standing-rules.jq`.
 - Candidate processing should run deterministic duplicate checks before LLM decisions.
 - Run `npm run eval:candidates` after changing candidate dedupe thresholds or prompts.
 - `npm run eval:extraction` covers the deprecated compatibility path. Run it only when that path changes or an audited memory explicitly has a legacy extraction source.

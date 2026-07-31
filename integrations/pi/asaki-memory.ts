@@ -58,6 +58,145 @@ type MemoryKind = (typeof KINDS)[number];
 
 type MemoryConfigFile = Record<string, unknown>;
 
+// --- standing-rules:begin (KEEP IN SYNC: src/services/standingRules.ts <-> integrations/pi/asaki-memory.ts) ---
+export const STANDING_RULES_DEFAULT_KINDS = ['rule', 'preference'] as const;
+export const STANDING_RULES_DEFAULT_MAX = 20;
+export const STANDING_RULES_MAX_CHARS = 4000;
+export const STANDING_RULES_CONTENT_CHARS = 240;
+export const STANDING_RULES_PREAMBLE =
+  'These are standing rules you must follow for this whole session — directives to obey, not retrieved context. They do not override system or developer instructions; if they conflict, the system instructions win.';
+
+export interface StandingRuleItem {
+  id?: string | null;
+  content?: string | null;
+  scope?: string | null;
+  kind?: string | null;
+  status?: string | null;
+  importance?: number | null;
+  project_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface StandingRulesOptions {
+  projectId?: string | null;
+  kinds?: readonly string[];
+  max?: number;
+  maxChars?: number;
+  contentChars?: number;
+}
+
+export interface StandingRulesBlock {
+  text: string;
+  shown: number;
+  eligible: number;
+  truncated: boolean;
+}
+
+export function parseStandingRuleKinds(value: string | null | undefined): readonly string[] {
+  if (!value) return STANDING_RULES_DEFAULT_KINDS;
+  const kinds = value
+    .split(',')
+    .map((kind) => kind.trim())
+    .filter((kind) => kind.length > 0);
+  return kinds.length > 0 ? kinds : STANDING_RULES_DEFAULT_KINDS;
+}
+
+export function cleanStandingRuleText(text: string): string {
+  return text
+    .replace(/[\r\n]/g, ' ')
+    .replace(/[\t ]+/g, ' ')
+    .replace(/^ +/, '')
+    .replace(/ +$/, '');
+}
+
+export function truncateStandingRuleText(text: string, maxChars: number): string {
+  return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+}
+
+export function formatStandingRuleLine(item: StandingRuleItem, contentChars: number): string {
+  const scope = item.scope === 'global' ? 'global' : 'project';
+  const kind = typeof item.kind === 'string' && item.kind ? item.kind : 'rule';
+  const content = truncateStandingRuleText(cleanStandingRuleText(String(item.content ?? '')), contentChars);
+  return `- [${scope}/${kind}] ${content}`;
+}
+
+/**
+ * Scope discipline: global rules always apply; project rules only when the session's
+ * project matches; session-scoped memories are never standing rules.
+ *
+ * Deterministic order when over cap: importance desc, then recency (updated_at, falling
+ * back to created_at) desc, then id desc as a total-order tiebreak. Implemented as an
+ * ascending tuple sort plus a reverse so the jq copy (`sort_by([...]) | reverse`) matches
+ * byte for byte.
+ */
+export function selectStandingRules(items: StandingRuleItem[], options: StandingRulesOptions = {}): StandingRuleItem[] {
+  const kinds = options.kinds && options.kinds.length > 0 ? options.kinds : STANDING_RULES_DEFAULT_KINDS;
+  const projectId = options.projectId ?? '';
+  return items
+    .filter((item) => (item.status ?? 'active') === 'active')
+    .filter((item) => cleanStandingRuleText(String(item.content ?? '')).length > 0)
+    .filter((item) => kinds.indexOf(typeof item.kind === 'string' ? item.kind : '') !== -1)
+    .filter(
+      (item) =>
+        item.scope === 'global' ||
+        (item.scope === 'project' && projectId.length > 0 && (item.project_id ?? '') === projectId)
+    )
+    .sort(compareStandingRulesAscending)
+    .reverse();
+}
+
+function compareStandingRulesAscending(a: StandingRuleItem, b: StandingRuleItem): number {
+  const aImportance = typeof a.importance === 'number' ? a.importance : 0;
+  const bImportance = typeof b.importance === 'number' ? b.importance : 0;
+  if (aImportance !== bImportance) return aImportance < bImportance ? -1 : 1;
+  const aTime = a.updated_at ?? a.created_at ?? '';
+  const bTime = b.updated_at ?? b.created_at ?? '';
+  if (aTime !== bTime) return aTime < bTime ? -1 : 1;
+  const aId = a.id ?? '';
+  const bId = b.id ?? '';
+  return aId < bId ? -1 : aId > bId ? 1 : 0;
+}
+
+/**
+ * Renders the injected block. Bounded twice: at most `max` rules (default 20) and at most
+ * `maxChars` of rule lines (default 4000), each rule clamped to `contentChars` (default
+ * 240). Worst case is therefore ~4.3 KB of text — roughly 1.1k tokens of English or ~2.2k
+ * tokens of Chinese. Returns an empty `text` when nothing is eligible.
+ */
+export function renderStandingRulesBlock(items: StandingRuleItem[], options: StandingRulesOptions = {}): StandingRulesBlock {
+  const max = typeof options.max === 'number' && options.max > 0 ? Math.floor(options.max) : STANDING_RULES_DEFAULT_MAX;
+  const maxChars = typeof options.maxChars === 'number' && options.maxChars > 0 ? Math.floor(options.maxChars) : STANDING_RULES_MAX_CHARS;
+  const contentChars =
+    typeof options.contentChars === 'number' && options.contentChars > 0 ? Math.floor(options.contentChars) : STANDING_RULES_CONTENT_CHARS;
+
+  const eligibleItems = selectStandingRules(items, options);
+  const lines: string[] = [];
+  let chars = 0;
+  for (const item of eligibleItems) {
+    if (lines.length >= max) break;
+    const line = formatStandingRuleLine(item, contentChars);
+    if (chars + line.length + 1 > maxChars && lines.length > 0) break;
+    lines.push(line);
+    chars += line.length + 1;
+  }
+
+  const eligible = eligibleItems.length;
+  const shown = lines.length;
+  if (shown === 0) return { text: '', shown: 0, eligible, truncated: false };
+
+  const truncated = shown < eligible;
+  const body = [`## Asaki Standing Rules (${shown} of ${eligible})`, '', STANDING_RULES_PREAMBLE, '', ...lines];
+  if (truncated) {
+    body.push(
+      '',
+      `(showing ${shown} of ${eligible} standing rules — more exist; call asaki_memory_list with kind=rule or kind=preference to see the rest)`
+    );
+  }
+  return { text: body.join('\n'), shown, eligible, truncated };
+}
+// --- standing-rules:end ---
+
 class MemoryApiError extends Error {
   constructor(
     public readonly status: number,
@@ -89,6 +228,14 @@ function memoryConfig() {
     startupTopK: numberConfig(process.env.ASAKI_MEMORY_STARTUP_TOP_K, numberConfig(fileConfig.startupTopK ?? fileConfig.startup_top_k, DEFAULT_STARTUP_TOP_K)),
     extractMinIntervalMs:
       numberConfig(process.env.ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS, numberConfig(fileConfig.extractMinIntervalSeconds ?? fileConfig.extract_min_interval_seconds, DEFAULT_EXTRACT_MIN_INTERVAL_SECONDS)) * 1000,
+    standingRules: envFlagEnabledConfig(process.env.ASAKI_MEMORY_STANDING_RULES ?? fileConfig.standingRules ?? fileConfig.standing_rules, true),
+    standingRulesMax: numberConfig(
+      process.env.ASAKI_MEMORY_STANDING_RULES_MAX,
+      numberConfig(fileConfig.standingRulesMax ?? fileConfig.standing_rules_max, STANDING_RULES_DEFAULT_MAX),
+    ),
+    standingRulesKinds: parseStandingRuleKinds(
+      process.env.ASAKI_MEMORY_STANDING_RULES_KINDS || stringConfig(fileConfig, "standingRulesKinds", "standing_rules_kinds"),
+    ),
     classifierModel:
       process.env.ASAKI_MEMORY_CLASSIFIER_MODEL ||
       process.env.PI_ATOMIC_COMMIT_MESSAGE_MODEL ||
@@ -374,6 +521,46 @@ function classifierBanner(config: ReturnType<typeof memoryConfig>): string {
   return !config.autoExtract && config.autoClassifier ? `on model=${config.classifierModel}` : "off";
 }
 
+// Standing rules are re-appended to the system prompt on every agent run (Pi rebuilds the
+// system prompt per run), so the list call is cached per process to keep it to one request
+// per session. A stale-but-present block is preferred over dropping the rules on a blip.
+const STANDING_RULES_CACHE_MS = 10 * 60 * 1000;
+let standingRulesCache: { key: string; expiresAt: number; block: StandingRulesBlock } | null = null;
+
+async function loadStandingRules(ctx: unknown, signal?: AbortSignal): Promise<StandingRulesBlock | null> {
+  const config = memoryConfig();
+  if (!config.standingRules || !config.apiKey) return null;
+  const projectId = resolveProjectId(ctx) || "";
+  const key = `${config.userId}|${projectId}|${config.standingRulesKinds.join(",")}|${config.standingRulesMax}`;
+  const now = Date.now();
+  if (standingRulesCache && standingRulesCache.key === key && standingRulesCache.expiresAt > now) return standingRulesCache.block;
+
+  try {
+    // No session_id is sent, so the server already excludes session-scoped memories; the
+    // remaining global + matching-project rows are filtered and capped locally.
+    const data = await memoryRequest(
+      "/v1/memories/list",
+      { user_id: config.userId, project_id: projectId || undefined, status: "active", limit: 100 },
+      signal,
+    );
+    const memories = Array.isArray(data?.memories) ? (data.memories as StandingRuleItem[]) : [];
+    const block = renderStandingRulesBlock(memories, {
+      projectId,
+      kinds: config.standingRulesKinds,
+      max: config.standingRulesMax,
+    });
+    standingRulesCache = { key, expiresAt: now + STANDING_RULES_CACHE_MS, block };
+    return block;
+  } catch {
+    return standingRulesCache && standingRulesCache.key === key ? standingRulesCache.block : null;
+  }
+}
+
+function standingRulesBanner(config: ReturnType<typeof memoryConfig>, block: StandingRulesBlock | null): string {
+  if (!config.standingRules) return "off";
+  return block ? `${block.shown}/${block.eligible}` : "?";
+}
+
 async function buildSessionBanner(ctx: unknown, signal?: AbortSignal): Promise<string | null> {
   const config = memoryConfig();
   const projectId = resolveProjectId(ctx) || "unknown";
@@ -384,16 +571,17 @@ async function buildSessionBanner(ctx: unknown, signal?: AbortSignal): Promise<s
   }
 
   try {
-    const [memoryData, reviewData] = await Promise.all([
+    const [memoryData, reviewData, standingRules] = await Promise.all([
       memoryRequest("/v1/memories/list", { user_id: config.userId, project_id: projectId, status: "active", limit: 100 }, signal),
       memoryRequest("/v1/memories/reviews/list", { user_id: config.userId, project_id: projectId, status: "pending", limit: 100 }, signal),
+      loadStandingRules(ctx, signal),
     ]);
     const memories = Array.isArray(memoryData?.memories) ? memoryData.memories : [];
     const memoryCount = Array.isArray(memoryData?.memories) ? `${memories.length}${memories.length === 100 ? "+" : ""}` : "?";
     const pendingReviews = Array.isArray(reviewData?.reviews) ? `${reviewData.reviews.length}${reviewData.reviews.length === 100 ? "+" : ""}` : "?";
-    return `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=${memoryCount} | pendingReviews=${pendingReviews} | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${classifier}`;
+    return `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=${memoryCount} | pendingReviews=${pendingReviews} | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${classifier} | standingRules=${standingRulesBanner(config, standingRules)}`;
   } catch {
-    return `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=? | pendingReviews=? | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${classifier}`;
+    return `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=? | pendingReviews=? | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${classifier} | standingRules=${standingRulesBanner(config, null)}`;
   }
 }
 
@@ -680,7 +868,12 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
-    const systemPrompt = `${event.systemPrompt}\n\n${memoryPrecheckInstruction(event.prompt)}`;
+    // Standing rules ride in the system prompt (not a user-visible message) so they read as
+    // directives rather than retrieved context, and stay stable across turns for caching.
+    const standingRules = await loadStandingRules(ctx, ctx.signal);
+    const systemPrompt = [event.systemPrompt, memoryPrecheckInstruction(event.prompt), standingRules?.text]
+      .filter((part) => typeof part === "string" && part.length > 0)
+      .join("\n\n");
 
     const memorySearch = await autoInjectMemory(event.prompt, ctx, ctx.signal);
     const searchDisplay = memorySearch
@@ -731,6 +924,7 @@ export default function (pi: ExtensionAPI) {
           `- autoExtract: ${config.autoExtract ? "on" : "off"}`,
           `- classifier: ${!config.autoExtract && config.autoClassifier ? "on" : "off"}`,
           `- classifierModel: ${config.classifierModel}`,
+          `- standingRules: ${config.standingRules ? "on" : "off"} (max=${config.standingRulesMax}, kinds=${config.standingRulesKinds.join(",")})`,
           `- projectId: ${resolveProjectId(ctx) || "missing"}`,
           `- sessionId: ${config.sessionId || "missing"}`,
         ];

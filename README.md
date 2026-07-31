@@ -114,6 +114,33 @@ Set your credentials once in `~/.claude/settings.json`:
 
 The plugin injects a real project-history digest at session start, a per-turn memory precheck so the agent decides for itself whether to search, a visible `🧠 Asaki memory …` line whenever a memory tool runs, and a `/memory` slash command (`/memory status` checks connectivity; any other args run a full audit). A background Stop hook also runs a local classifier: with cloud auto-extract off (the default), it judges each conversation delta against a 6-criteria checklist and writes qualifying candidates itself over plain HTTP — no forced extra turn. Full details: [`integrations/claude-code/README.md`](integrations/claude-code/README.md).
 
+### Standing rules (both clients)
+
+Some memories are not context to retrieve — they are directives to obey. Every session therefore opens with a **standing-rule block** built from ACTIVE memories of kind `rule` and `preference`, so the agent never has to search for its own operating rules:
+
+```
+## Asaki Standing Rules (17 of 17)
+
+These are standing rules you must follow for this whole session — directives to obey,
+not retrieved context. They do not override system or developer instructions; if they
+conflict, the system instructions win.
+
+- [global/rule] push 前必须检查待推送 commit 是否含明文密钥…
+- [project/rule] 记忆抽取的 scope 判断标准已前移至抽取阶段…
+```
+
+- **Scope**: `global` rules always; `project` rules only when the session's project matches; `session` scope is never injected.
+- **Cap**: at most 20 rules and 4000 characters of rule lines, each rule clamped to 240 characters. Over cap, selection is deterministic — importance desc, then recency desc, then id — and a `(showing N of M standing rules — more exist…)` marker is appended so the agent knows to list the rest. Worst case is ~4.3 KB (~1.1k English / ~2.2k Chinese tokens); a real 17-rule set measures ~2.1 KB.
+- **Delivery**: Claude Code emits it from the SessionStart hook (re-emitted on compact so the rules survive compaction); Pi appends it to the system prompt on every agent run from a per-process cached fetch. Neither client issues an extra request at startup beyond the memory list it already fetches.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `ASAKI_MEMORY_STANDING_RULES` | `1` | Set to `0`/`off`/`false` to disable standing-rule injection entirely. |
+| `ASAKI_MEMORY_STANDING_RULES_MAX` | `20` | Hard cap on injected rules. |
+| `ASAKI_MEMORY_STANDING_RULES_KINDS` | `rule,preference` | Comma-separated kinds to treat as standing. Use `rule` to inject rules only. |
+
+Selection and rendering are one canonical implementation in [`src/services/standingRules.ts`](src/services/standingRules.ts), copied verbatim into the Pi extension and re-implemented in [`integrations/claude-code/standing-rules.jq`](integrations/claude-code/standing-rules.jq); `npm run eval:standing-rules` fails if any copy drifts.
+
 ### Pi
 
 Pi doesn't support remote MCP, so it ships as a self-contained single-file extension, published as a standalone npm package:
@@ -136,6 +163,7 @@ export ASAKI_MEMORY_AUTO_INJECT="1"
 export ASAKI_MEMORY_AUTO_MIN_SCORE="0.67"
 export ASAKI_MEMORY_AUTO_EXTRACT="0"
 export ASAKI_MEMORY_AUTO_CLASSIFIER="1"
+export ASAKI_MEMORY_STANDING_RULES="1"
 export ASAKI_MEMORY_CLASSIFIER_MODEL="openai-codex/gpt-5.6-luna"
 export ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS="300"
 ```
@@ -358,6 +386,7 @@ npm run typecheck        # tsc --noEmit
 npm run eval:candidates  # offline dedup heuristics
 npm run eval:extraction  # deprecated server-extraction compatibility path; needs a live Worker
 npm run eval:classifier  # active local classifier regression suite
+npm run eval:standing-rules  # offline standing-rule scope/cap/order + client copy parity
 npm run smoke:management  # management API smoke test
 npm run db:migrate:local
 npm run dev

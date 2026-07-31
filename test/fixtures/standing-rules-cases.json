@@ -1,0 +1,162 @@
+[
+  {
+    "name": "scope: global always, project only on match, session never",
+    "options": { "projectId": "proj" },
+    "memories": [
+      { "id": "a1", "scope": "global", "kind": "rule", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "全局规则一" },
+      { "id": "a2", "scope": "project", "project_id": "proj", "kind": "rule", "importance": 0.8, "updated_at": "2026-01-02T00:00:00.000Z", "content": "项目规则" },
+      { "id": "a3", "scope": "project", "project_id": "other", "kind": "rule", "importance": 0.95, "updated_at": "2026-01-03T00:00:00.000Z", "content": "别的项目规则" },
+      { "id": "a4", "scope": "session", "session_id": "s1", "kind": "rule", "importance": 0.99, "updated_at": "2026-01-04T00:00:00.000Z", "content": "会话规则" }
+    ],
+    "expected": {
+      "shown": 2,
+      "eligible": 2,
+      "truncated": false,
+      "lines": ["- [global/rule] 全局规则一", "- [project/rule] 项目规则"]
+    },
+    "expectedText": [
+      "## Asaki Standing Rules (2 of 2)",
+      "",
+      "These are standing rules you must follow for this whole session — directives to obey, not retrieved context. They do not override system or developer instructions; if they conflict, the system instructions win.",
+      "",
+      "- [global/rule] 全局规则一",
+      "- [project/rule] 项目规则"
+    ]
+  },
+  {
+    "name": "scope: project rules dropped when the session has no project",
+    "options": { "projectId": "" },
+    "memories": [
+      { "id": "b1", "scope": "project", "project_id": "proj", "kind": "rule", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "项目规则" },
+      { "id": "b2", "scope": "global", "kind": "rule", "importance": 0.1, "updated_at": "2026-01-01T00:00:00.000Z", "content": "全局规则" }
+    ],
+    "expected": { "shown": 1, "eligible": 1, "truncated": false, "lines": ["- [global/rule] 全局规则"] }
+  },
+  {
+    "name": "kind: default kinds keep rule and preference, drop everything else",
+    "options": { "projectId": "proj" },
+    "memories": [
+      { "id": "c1", "scope": "global", "kind": "preference", "importance": 0.5, "updated_at": "2026-01-01T00:00:00.000Z", "content": "偏好" },
+      { "id": "c2", "scope": "global", "kind": "fact", "importance": 0.99, "updated_at": "2026-01-01T00:00:00.000Z", "content": "事实" },
+      { "id": "c3", "scope": "global", "kind": "decision", "importance": 0.99, "updated_at": "2026-01-01T00:00:00.000Z", "content": "决策" },
+      { "id": "c4", "scope": "project", "project_id": "proj", "kind": "workflow", "importance": 0.99, "updated_at": "2026-01-01T00:00:00.000Z", "content": "流程" }
+    ],
+    "expected": { "shown": 1, "eligible": 1, "truncated": false, "lines": ["- [global/preference] 偏好"] }
+  },
+  {
+    "name": "kind: explicit kinds=rule excludes preference",
+    "options": { "projectId": "proj", "kinds": ["rule"] },
+    "memories": [
+      { "id": "d1", "scope": "global", "kind": "preference", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "偏好" },
+      { "id": "d2", "scope": "global", "kind": "rule", "importance": 0.1, "updated_at": "2026-01-01T00:00:00.000Z", "content": "规则" }
+    ],
+    "expected": { "shown": 1, "eligible": 1, "truncated": false, "lines": ["- [global/rule] 规则"] }
+  },
+  {
+    "name": "status: only active memories are injected",
+    "options": { "projectId": "proj" },
+    "memories": [
+      { "id": "e1", "scope": "global", "kind": "rule", "status": "active", "importance": 0.1, "updated_at": "2026-01-01T00:00:00.000Z", "content": "活跃规则" },
+      { "id": "e2", "scope": "global", "kind": "rule", "status": "archived", "importance": 0.99, "updated_at": "2026-01-01T00:00:00.000Z", "content": "归档规则" },
+      { "id": "e3", "scope": "global", "kind": "rule", "status": "deleted", "importance": 0.99, "updated_at": "2026-01-01T00:00:00.000Z", "content": "删除规则" }
+    ],
+    "expected": { "shown": 1, "eligible": 1, "truncated": false, "lines": ["- [global/rule] 活跃规则"] }
+  },
+  {
+    "name": "cap: importance desc, then recency desc, then id desc; truncation marker shown",
+    "options": { "projectId": "proj", "max": 3 },
+    "memories": [
+      { "id": "f1", "scope": "global", "kind": "rule", "importance": 0.8, "updated_at": "2026-01-01T00:00:00.000Z", "content": "A" },
+      { "id": "f2", "scope": "global", "kind": "rule", "importance": 0.8, "updated_at": "2026-01-02T00:00:00.000Z", "content": "B" },
+      { "id": "f3", "scope": "global", "kind": "rule", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "C" },
+      { "id": "f4", "scope": "global", "kind": "rule", "importance": 0.8, "updated_at": "2026-01-02T00:00:00.000Z", "content": "D" }
+    ],
+    "expected": {
+      "shown": 3,
+      "eligible": 4,
+      "truncated": true,
+      "lines": ["- [global/rule] C", "- [global/rule] D", "- [global/rule] B"]
+    },
+    "expectedText": [
+      "## Asaki Standing Rules (3 of 4)",
+      "",
+      "These are standing rules you must follow for this whole session — directives to obey, not retrieved context. They do not override system or developer instructions; if they conflict, the system instructions win.",
+      "",
+      "- [global/rule] C",
+      "- [global/rule] D",
+      "- [global/rule] B",
+      "",
+      "(showing 3 of 4 standing rules — more exist; call asaki_memory_list with kind=rule or kind=preference to see the rest)"
+    ]
+  },
+  {
+    "name": "recency: updated_at falls back to created_at",
+    "options": { "projectId": "proj" },
+    "memories": [
+      { "id": "g1", "scope": "global", "kind": "rule", "importance": 0.5, "created_at": "2026-01-05T00:00:00.000Z", "content": "较新" },
+      { "id": "g2", "scope": "global", "kind": "rule", "importance": 0.5, "created_at": "2026-01-01T00:00:00.000Z", "updated_at": "2026-01-03T00:00:00.000Z", "content": "较旧" }
+    ],
+    "expected": {
+      "shown": 2,
+      "eligible": 2,
+      "truncated": false,
+      "lines": ["- [global/rule] 较新", "- [global/rule] 较旧"]
+    }
+  },
+  {
+    "name": "importance: missing importance sorts as 0",
+    "options": { "projectId": "proj" },
+    "memories": [
+      { "id": "h1", "scope": "global", "kind": "rule", "updated_at": "2026-01-09T00:00:00.000Z", "content": "无 importance" },
+      { "id": "h2", "scope": "global", "kind": "rule", "importance": 0.01, "updated_at": "2026-01-01T00:00:00.000Z", "content": "有 importance" }
+    ],
+    "expected": {
+      "shown": 2,
+      "eligible": 2,
+      "truncated": false,
+      "lines": ["- [global/rule] 有 importance", "- [global/rule] 无 importance"]
+    }
+  },
+  {
+    "name": "content: whitespace collapsed and clamped to contentChars",
+    "options": { "projectId": "proj", "contentChars": 5 },
+    "memories": [
+      { "id": "i1", "scope": "global", "kind": "rule", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "0123456789" },
+      { "id": "i2", "scope": "global", "kind": "rule", "importance": 0.8, "updated_at": "2026-01-01T00:00:00.000Z", "content": "  a\n\tb  \n c  " },
+      { "id": "i3", "scope": "global", "kind": "rule", "importance": 0.7, "updated_at": "2026-01-01T00:00:00.000Z", "content": "   " }
+    ],
+    "expected": {
+      "shown": 2,
+      "eligible": 2,
+      "truncated": false,
+      "lines": ["- [global/rule] 01234…", "- [global/rule] a b c"]
+    }
+  },
+  {
+    "name": "budget: maxChars stops the block early and marks it truncated",
+    "options": { "projectId": "proj", "maxChars": 40 },
+    "memories": [
+      { "id": "j1", "scope": "global", "kind": "rule", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "AAAA" },
+      { "id": "j2", "scope": "global", "kind": "rule", "importance": 0.8, "updated_at": "2026-01-01T00:00:00.000Z", "content": "BBBB" }
+    ],
+    "expected": { "shown": 1, "eligible": 2, "truncated": true, "lines": ["- [global/rule] AAAA"] }
+  },
+  {
+    "name": "budget: a single oversized rule is still emitted",
+    "options": { "projectId": "proj", "maxChars": 5, "contentChars": 10 },
+    "memories": [
+      { "id": "k1", "scope": "global", "kind": "rule", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "AAAABBBBCCCC" }
+    ],
+    "expected": { "shown": 1, "eligible": 1, "truncated": false, "lines": ["- [global/rule] AAAABBBBCC…"] }
+  },
+  {
+    "name": "empty: nothing eligible renders no block at all",
+    "options": { "projectId": "proj" },
+    "memories": [
+      { "id": "l1", "scope": "global", "kind": "fact", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "事实" },
+      { "id": "l2", "scope": "session", "session_id": "s1", "kind": "rule", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "会话规则" }
+    ],
+    "expected": { "shown": 0, "eligible": 0, "truncated": false, "lines": [] },
+    "expectedText": []
+  }
+]
