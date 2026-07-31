@@ -204,28 +204,49 @@ export function isUnsupervisedSource(source: string | null | undefined): boolean
   return typeof source === 'string' && UNSUPERVISED_CANDIDATE_SOURCES.has(source);
 }
 
-export function bestUsableMatch(candidate: ProcessMemoryCandidateInput, matches: Array<SearchResult | undefined>): SearchResult | undefined {
-  let best: SearchResult | undefined;
+// Plural sibling of bestUsableMatch(): same usableMatch() gate (normalized equality, token
+// decision, lexical/semantic >= 0.5), same matchSimilarity() score, ordered best-first. The
+// supersession lookup needs the top few candidates rather than the single best one, and both
+// callers must agree on what "usable" means — hence one implementation, not two.
+export function usableMatches(
+  candidate: ProcessMemoryCandidateInput,
+  matches: Array<SearchResult | undefined>,
+): Array<{ match: SearchResult; score: number }> {
+  const out: Array<{ match: SearchResult; score: number }> = [];
   for (const match of matches) {
     const usable = usableMatch(candidate, match);
     if (!usable) continue;
-    if (!best || matchSimilarity(candidate, usable) > matchSimilarity(candidate, best)) best = usable;
+    out.push({ match: usable, score: matchSimilarity(candidate, usable) });
   }
-  return best;
+  // Array.prototype.sort is stable, so equal scores keep input order.
+  out.sort((a, b) => b.score - a.score);
+  return out;
+}
+
+export function bestUsableMatch(candidate: ProcessMemoryCandidateInput, matches: Array<SearchResult | undefined>): SearchResult | undefined {
+  return usableMatches(candidate, matches)[0]?.match;
 }
 
 // Deliberately excludes a bare "not" — it matches too much plain negation ("this is not a bug")
 // that isn't actually superseding anything, and would send routine candidates to the LLM.
 const CONTRADICTION_SIGNALS = /\b(instead of|instead|no longer|rather than|switch(?:ed|ing)?\s+to|replace[sd]?|change[sd]?\s+to|revert(?:ed)?\s+to|versus|vs\.?)\b/i;
 
+// CJK has no word boundaries, so these can't ride in the \b-anchored pattern above. Same care as
+// the English side: no bare 不 / 不要 (plain negation is not supersession — "这不是 bug" must not
+// route to the LLM), only phrasings that assert a replacement of an earlier state. 不用…了 is
+// bounded to one clause so it can't span a whole paragraph.
+const CONTRADICTION_SIGNALS_CJK = /(改回|还是原来的|换成|别再|不要再|不用[^。！？!?\n]{0,20}了)/;
+
 export function hasContradictionSignal(text: string): boolean {
-  return CONTRADICTION_SIGNALS.test(text);
+  return CONTRADICTION_SIGNALS.test(text) || CONTRADICTION_SIGNALS_CJK.test(text);
 }
 
 const FORGET_SIGNALS = /\b(forget (that|about|it)|disregard|retract(?:ed)?|never\s?mind|delete (that|this)|remove (that|this)|scratch that|that('s| is) (not|no longer) (true|valid|correct))\b/i;
 
+const FORGET_SIGNALS_CJK = /(去掉|之前那条不算了|撤销|作废)/;
+
 export function hasForgetSignal(text: string): boolean {
-  return FORGET_SIGNALS.test(text);
+  return FORGET_SIGNALS.test(text) || FORGET_SIGNALS_CJK.test(text);
 }
 
 // Whether chooseDecision() would actually use an LLM decision if given one — callers use this to

@@ -2,7 +2,7 @@ import type { Env, MemoryReviewRecord, MemoryReviewRow } from '../types';
 import { UserFacingError } from '../utils/errors';
 import { createMemory, deleteMemory, getMemory, searchMemories, updateMemoryContent } from './memories';
 import { writeMemoryEvent } from './memoryEvents';
-import { BATCH_DEDUP_SIMILARITY_THRESHOLD, bestUsableMatch, heuristicDecision, lexicalSimilarity, mergeContent, type ProcessMemoryCandidateInput } from './candidateDecision';
+import { BATCH_DEDUP_SIMILARITY_THRESHOLD, bestUsableMatch, heuristicDecision, lexicalSimilarity, mergeContent, usableMatches, type ProcessMemoryCandidateInput } from './candidateDecision';
 import { findLexicalMatch } from './candidates';
 
 function nowIso(): string {
@@ -21,8 +21,60 @@ async function findBestMatch(env: Env, candidate: ProcessMemoryCandidateInput) {
     project_id: candidate.project_id ?? null,
     session_id: candidate.session_id ?? null,
     top_k: 5,
+    // Suggesting a memory as a dedup target must not refresh its last_accessed_at (§5.3d).
+    track_access: false,
   });
   return bestUsableMatch(candidate, [...similar, await findLexicalMatch(env, candidate)]);
+}
+
+// Display-time supersession hint: which ACTIVE memory does this correction invalidate?
+//
+// The query text is deliberately `supersedes_query` — the affirmative restatement of the old
+// behaviour — not the candidate's own (negative) rule text: a negation scores 0.176-0.333 lexically
+// against the memory it contradicts, which is below the usable-match floor. With no
+// `supersedes_query` the lookup does not run at all; a bad query is worse than no suggestion.
+//
+// `scope` is omitted on purpose so isVisibleInScope() admits global + the current project/session
+// (a project correction retiring an over-broad global rule is the direction that matters most).
+// `project_context` is a scope-neutral client hint and is preferred over project_id precisely
+// because a global correction carries no project_id; it never touches scope validation or the
+// review row's project_id column. Cross-project search is deliberately not done here.
+export async function findSupersedeCandidates(
+  env: Env,
+  candidate: ProcessMemoryCandidateInput,
+  reviewProjectId?: string | null,
+): Promise<NonNullable<MemoryReviewRow['supersedes_candidates']>> {
+  const query = typeof candidate.supersedes_query === 'string' ? candidate.supersedes_query.trim() : '';
+  if (!query) return [];
+
+  const synthetic: ProcessMemoryCandidateInput = { ...candidate, content: query };
+  const projectId = candidate.project_context ?? candidate.project_id ?? reviewProjectId ?? null;
+  const similar = await searchMemories(env, {
+    query,
+    user_id: candidate.user_id,
+    project_id: projectId,
+    session_id: candidate.session_id ?? null,
+    top_k: 5,
+    track_access: false,
+  });
+
+  // `retract` is the only rule form that asks for the memory to go away; everything else rewrites it.
+  const suggestedAction = candidate.rule_form === 'retract' ? ('delete' as const) : ('update' as const);
+  // The lexical scan can return a memory the vector search already found; keep the higher-scoring
+  // entry (the list is sorted best-first) rather than suggesting the same target twice.
+  const seen = new Set<string>();
+  return usableMatches(synthetic, [...similar, await findLexicalMatch(env, synthetic)])
+    .filter(({ match }) => (seen.has(match.id) ? false : (seen.add(match.id), true)))
+    .slice(0, 3)
+    .map(({ match, score }) => ({
+      memory_id: match.id,
+      content: match.content,
+      score,
+      target_scope: match.scope,
+      target_kind: match.kind,
+      target_confidence: match.confidence,
+      suggested_action: suggestedAction,
+    }));
 }
 
 // Catches the gap a review-queue-only dedup (findSimilarPendingReview below) can't: a candidate
@@ -96,41 +148,77 @@ export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCan
       continue;
     }
 
+    // Set below when a correction refuses to merge into the pending row it contradicts, so the
+    // human sees both rows and the link between them. Server-written, never client-supplied.
+    let outgoing = candidate;
     const similar = await findSimilarPendingReview(env, candidate);
 
     if (similar) {
-      // The merged object keeps the EXISTING candidate's correction-evidence fields (signal,
-      // correction, supersedes_query, antecedent_source): newest-evidence-wins merging, and the
-      // rule that a correction never merges into a non-correction row, land with the
-      // correction-aware dedup work — not here.
       const existing = JSON.parse(similar.candidate_json) as ProcessMemoryCandidateInput;
-      const merged: ProcessMemoryCandidateInput = {
-        ...existing,
-        content: mergeContent(existing.content, candidate.content),
-        importance: Math.max(existing.importance, candidate.importance),
-        confidence: Math.max(existing.confidence, candidate.confidence),
-      };
-      await env.DB.prepare(`UPDATE memory_reviews SET candidate_json = ?1, updated_at = ?2 WHERE id = ?3`)
-        .bind(JSON.stringify(merged), timestamp, similar.id)
-        .run();
+      const incomingIsCorrection = candidate.signal === 'correction';
+      const existingIsCorrection = existing.signal === 'correction';
+      // A correction and the affirmative statement it invalidates score >= 0.5 against each other
+      // (they reuse the same wording), so today's merge would newline-concatenate a preference with
+      // its own negation into one row AND keep the older, affirmative evidence. Never merge across
+      // that boundary; and merge two corrections only when they are the same kind of correction.
+      const mergeable = incomingIsCorrection === existingIsCorrection
+        && (!incomingIsCorrection
+          || ((existing.signal_subtype ?? '') === (candidate.signal_subtype ?? '') && (existing.rule_form ?? null) === (candidate.rule_form ?? null)));
 
-      mergedIds.push(similar.id);
-      reviews.push({
-        id: similar.id,
-        user_id: similar.user_id,
-        status: 'pending',
-        candidate: merged,
-        resolved_action: null,
-        memory_id: null,
-        project_id: similar.project_id,
-        session_id: similar.session_id,
-        source: similar.source,
-        reason: null,
-        created_at: similar.created_at,
-        updated_at: timestamp,
-        resolved_at: null,
-      });
-      continue;
+      if (!mergeable) {
+        if (incomingIsCorrection) outgoing = { ...candidate, supersedes_pending_review_id: similar.id };
+      } else {
+        // Newest evidence wins for a correction↔correction merge: the incoming candidate's
+        // correction/supersedes_query/antecedent_source/signal_subtype describe the more recent
+        // moment. Legacy (non-correction) merges keep spreading the existing candidate.
+        const merged: ProcessMemoryCandidateInput = incomingIsCorrection
+          ? {
+              ...existing,
+              signal: candidate.signal,
+              signal_subtype: candidate.signal_subtype,
+              rule_form: candidate.rule_form,
+              antecedent_source: candidate.antecedent_source,
+              correction: candidate.correction,
+              supersedes_query: candidate.supersedes_query,
+              supersedes_pending_review_id: candidate.supersedes_pending_review_id,
+              project_context: candidate.project_context,
+              source: candidate.source ?? existing.source ?? null,
+              content: mergeContent(existing.content, candidate.content),
+              importance: Math.max(existing.importance, candidate.importance),
+              confidence: Math.max(existing.confidence, candidate.confidence),
+            }
+          : {
+              ...existing,
+              content: mergeContent(existing.content, candidate.content),
+              importance: Math.max(existing.importance, candidate.importance),
+              confidence: Math.max(existing.confidence, candidate.confidence),
+            };
+        // The row's `source` column — not just the JSON — must follow the surviving evidence:
+        // parseReview() and listMemoryReviews()'s source filter both read the column, so leaving it
+        // stale makes the queue lie about which client produced what's now in the row.
+        const mergedSource = candidate.source ?? similar.source;
+        await env.DB.prepare(`UPDATE memory_reviews SET candidate_json = ?1, source = ?2, updated_at = ?3 WHERE id = ?4`)
+          .bind(JSON.stringify(merged), mergedSource, timestamp, similar.id)
+          .run();
+
+        mergedIds.push(similar.id);
+        reviews.push({
+          id: similar.id,
+          user_id: similar.user_id,
+          status: 'pending',
+          candidate: merged,
+          resolved_action: null,
+          memory_id: null,
+          project_id: similar.project_id,
+          session_id: similar.session_id,
+          source: mergedSource,
+          reason: null,
+          created_at: similar.created_at,
+          updated_at: timestamp,
+          resolved_at: null,
+        });
+        continue;
+      }
     }
 
     // candidate_json is free-form TEXT, so the whole validated candidate — including the
@@ -143,20 +231,20 @@ export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCan
         id, user_id, status, candidate_json, project_id, session_id, source, created_at, updated_at
       ) VALUES (?1, ?2, 'pending', ?3, ?4, ?5, ?6, ?7, ?8)`
     )
-      .bind(id, candidate.user_id, JSON.stringify(candidate), candidate.project_id ?? null, candidate.session_id ?? null, candidate.source ?? null, timestamp, timestamp)
+      .bind(id, outgoing.user_id, JSON.stringify(outgoing), outgoing.project_id ?? null, outgoing.session_id ?? null, outgoing.source ?? null, timestamp, timestamp)
       .run();
 
     createdIds.push(id);
     reviews.push({
       id,
-      user_id: candidate.user_id,
+      user_id: outgoing.user_id,
       status: 'pending',
-      candidate,
+      candidate: outgoing,
       resolved_action: null,
       memory_id: null,
-      project_id: candidate.project_id ?? null,
-      session_id: candidate.session_id ?? null,
-      source: candidate.source ?? null,
+      project_id: outgoing.project_id ?? null,
+      session_id: outgoing.session_id ?? null,
+      source: outgoing.source ?? null,
       reason: null,
       created_at: timestamp,
       updated_at: timestamp,
@@ -189,7 +277,19 @@ export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCan
   return reviews;
 }
 
-export async function listMemoryReviews(env: Env, input: { user_id: string; status: 'pending' | 'resolved' | 'all'; project_id?: string | null; session_id?: string | null; source?: string | null; limit: number; offset: number; include_suggestions?: boolean }): Promise<MemoryReviewRow[]> {
+// `signal` lives inside candidate_json, so both the correction-first ordering and the signal filter
+// have to be SQL expressions — sorting a returned page client-side cannot work when the query
+// paginates. The `CASE WHEN json_valid(...)` wrapper is required, not decorative: SQLite does not
+// short-circuit AND, so `json_valid(x) AND json_extract(x, '$.signal')` still throws on a malformed
+// row. No index exists on this expression and none is added (that would be a migration); at
+// single-operator volume scanning one user's reviews is fine — revisit past ~10k rows.
+const SIGNAL_EXPR = `(CASE WHEN json_valid(candidate_json) THEN COALESCE(json_extract(candidate_json, '$.signal'), '') ELSE '' END)`;
+
+// Suggestion lookups cost one search each, so cap how many a single response can trigger. Rows past
+// the cap report supersedes_candidates: null plus suggestions_truncated on the response.
+const MAX_SUPERSEDE_LOOKUPS_PER_RESPONSE = 20;
+
+export async function listMemoryReviews(env: Env, input: { user_id: string; status: 'pending' | 'resolved' | 'all'; project_id?: string | null; session_id?: string | null; source?: string | null; signal?: string | null; limit: number; offset: number; include_suggestions?: boolean }): Promise<{ reviews: MemoryReviewRow[]; suggestions_truncated: boolean }> {
   const clauses = ['user_id = ?'];
   const bindings: unknown[] = [input.user_id];
 
@@ -209,29 +309,65 @@ export async function listMemoryReviews(env: Env, input: { user_id: string; stat
     clauses.push('source = ?');
     bindings.push(input.source);
   }
+  if (input.signal) {
+    // Candidates written before the evidence fields existed (and ones whose signal was coerced to
+    // 'none') both read as "no signal", so `signal=none` must match the empty string too.
+    if (input.signal === 'none') {
+      clauses.push(`${SIGNAL_EXPR} IN ('none', '')`);
+    } else {
+      clauses.push(`${SIGNAL_EXPR} = ?`);
+      bindings.push(input.signal);
+    }
+  }
 
   const result = await env.DB.prepare(
     `SELECT * FROM memory_reviews
      WHERE ${clauses.join(' AND ')}
-     ORDER BY updated_at DESC, created_at DESC
+     ORDER BY (${SIGNAL_EXPR} = 'correction') DESC, updated_at DESC, created_at DESC
      LIMIT ? OFFSET ?`
   )
     .bind(...bindings, input.limit, input.offset)
     .all<MemoryReviewRecord>();
 
   const reviews = (result.results ?? []).map(parseReview);
-  if (!input.include_suggestions) return reviews;
+  if (!input.include_suggestions) return { reviews, suggestions_truncated: false };
+
+  // Supersession lookups run only for pending correction rows that actually carry a query, and only
+  // for the first N of them in page order — everything else would be a search that can't produce a
+  // suggestion anyway.
+  const supersedeEligible = new Set<string>();
+  let suggestionsTruncated = false;
+  for (const review of reviews) {
+    if (review.status !== 'pending') continue;
+    if (review.candidate.signal !== 'correction') continue;
+    if (!review.candidate.supersedes_query?.trim()) continue;
+    if (supersedeEligible.size >= MAX_SUPERSEDE_LOOKUPS_PER_RESPONSE) {
+      suggestionsTruncated = true;
+      continue;
+    }
+    supersedeEligible.add(review.id);
+  }
 
   // Only worth computing for still-pending rows — a resolved review's suggestion is moot.
-  return Promise.all(
-    reviews.map(async (review) => {
+  const withSuggestions = await Promise.all(
+    reviews.map(async (review): Promise<MemoryReviewRow> => {
       if (review.status !== 'pending') return { ...review, potential_duplicate: null };
+
+      const supersedes = supersedeEligible.has(review.id)
+        ? await findSupersedeCandidates(env, review.candidate, review.project_id)
+        : review.candidate.signal === 'correction' && review.candidate.supersedes_query?.trim()
+          ? null
+          : undefined;
+      const supersedesField = supersedes === undefined ? {} : { supersedes_candidates: supersedes };
+
       const match = await findBestMatch(env, review.candidate);
-      if (!match) return { ...review, potential_duplicate: null };
+      if (!match) return { ...review, potential_duplicate: null, ...supersedesField };
       const { action, reason } = heuristicDecision(review.candidate, match);
-      return { ...review, potential_duplicate: { memory_id: match.id, content: match.content, action, reason } };
+      return { ...review, potential_duplicate: { memory_id: match.id, content: match.content, action, reason }, ...supersedesField };
     })
   );
+
+  return { reviews: withSuggestions, suggestions_truncated: suggestionsTruncated };
 }
 
 export async function resolveMemoryReview(env: Env, id: string, input: { user_id: string; action: 'add' | 'merge' | 'update' | 'delete' | 'ignore'; memory_id?: string | null; reason?: string | null }): Promise<{ review: MemoryReviewRow; memory?: Awaited<ReturnType<typeof createMemory>> }> {
@@ -295,6 +431,9 @@ export async function resolveMemoryReview(env: Env, id: string, input: { user_id
         content: review.candidate.content,
         importance: review.candidate.importance,
         confidence: review.candidate.confidence,
+        // A correction resolved as `update` usually retypes the target (a `rule` replacing a
+        // `fact`); scope stays untouched — rescoping is a separate, explicit audit action.
+        kind: review.candidate.kind !== target.kind ? review.candidate.kind : undefined,
       });
       mutated = true;
     }

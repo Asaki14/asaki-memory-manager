@@ -15,6 +15,7 @@
     "eval:classifier": "bash scripts/eval-classifier.sh",
     "eval:sensitive-pattern": "bash scripts/eval-sensitive-pattern.sh",
     "eval:standing-rules": "node --experimental-strip-types scripts/eval-standing-rules.ts",
+    "eval:review-dedup": "bash scripts/eval-review-dedup.sh",
     "shadow-run:extraction": "node --experimental-strip-types scripts/shadow-run-extraction.ts",
     "backfill:index": "node --experimental-strip-types scripts/backfill-index.ts",
     "prune:stale": "node --experimental-strip-types scripts/prune-stale.ts",

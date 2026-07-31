@@ -78,6 +78,11 @@ export interface SearchMemoriesInput {
   session_id?: string | null;
   top_k?: number;
   min_score?: number;
+  // Internal-only (never read off a request body: validateSearchMemories returns an explicit
+  // whitelist). `false` means "this search is a suggestion lookup, not a retrieval" — it skips the
+  // last_accessed_at write so merely proposing a memory as a dedup/supersession target doesn't
+  // make it look recently used to pruneStaleMemories().
+  track_access?: boolean;
 }
 
 export interface ListMemoriesInput {
@@ -165,4 +170,15 @@ export interface MemoryReviewRow extends Omit<MemoryReviewRecord, 'candidate_jso
     action: import('./services/candidateDecision').CandidateAction;
     reason: string;
   } | null;
+  // Display-time only (no column, no migration): active memories this correction candidate looks
+  // like it invalidates. `null` means "eligible but not computed" — the per-response cap was hit.
+  supersedes_candidates?: Array<{
+    memory_id: string;
+    content: string;
+    score: number;
+    target_scope: MemoryScope;
+    target_kind: MemoryKind;
+    target_confidence: number;
+    suggested_action: 'update' | 'delete';
+  }> | null;
 }
