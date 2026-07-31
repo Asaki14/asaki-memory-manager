@@ -11,12 +11,12 @@
 #   1. the canonical server gate, containsSensitiveContent() in src/utils/sensitiveContent.ts;
 #   2. the shell pattern below, which mirrors that canonical list for the Stop-hook shape.
 #
-# KEEP IN SYNC: the pattern below tracks the canonical server list. The client copies
-# (SENSITIVE_PATTERN in integrations/claude-code/stop-extract.sh, SENSITIVE_RE in
-# integrations/claude-code/user-prompt.sh, SENSITIVE_RE_LIST in integrations/pi/asaki-memory.ts and
-# scripts/shadow-run-extraction.ts) still carry the pre-fix keyword/`set -gx` rules and are
-# deliberately behind until the client batch of the correction-classifier plan lands; drift against
-# them must still be caught by comparing the patterns at review time.
+# KEEP IN SYNC: the pattern below tracks the canonical server list. SENSITIVE_PATTERN in
+# integrations/claude-code/stop-extract.sh, SENSITIVE_RE_LIST in integrations/pi/asaki-memory.ts
+# and SENSITIVE_PATTERNS in integrations/claude-code/build-delta.mjs now mirror it. Two copies are
+# still deliberately behind (SENSITIVE_RE in integrations/claude-code/user-prompt.sh and
+# SENSITIVE_RE_LIST in scripts/shadow-run-extraction.ts); drift against any of them must still be
+# caught by comparing the patterns at review time.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

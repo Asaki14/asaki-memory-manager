@@ -89,6 +89,45 @@ environment (never hardcoded / never committed). Set them once in
     next Stop event just reports the real outcome as a one-line
     `systemMessage`.
 
+
+  Two opt-in flags extend this path, both **off by default**:
+
+  - `ASAKI_MEMORY_CORRECTION_MODE=1` — switches the classifier to the correction
+    prompt/schema: it detects the user correcting the agent, records the
+    contrast pair (`agent_did` / `captain_verdict` / `redirect_target`), infers
+    a durable rule, and sends the extra evidence fields on the candidate. It
+    also replays the last ~8 lines of the previous processed delta as a
+    labelled `Prior context (ALREADY PROCESSED ...)` block, and lets one
+    correction-signalled turn per throttle window fire an extra classifier call
+    (a hard ceiling of 2 calls per window, never more).
+  - `ASAKI_MEMORY_ACTION_TRACE=1` — adds one `Tool: <name> <arg>` line per
+    assistant tool call to the delta, so a terse verdict ("别再自动 commit 了")
+    has a recoverable antecedent. **Read the exposure notice below before
+    turning this on.** Tool *results* and thinking blocks are never sent.
+
+  With both flags off, the prompt, the JSON schema, the POST body, the delta
+  text and the call frequency are exactly what they were before this feature
+  existed.
+
+  **What action trace sends off-machine.** Per tool call, one line leaves this
+  machine: the tool name plus **one** argument, capped at 120 characters.
+  Absolute paths, URIs and `user@host` targets are replaced by `<path>` /
+  `<uri:scheme>` / `<host>`, so filesystem layout outside the current repo,
+  customer directory names, private bucket names and internal hostnames do not
+  leave. What is **not** bounded and leaves verbatim: repo-relative paths inside
+  the current repo, command binaries and their flags, and any free-text
+  argument that is not a path — commit messages, branch/PR titles, and
+  `grep`/`find` patterns. Those are gated only by credential patterns, which
+  look for secrets, not for confidentiality: `git commit -m "fix Acme pricing
+  before the layoff announcement"` will be sent as written. If your working
+  style routinely puts confidential material in commit messages or search
+  patterns, leave the flag off — correction mode still works on prose
+  antecedents without it, at lower recall. The flag is per-machine and takes
+  effect on the next Stop event.
+
+  Correction evidence written into `memory_reviews.candidate_json` persists in
+  D1 indefinitely, including after a review is resolved or ignored.
+
   Both modes are throttled to at most once per
   `ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS` (default 300) — a throttled
   turn's text is not dropped, it's carried into the next Stop event's (larger)

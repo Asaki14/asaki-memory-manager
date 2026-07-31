@@ -1,0 +1,124 @@
+[
+  {
+    "name": "correction: explicit_negation",
+    "correction": true,
+    "expectMatch": true,
+    "text": "Assistant: 我把 scope 默认改成了 global。\n\nUser: 不对，不是这样"
+  },
+  {
+    "name": "correction: override_of_action from a trace line",
+    "correction": true,
+    "expectMatch": true,
+    "text": "Tool: bash git commit -m \"wip\"\n\nUser: 别再自动 commit 了"
+  },
+  {
+    "name": "correction: terse_redirect",
+    "correction": true,
+    "expectMatch": true,
+    "text": "Assistant: 加了 axios 依赖来发请求。\n\nUser: 用 fetch 就行"
+  },
+  {
+    "name": "correction: repeat_complaint",
+    "correction": true,
+    "expectMatch": true,
+    "text": "Assistant: 顺手又写了一份完整报告。\n\nUser: 说过了，一次性汇报放 scratchpad"
+  },
+  {
+    "name": "correction: approval_after_change",
+    "correction": true,
+    "expectMatch": true,
+    "text": "Assistant: 已经改成只读模式，不再自动写入。\n\nUser: 对了，这样就行"
+  },
+  {
+    "name": "correction: futility_verdict in English",
+    "correction": true,
+    "expectMatch": true,
+    "text": "Assistant: I wrapped every call in a retry helper with exponential backoff.\n\nUser: revert that, it is overkill"
+  },
+  {
+    "name": "adversarial: correction-shaped words inside a commit message",
+    "correction": false,
+    "expectMatch": true,
+    "text": "Tool: bash git commit -m \"对了顺手改了下 padding\"",
+    "note": "known false trigger — costs one extra classifier call inside a window capped at 2, and no write"
+  },
+  {
+    "name": "adversarial: 换成 about a dependency, not about an agent action",
+    "correction": false,
+    "expectMatch": true,
+    "text": "Assistant: 依赖从 lodash 换成 es-toolkit，测试全部通过。",
+    "note": "known false trigger — same bounded cost"
+  },
+  {
+    "name": "adversarial: 还是 inside a grep pattern",
+    "correction": false,
+    "expectMatch": false,
+    "text": "Tool: bash grep -rn '还是' src/services"
+  },
+  {
+    "name": "adversarial: 又 inside an ordinary progress line",
+    "correction": false,
+    "expectMatch": false,
+    "text": "Assistant: 又跑了一遍 eval，结果与上一轮一致。"
+  },
+  {
+    "name": "non-correction: one-off command",
+    "correction": false,
+    "expectMatch": false,
+    "text": "User: 跑一下测试"
+  },
+  {
+    "name": "non-correction: bug fix report",
+    "correction": false,
+    "expectMatch": false,
+    "text": "Assistant: 已修复登录超时，根因是 token 刷新竞态。"
+  },
+  {
+    "name": "non-correction: a question that reads like a complaint",
+    "correction": false,
+    "expectMatch": false,
+    "text": "User: 这样不会有问题吗？"
+  },
+  {
+    "name": "non-correction: routine test step",
+    "correction": false,
+    "expectMatch": false,
+    "text": "Assistant: 加了个测试用例，跑了一下全过了。"
+  },
+  {
+    "name": "non-correction: delivery status",
+    "correction": false,
+    "expectMatch": false,
+    "text": "Assistant: 报告写完了，放在 scratchpad 里。"
+  },
+  {
+    "name": "non-correction: build command trace",
+    "correction": false,
+    "expectMatch": false,
+    "text": "Tool: bash rm -rf dist\n\nTool: bash npm run build"
+  },
+  {
+    "name": "non-correction: documentation of a forget regex",
+    "correction": false,
+    "expectMatch": false,
+    "text": "Assistant: FORGET_SIGNALS 用于识别 forget that I prefer dark mode 这类表达。"
+  },
+  {
+    "name": "non-correction: English build report",
+    "correction": false,
+    "expectMatch": false,
+    "text": "Assistant: The build finished and all 33 classifier cases pass."
+  },
+  {
+    "name": "non-correction: open question about performance",
+    "correction": false,
+    "expectMatch": false,
+    "text": "User: 帮我看看这个函数为什么慢"
+  },
+  {
+    "name": "non-correction: a numeric config change",
+    "correction": false,
+    "expectMatch": false,
+    "text": "Assistant: 把 padding 从 4 调整到 10，与 sketchybar 左侧对齐。"
+  }
+]

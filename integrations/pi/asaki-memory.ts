@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Type } from "typebox";
 
 const API_BASE = "https://asaki-memory-manager.YOUR_SUBDOMAIN.workers.dev";
@@ -31,11 +31,12 @@ const MEMORY_NEEDED_RE =
 // KEEP IN SYNC with EXTRACT_SIGNAL_PATTERN in integrations/claude-code/stop-extract.sh.
 const EXTRACT_SIGNAL_RE =
   /以后都|以后就|不要再|别再|记住|记得|规则是|统一用|统一使用|根因是|已验证|已修复|已确认|踩坑|决定用|决定是|改用|换成|约定是|复盘|经验是|remember|always|never|from now on|going forward|decided to|decision is|decision was|root cause is|root cause was|already fixed|now fixed|now verified|already verified|learned that|instead of|switch to|switched to|switching to|convention is|the rule is/i;
-// KEEP IN SYNC with SENSITIVE_PATTERN in integrations/claude-code/stop-extract.sh and
-// SENSITIVE_RE_LIST in scripts/shadow-run-extraction.ts. Also mirrors the server-side canonical
-// list in src/utils/sensitiveContent.ts: sk-/sk-proj-/sk-ant- use a hyphen (not an underscore)
-// to actually match real OpenAI/Anthropic keys, and this now also covers Slack xox- tokens,
-// Google AIza- keys, JWTs, and user:pass@host credential URLs.
+// #region asaki-trace-builder
+// KEEP IN SYNC with SENSITIVE_PATTERN in integrations/claude-code/stop-extract.sh,
+// SENSITIVE_PATTERNS in integrations/claude-code/build-delta.mjs, and the canonical server list
+// in src/utils/sensitiveContent.ts. Both holes the canonical list closed are carried here: the
+// credential keyword may carry an identifier prefix/suffix (so DATABASE_PASSWORD=… is caught,
+// where the old `\b` form was not) and any fish `set -x`/`-gx`/`-Ux` spelling matches.
 const SENSITIVE_RE_LIST = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/i,
   /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b/i,
@@ -46,9 +47,58 @@ const SENSITIVE_RE_LIST = [
   /\bAIza[0-9A-Za-z_-]{20,}\b/,
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/,
   /:\/\/[^/\s:]+:[^/\s@]{6,}@/,
-  /\b(?:api[_-]?key|token|secret|password|passwd|authorization)\b\s*[:=]\s*["']?[^"'\s]{8,}/i,
-  /set\s+-gx\s+\w*(?:KEY|TOKEN|SECRET|PASSWORD)\w*\s+[^$\s][^\s]{8,}/i,
+  /(?:^|[^A-Za-z0-9])[A-Za-z0-9_-]{0,64}(?:api[_-]?key|token|secret|password|passwd|authorization)(?:[_-][A-Za-z0-9_-]{0,64})?\s*[:=]\s*["']?[^"'\s]{8,}/i,
+  /set(?:\s+--?[A-Za-z][A-Za-z0-9-]*)+\s+\w*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)\w*\s+[^$\s][^\s]{8,}/i,
 ];
+
+// Trace-specific gate (plan §8.2b): applied per `Tool:` line, on the ORIGINAL argument, in
+// addition to the list above. KEEP IN SYNC with TRACE_SENSITIVE_PATTERNS in
+// integrations/claude-code/build-delta.mjs.
+const TRACE_SENSITIVE_RE_LIST = [
+  /\bcurl\b[^\n]*\s(?:-u|--user)\s/i,
+  /\bcurl\b[^\n]*\s(?:-H|--header)\s*["']?[^"'\n]*(?:key|token|secret|auth|credential)/i,
+  /\bsshpass\b/i,
+  /\bssh\b[^\n]*\s-i\s/i,
+  /\bscp\b[^\n]*\s-i\s/i,
+  /\bmysql\b[^\n]*\s-p\S/i,
+  /\b(?:psql|mongo|mongosh)\b[^\n]*\bpassword\s*=/i,
+  /\b(?:export|env|setenv)\s+[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API)[A-Za-z0-9_]*\s*[=\s]\s*\S/i,
+  /\bset(?:\s+--?[A-Za-z][A-Za-z0-9-]*)+\s+[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API)[A-Za-z0-9_]*\s+\S/i,
+  /(?:^|[\s;&|(])[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)[A-Za-z0-9_]*=\S/,
+  /\bwrangler\s+secret\b/i,
+  /\bgh\s+auth\b/i,
+  /\baws\s+configure\b/i,
+  /\bop\s+read\b/i,
+  /\bsecurity\s+find-(?:generic|internet)-password\b/i,
+  /(?:^|[\s"'=:])[^\s"']*(?:\.env(?:\.[A-Za-z0-9_-]+)?|\.pem|\.p12|\.netrc|id_rsa|id_ed25519|id_ecdsa)\b/,
+  /(?:^|[\s"'=:])[^\s"']*(?:\.aws\/|\.ssh\/|\.gnupg\/|credentials\b)/,
+  /(?:^|[\s"'=:])[^\s"']*(?:token|secret)[^\s"']*\.(?:json|txt|yaml|yml|conf)\b/i,
+];
+
+// Pi's own tool whitelist (plan §3.3), verified against the installed package: lowercase names,
+// `path` rather than `file_path`, and `find` where Claude Code has `Glob`. Anything not listed
+// emits the tool name alone. This is a per-client table, NOT one shared literal — KEEP the
+// BEHAVIOUR in sync with CLAUDE_TRACE_TOOLS in integrations/claude-code/build-delta.mjs.
+const PI_TRACE_TOOLS: Record<string, { arg: string; shape: "command" | "path" | "text" }> = {
+  bash: { arg: "command", shape: "command" },
+  edit: { arg: "path", shape: "path" },
+  write: { arg: "path", shape: "path" },
+  read: { arg: "path", shape: "path" },
+  ls: { arg: "path", shape: "path" },
+  find: { arg: "pattern", shape: "text" },
+  grep: { arg: "pattern", shape: "text" },
+};
+
+const TRACE_ARG_MAX_CHARS = 120;
+const PRIOR_BLOCK_HEADER = "Prior context (ALREADY PROCESSED — antecedent only, never extract from this block):";
+const CURRENT_DELTA_DELIMITER = "--- current delta below ---";
+
+// Correction pre-gate (plan §4.1) — used only for the throttle override (§4.5) and the
+// `correction_suspected` prompt hint, never as a pre-filter on the classifier call.
+// KEEP IN SYNC with CORRECTION_SIGNAL_PATTERN in integrations/claude-code/stop-extract.sh.
+const CORRECTION_SIGNAL_RE =
+  /不对|不是这样|错了|这不行|不用改了|别改|别再|改回|回到|还是原来的|还是之前|撤销|去掉|删掉|换成|直接用|就行|应该是|说过了|都说了|第几次|又.{0,6}了吗|对了|这样就行|可以了|就这样|何必|没必要|多余|想复杂了|that.{0,3}s wrong|that.{0,3}s not right|revert|undo that|put it back|drop that|use .{1,24} instead|i already said|yes that.{0,3}s it|overkill|why bother/i;
+// #endregion
 
 const SCOPES = ["global", "project", "session"] as const;
 const KINDS = ["preference", "rule", "fact", "decision", "task_learning", "bug_fix", "workflow"] as const;
@@ -225,6 +275,12 @@ function memoryConfig() {
     autoExtract: envFlagEnabledConfig(process.env.ASAKI_MEMORY_AUTO_EXTRACT ?? fileConfig.autoExtract ?? fileConfig.auto_extract, false),
     autoClassifier: envFlagEnabledConfig(process.env.ASAKI_MEMORY_AUTO_CLASSIFIER ?? fileConfig.autoClassifier ?? fileConfig.auto_classifier, true),
     startupInject: envFlagEnabledConfig(process.env.ASAKI_MEMORY_STARTUP_INJECT ?? fileConfig.startupInject ?? fileConfig.startup_inject, true),
+    // Both default OFF (plan §11.1). Correction mode gates the correction prompt/schema, the
+    // extra POST fields, the prior-context block, the prior-candidate line and the throttle
+    // override; action trace gates only the `Tool:` lines inside the delta. With both off the
+    // prompt, the schema, the POST body and the delta text are what they were before.
+    correctionMode: envFlagEnabledConfig(process.env.ASAKI_MEMORY_CORRECTION_MODE ?? fileConfig.correctionMode ?? fileConfig.correction_mode, false),
+    actionTrace: envFlagEnabledConfig(process.env.ASAKI_MEMORY_ACTION_TRACE ?? fileConfig.actionTrace ?? fileConfig.action_trace, false),
     startupTopK: numberConfig(process.env.ASAKI_MEMORY_STARTUP_TOP_K, numberConfig(fileConfig.startupTopK ?? fileConfig.startup_top_k, DEFAULT_STARTUP_TOP_K)),
     extractMinIntervalMs:
       numberConfig(process.env.ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS, numberConfig(fileConfig.extractMinIntervalSeconds ?? fileConfig.extract_min_interval_seconds, DEFAULT_EXTRACT_MIN_INTERVAL_SECONDS)) * 1000,
@@ -332,7 +388,7 @@ function assertSafeBaseUrl(url: string): void {
   throw new Error(`Unsafe ASAKI_MEMORY_BASE_URL "${url}": baseUrl must be https:, only localhost/127.0.0.1 may use http:.`);
 }
 
-async function memoryRequest(path: string, body: unknown, signal?: AbortSignal, method = "POST") {
+async function memoryRequest(path: string, body: unknown, signal?: AbortSignal, method = "POST"): Promise<any> {
   const { baseUrl, apiKey } = memoryConfig();
   assertSafeBaseUrl(baseUrl);
   if (!apiKey) {
@@ -595,12 +651,100 @@ function envFlagEnabled(name: string, fallback = true): boolean {
   return !["0", "false", "off", "no"].includes(value.toLowerCase());
 }
 
+// #region asaki-trace-builder
 function cleanMemoryText(text: string): string {
   return text.replace(/\r/g, "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function containsSensitiveText(text: string): boolean {
   return SENSITIVE_RE_LIST.some((pattern) => pattern.test(text));
+}
+
+function containsTraceSensitiveText(text: string): boolean {
+  return TRACE_SENSITIVE_RE_LIST.some((pattern) => pattern.test(text));
+}
+
+function expandHomePath(value: string): string {
+  if (value === "~") return homedir();
+  if (value.startsWith("~/")) return resolve(homedir(), value.slice(2));
+  return value;
+}
+
+// R1's "inside the repo" half: a path inside the repo root is emitted repo-relative, anything
+// outside it (or any path at all when the repo root is unknown) collapses to a placeholder.
+function repoRelativeOrNull(value: string, repoRoot: string): string | null {
+  if (!repoRoot) return null;
+  const absolute = resolve(repoRoot, expandHomePath(value));
+  const rel = relative(repoRoot, absolute);
+  if (rel === "") return ".";
+  if (rel.startsWith("..") || isAbsolute(rel)) return null;
+  return rel.split(sep).join("/");
+}
+
+function isAbsolutePathToken(token: string): boolean {
+  return token.startsWith("/") || token.startsWith("~/") || token === "~" || /^[A-Za-z]:[\\/]/.test(token);
+}
+
+// R1–R5 for a single whitespace-delimited command token (plan §3.1). Surrounding quotes are
+// stripped for classification and restored afterwards, so a quoted absolute path still redacts.
+function redactTraceToken(token: string, repoRoot: string): string {
+  if (!token) return token;
+
+  const quoted = token.match(/^(["'])([\s\S]*)\1$/);
+  if (quoted) return `${quoted[1]}${redactTraceToken(quoted[2], repoRoot)}${quoted[1]}`;
+
+  const assignment = token.match(/^([A-Za-z0-9_.-]+=)([\s\S]+)$/);
+  if (assignment) return `${assignment[1]}${redactTraceToken(assignment[2], repoRoot)}`;
+
+  // R1: absolute path → repo-relative inside the repo, else <path>.
+  if (isAbsolutePathToken(token)) return repoRelativeOrNull(token, repoRoot) ?? "<path>";
+
+  // R2: URI → scheme only; host and object path are both dropped.
+  const uri = token.match(/^([a-z][a-z0-9+.-]*):\/\//i);
+  if (uri) return `<uri:${uri[1].toLowerCase()}>`;
+
+  // R3: user@host.
+  if (/^[^@\s]+@[^@\s]+$/.test(token)) return "<host>";
+
+  // R4: relative path escaping the repo.
+  if (token.startsWith("../") && token.includes("/")) return "<path>";
+
+  // R5: binary names, flags, numbers, quoted free text — verbatim.
+  return token;
+}
+
+function redactTraceCommand(command: string, repoRoot: string): string {
+  return command
+    .trim()
+    .split(/\s+/)
+    .map((token) => redactTraceToken(token, repoRoot))
+    .join(" ");
+}
+
+// One Pi ToolCall → one trace line, or null when the whole line must be dropped. The gate runs
+// on the ORIGINAL argument (step 1) because redaction would rewrite `ssh -i /home/a/.ssh/id_x`
+// into `ssh -i <path>`, which no longer matches the `.ssh/` rule; truncation runs last (step 3)
+// so it can neither bisect a credential nor cut away a token the gate was about to catch.
+function traceLineForToolCall(call: unknown, repoRoot: string): string | null {
+  const toolCall = call as { name?: unknown; arguments?: Record<string, unknown> } | null;
+  const name = typeof toolCall?.name === "string" ? toolCall.name.trim() : "";
+  if (!name) return null;
+  const label = `Tool: ${name.toLowerCase()}`;
+
+  const entry = PI_TRACE_TOOLS[name.toLowerCase()];
+  if (!entry) return label;
+
+  const raw = toolCall?.arguments && typeof toolCall.arguments === "object" ? toolCall.arguments[entry.arg] : undefined;
+  if (typeof raw !== "string" || !raw.trim()) return label;
+  if (containsTraceSensitiveText(raw) || containsSensitiveText(raw)) return null;
+
+  let arg: string;
+  if (entry.shape === "command") arg = redactTraceCommand(raw, repoRoot);
+  else if (entry.shape === "path") arg = repoRelativeOrNull(raw.trim(), repoRoot) ?? "";
+  else arg = raw.trim().replace(/\s+/g, " ");
+
+  arg = arg.length > TRACE_ARG_MAX_CHARS ? arg.slice(0, TRACE_ARG_MAX_CHARS) : arg;
+  return arg ? `${label} ${arg}` : label;
 }
 
 function extractTextContent(content: unknown): string {
@@ -612,21 +756,60 @@ function extractTextContent(content: unknown): string {
     .join(" ");
 }
 
-function buildExtractionText(messages: unknown): string {
-  if (!Array.isArray(messages)) return "";
+// Sibling of extractTextContent for the action trace. `toolResult` arrives as its own message
+// role and is never read; thinking content is never read either.
+function extractToolCalls(content: unknown, repoRoot: string): string[] {
+  if (!Array.isArray(content)) return [];
   const lines: string[] = [];
+  for (const part of content as any[]) {
+    if (!part || typeof part !== "object" || part.type !== "toolCall") continue;
+    const line = traceLineForToolCall(part, repoRoot);
+    if (line) lines.push(line);
+  }
+  return lines;
+}
+
+export interface ExtractionTextOptions {
+  actionTrace?: boolean;
+  correctionMode?: boolean;
+  repoRoot?: string;
+  priorCandidate?: string;
+}
+
+// Pi has no cross-delta tail file (unlike Claude Code it sees the whole message list every
+// agent_end), so the equivalent of the tail carry-over is marking where the current turn starts:
+// everything from the last `role: "user"` message onward is the current delta, everything above
+// it is already-processed antecedent context. Nothing is collapsed, deduplicated or reordered —
+// the trace line format carries no timestamp, so order is the only temporal signal.
+function buildExtractionText(messages: unknown, options: ExtractionTextOptions = {}): string {
+  if (!Array.isArray(messages)) return "";
+  const { actionTrace = false, correctionMode = false, repoRoot = "", priorCandidate = "" } = options;
+  const lines: string[] = [];
+  let currentTurnAt = -1;
   for (const message of messages as any[]) {
     if (!message || typeof message !== "object") continue;
     if (message.role === "user") {
       const text = cleanMemoryText(extractTextContent(message.content));
-      if (text) lines.push(`User: ${text}`);
+      if (text) {
+        currentTurnAt = lines.length;
+        lines.push(`User: ${text}`);
+      }
     } else if (message.role === "assistant" && (!message.stopReason || message.stopReason === "stop" || message.stopReason === "toolUse")) {
       const text = cleanMemoryText(extractTextContent(message.content));
       if (text) lines.push(`Assistant: ${text}`);
+      if (actionTrace) lines.push(...extractToolCalls(message.content, repoRoot));
     }
   }
-  return lines.join("\n\n");
+
+  if (!correctionMode) return lines.join("\n\n");
+
+  const prior = currentTurnAt > 0 ? lines.slice(0, currentTurnAt) : [];
+  const current = currentTurnAt > 0 ? lines.slice(currentTurnAt) : lines;
+  if (priorCandidate) prior.push(`Prior memory candidate: ${priorCandidate}`);
+  if (prior.length === 0) return current.join("\n\n");
+  return [PRIOR_BLOCK_HEADER, ...prior, CURRENT_DELTA_DELIMITER, ...current].join("\n\n");
 }
+// #endregion
 
 function summarizeExtractionDecisions(decisions: unknown, reviews?: unknown): string | null {
   const decisionList = Array.isArray(decisions) ? (decisions as any[]) : [];
@@ -652,7 +835,51 @@ function timeoutSignal(ms: number): AbortSignal {
 
 // Module-level, not per-call: agent_end fires every turn, and this must survive across those
 // calls within the same process to actually throttle repeat extraction/classifier attempts.
+// `lastAutoExtractAt` is now the analogue of Claude Code's `.last_extract`: written on every
+// fire, read for nothing — the window anchor below is what the throttle actually decides on.
 let lastAutoExtractAt = 0;
+
+// Session-scoped state (plan §3.4/§4.5). AgentEndEvent carries no session id and config.sessionId
+// is normally empty, so a bare module-level variable would leak the previous session's candidate
+// after an in-process switchSession(). Everything session-scoped is therefore keyed by an epoch
+// bumped on every real session boundary event.
+let sessionEpoch = 0;
+let priorCandidate: { epoch: number; text: string } | null = null;
+let lastWindowStartAt = 0;
+let overrideUsedForWindow = -1;
+
+function resetSessionScopedState(): void {
+  sessionEpoch += 1;
+  priorCandidate = null;
+  lastWindowStartAt = 0;
+  overrideUsedForWindow = -1;
+}
+
+// Pi's copy of the throttle state machine (plan §4.5), identical in rules to `throttle_decision`
+// in integrations/claude-code/stop-extract.sh: an override never moves the window anchor, so a
+// correction storm cannot replenish its own override budget. At most 2 calls per fixed window.
+type ThrottleDecision = "normal" | "override" | "skip";
+
+function throttleDecision(now: number, intervalMs: number, signal: boolean): ThrottleDecision {
+  if (lastWindowStartAt > now || now - lastWindowStartAt >= intervalMs) {
+    lastWindowStartAt = now;
+    return "normal";
+  }
+  if (signal && overrideUsedForWindow !== lastWindowStartAt) {
+    overrideUsedForWindow = lastWindowStartAt;
+    return "override";
+  }
+  return "skip";
+}
+
+// Offset consumption has no analogue here (Pi re-reads the whole message list every turn), so
+// this only decides whether a failure is worth reporting as retryable. KEEP the classes in sync
+// with `outcome_for_status` in integrations/claude-code/stop-extract.sh (plan §9.3).
+function outcomeForStatus(status: number): "advance" | "hold" {
+  if (status >= 200 && status < 300) return "advance";
+  if (status === 400 || status === 413 || status === 414 || status === 422) return "advance";
+  return "hold";
+}
 
 type ClassifierResult = {
   flag: boolean;
@@ -660,6 +887,12 @@ type ClassifierResult = {
   type: string;
   scope: string;
   reason: string;
+  signal: string;
+  signal_subtype: string;
+  rule_form: string;
+  antecedent_source: string;
+  correction: { agent_did: string; captain_verdict: string; redirect_target: string };
+  supersedes_query: string;
 };
 
 const CLASSIFIER_SYSTEM_PROMPT = `You are a memory-candidate detector, not a writer. Given a conversation delta, decide if it contains something worth saving as a durable memory, and if so pre-distill it into ready-to-write fields. The extension will execute the write via HTTP after your response, so make the call carefully here.
@@ -708,17 +941,142 @@ Be conservative: when genuinely unsure, prefer flag=false.
 
 Output compact JSON only, no prose: {"flag":true|false,"text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","reason":"<short reason, especially when flag=false>"}`;
 
+// Correction mode (plan §6). Superset of the prompt above: same checklist and few-shot set, plus
+// correction detection, the contrast pair, rule-form grammar and the extra output fields.
+// KEEP IN SYNC — byte-identical — with CORRECTION_SYSTEM_PROMPT in
+// integrations/claude-code/stop-extract.sh and scripts/eval-classifier.sh.
+const CORRECTION_SYSTEM_PROMPT = `You are a memory-candidate detector, not a writer. Given a conversation delta, decide if it contains something worth saving as a durable memory, and if so pre-distill it into ready-to-write fields — the client executes the write itself via HTTP after your response (the server then routes it to a review queue), so make the call carefully here.
+
+PRIORITY: the user correcting the agent outranks everything else. A correction is any turn where the user rejects, reverses, narrows, or explicitly approves what the agent just did. If one delta contains BOTH a correction and an ordinary outcome/preference, emit ONLY the correction — the competitor is dropped, not downgraded. At most one candidate per delta.
+
+Input shape. The delta may contain:
+- "User:" / "Assistant:" lines — conversation prose, in transcript order.
+- "Tool: <name> <arg>" lines — one line per agent tool call, with paths, URIs and hosts already redacted. Tool results and thinking are never shown to you.
+- An optional block that starts with "Prior context (ALREADY PROCESSED — antecedent only, never extract from this block):" and ends at the line "--- current delta below ---". Everything above that delimiter was already processed in an earlier turn: use it ONLY as the antecedent of a correction, and never extract a memory out of it.
+- An optional "Prior memory candidate: <text>" line inside that prior block — the memory candidate this classifier proposed last time. A verdict about "那条记忆" / "that memory" refers to it.
+
+Correction reasoning — build the contrast pair BEFORE writing the rule:
+1. correction.agent_did — what the agent produced or attempted, taken from assistant prose, a "Tool:" line, the prior block, or the prior memory candidate.
+2. correction.captain_verdict — the user words, verbatim, trimmed.
+3. correction.redirect_target — what the user pointed to instead (empty for a pure prohibition).
+
+Temporal attribution: agent_did MUST come from a line appearing BEFORE the verdict in reading order. "Tool:" lines appearing AFTER the verdict in the current delta are the agent repairing itself and must never be used as agent_did. If the only candidate action is post-verdict, treat the antecedent as unrecoverable.
+
+If the antecedent cannot be recovered, output flag=false, signal="correction", antecedent_source="none", reason="correction-without-antecedent" — never invent one. This applies ONLY when the user rejects an agent ACTION you cannot find. It does NOT apply to an explicit forget/retract request about an existing memory, rule or prior candidate ("forget that I prefer dark mode", "那条记忆不对") — that request IS its own antecedent, so it is flag=true with rule_form="retract" and needs no agent action at all.
+
+Corrections are the PRIORITY, not the only thing worth saving. A delta with no correction in it is judged exactly as it was before: a completed decision, fix, configuration state or stated preference is flag=true on its own merits and never needs a user verdict, approval or confirmation to qualify. "No correction here" is a reason to fall through to the checklist below, never a reason to answer flag=false. Judge self-containedness on what the sentence itself names — do not demand extra project context it does not need.
+
+Fields:
+- signal: correction | preference | outcome | none. Use "preference" for a stated preference/rule with no correction, "outcome" for a completed decision/fix/learning, "none" when flag=false and nothing was detected.
+- signal_subtype, only when signal=correction (otherwise empty string):
+  - explicit_negation — 不对、不是这样、错了、这不行、no that is wrong, that is not right
+  - override_of_action — 不用改了、别改、改回、回到…、还是原来的、撤销、revert, undo that, put it back
+  - terse_redirect — 去掉、删掉、换成、直接用、应该是…、use X instead, drop that
+  - repeat_complaint — 又…、还是…、说过了、都说了、第几次了、again, I already said
+  - approval_after_change — 对了、这样就行、可以了、就这样、yes that is it (EXPLICIT approval only; never mine implicit acceptance)
+  - futility_verdict — 何必、没必要、多余、想复杂了、overkill, why bother
+- rule_form: prohibition | preference | procedure | retract. Use "retract" for an explicit request to drop or undo an existing memory, rule or prior candidate — including when the user also names a replacement in the same breath (the replacement goes in redirect_target and shapes text; the form stays retract).
+- antecedent_source: prose | trace | prior_tail | candidate | none — where agent_did came from. Use "trace" for a "Tool:" line in the current delta, "prior_tail" for anything inside the prior block, "candidate" for the "Prior memory candidate:" line, "prose" for assistant text, "none" when there is no antecedent.
+- supersedes_query: an AFFIRMATIVE restatement of the OLD behaviour the new rule retires, phrased the way the old memory would have been written — NOT the new negative rule. Empty string when nothing is being retired.
+- Never output importance or confidence. The server derives both from signal and antecedent_source.
+
+Rule phrasing per rule_form:
+- prohibition → 不要<动作>（<场景/对象>） / Never <action> when <scope>. The object must be named; an objectless fragment is flag=false.
+- preference → <场景>下优先<Y>，不要<X> / Prefer Y over X when <scope>. Name both alternatives.
+- procedure → <触发条件>时先<步骤> / When <trigger>, do <step> first.
+- retract → still phrased as a usable negative rule, never the bare verdict.
+
+Two invariants:
+1. The verdict is never the memory. "不对" / "何必" may appear only in correction.captain_verdict, never in text.
+2. The rule must survive the death of the conversation: no 这个 / 该文件 / 上面那版 / 主公说的 in text.
+
+Apply this checklist to every candidate, correction or not:
+1. Durable — will this still matter later, not just for the current task.
+2. Actually happened — a completed decision/fact/fix, not a proposal, question, or hypothetical.
+3. Not noise — not chit-chat, a one-off command, or quoted code/CLI output/prompt text used only to explain how something works (even if the quoted text itself sounds like a preference/rule).
+4. Self-contained — understandable on its own, without the rest of the conversation.
+5. Right scope — see scope rule below.
+
+Do NOT flag: an in-progress/undecided plan, a problem report that ends by asking whether to fix it, routine implementation-progress update within ongoing work, or prompt/eval calibration notes that quote hypothetical user inputs. Actual user forget/retract requests are durable and should be flag=true.
+
+Correction examples:
+- "Tool: bash git commit -m \"wip\"" … "User: 别再自动 commit 了" -> flag=true, signal=correction, signal_subtype=override_of_action, rule_form=prohibition, antecedent_source=trace, text="不要在未获得确认前自动 commit 本仓库的改动".
+- "Assistant: 顺手把首页布局重排了" … "User: 回打开前的页面" -> flag=true, signal=correction, signal_subtype=override_of_action, rule_form=prohibition, antecedent_source=prose, text="修改页面时不要顺手重排既有布局，改完后回到用户打开前的页面状态".
+- "Assistant: 加了三层缓存做兜底" … "User: 何必" -> flag=true, signal=correction, signal_subtype=futility_verdict, rule_form=preference, antecedent_source=prose, text="没有实测瓶颈时不要预先加多层缓存兜底，先用最简实现".
+- "Assistant: 把配置改成 A 方案" … "User: 还是原来的好" -> flag=true, signal=correction, signal_subtype=override_of_action, rule_form=preference, antecedent_source=prose, text="该项目配置保留原方案 B，不要换成 A 方案", supersedes_query="该项目配置改用 A 方案".
+- "Prior memory candidate: 每次编辑完成后自动 commit 并推送" … "User: 那条不对" -> flag=true, signal=correction, signal_subtype=explicit_negation, rule_form=retract, antecedent_source=candidate, text="不要在编辑完成后自动 commit 并推送", supersedes_query="每次编辑完成后自动 commit 并推送".
+- prior block "Tool: edit src/a.ts" … current delta "User: 不对" then "Tool: edit src/a.ts" -> the antecedent is the PRIOR action (antecedent_source=prior_tail); the post-verdict tool line is the repair and must be ignored.
+- "User: 不对" with nothing before it -> flag=false, signal=correction, antecedent_source=none, reason="correction-without-antecedent".
+- User says "forget that I prefer dark mode" -> flag=true, signal=correction, rule_form=retract, antecedent_source=prose, supersedes_query="prefers dark mode" (an explicit forget request is never "correction-without-antecedent").
+- "Prior memory candidate: Always run the full eval suite before every commit" … "User: that memory is wrong, drop it — only run it before a release" -> flag=true, rule_form=retract (NOT procedure), antecedent_source=candidate, redirect_target="only before a release".
+- "User: 这样不会有问题吗？" -> flag=false (a question is not a verdict).
+- "Assistant: 我上面那条改错了，已经修回来了" -> flag=false (the agent correcting itself is not a user correction).
+- One delta with "Assistant: 已修复登录超时" and "User: 别再自动 commit 了" -> emit ONLY the correction; the fix outcome is dropped.
+
+Non-correction examples (unchanged rules):
+- "解决了内存泄漏问题，已验证生效" -> flag=true (a previously-existing problem is now resolved).
+- "记忆里漏了缓存过期时间的配置项" … "已经补全，缓存过期时间统一改成 300 秒" -> flag=true (a concrete corrected configuration value is durable; do not demand an extra system/project identifier the sentence does not need).
+- "加了个测试用例，跑了一下全过了" -> flag=false (a routine step of ongoing work, no prior problem being resolved, nothing durable to recall later).
+- "这条需要改。要不要现在改？" -> flag=false (problem identified but fix/decision is still pending).
+- "FORGET_SIGNALS 正则用于识别类似 \"forget that I prefer dark mode\" 这种表达" -> flag=false (documentation-style explanation of code/prompt behavior, not an actual forget request).
+- User says "forget that I prefer dark mode" -> flag=true (actual forget/retract request).
+- "prompt 里加了 few-shot 正例，比如 User: 以后都用 pnpm" -> flag=false (prompt/eval calibration quoting a hypothetical user input).
+- "已将变更推送至 origin/main，提交为 8df25dd" -> flag=false (one-off delivery status, not durable memory).
+- "Node.js new URL().hostname 对 IPv6 loopback 返回 [::1]" -> flag=false (generic technical trivia, not a user/project memory).
+- "点点数据的 App 详情页是 JS SPA，WebFetch 抓不到价格，后续改用官方 API" -> flag=true, scope=project (tool/site-specific learning never belongs in global scope).
+- "已从 Pi 配置中彻底移除 Ponytail 包、extension、skills 和配置引用" -> flag=true, scope=project (durable current configuration state).
+- "type: fix" -> flag=false (vague commit fragment with no self-contained durable fact).
+- "Music playing now" -> flag=false (transient UI/runtime status).
+- "先强制使用 Chafa；后续确认已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp" -> flag=true, scope=project, but distill only the final Kgp state (superseded intermediate states must not become separate memories).
+- "环境变量/API密钥统一存放在 ~/.config/fish/conf.d/api_keys.local.fish" -> flag=true, scope=project (machine-local shell paths belong to the dotfiles project, never global).
+- "一次性汇报放 scratchpad，不写入项目仓库" -> flag=true, scope=global (where one-off artifacts go is a reusable cross-project delivery preference, so it stays global even though the sentence mentions 项目仓库; keep it concise).
+- "周会每项目 3–5 行，与豪哥日报区分；临时汇报放 scratchpad" -> flag=true, scope=project (mentor/reporting-specific conventions do not help in unrelated projects).
+- "Claude Code 的交付文本必须放在回合最后，否则后续工具调用可能使文本不展示" -> flag=true, scope=project (app-specific harness behavior is not global).
+- "用户希望针对技能和工具进行优化，列出推荐项并决定是否禁用" -> flag=false (an open optimization intention is not a completed decision or durable outcome).
+- "paneru 四边 padding 4→10，与 sketchybar 左侧 10px 对齐" -> flag=true, scope=project, and distill the final 10px state rather than the change history.
+- A long SketchyBar popup implementation report -> flag=true, scope=project, but compress it to the stable entry point, switching mechanism, and fallback behavior within 300 characters.
+- "Claude Design 画布页（.dc.html）不在 DesignSync MCP 文件树里（get_file 404）。浏览器登录态下可直接调 Omelette API：读取 GetFile，写回用 UploadFile，DeleteFile 删文件；大段 HTML 下载用 Blob+anchor，上传方向页内 fetch 后再 SHA-256 对齐本地。" -> flag=false (raw one-off API procedure dump, not an explicit repeat-use convention or established project workflow).
+- "用户希望不使用嵌套并复用同一个 herdr 进程和 server" -> flag=false ("不使用嵌套" lacks an object and cannot stand alone).
+- "手动拖高 Ghostty 窗口以填补当前布局缺口" -> flag=false (transient manual UI adjustment).
+
+If flag=true, distill: compress the candidate into exactly ONE self-contained sentence for text, same language as the source. Preference/rule should be roughly 40-160 characters; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 characters. No bullet lists. One fact per memory — never chain multiple facts with semicolons/commas. Never paste raw code, CLI output, or a multi-paragraph narrative.
+
+Classify (only meaningful when flag=true):
+- type: preference | rule | fact | decision | task_learning | bug_fix | workflow. A correction is normally "rule", or "preference" for a taste-level redirect.
+- scope rule: "global" only if the statement would genuinely help in ANY unrelated project (cross-project dev preferences, communication/output style, secret-handling rules, durable personal/identity facts), and "project" for everything else, including system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs, OS-level fixes) even when it was not said inside a recognizable project. When ambiguous, prefer "project".
+
+Be conservative: when genuinely unsure, prefer flag=false — a missed candidate falls back to the existing prompt-based reminder, a false alarm costs the main agent one wasted turn.
+
+Output your FINAL answer as compact JSON only, no other prose before or after it: {"flag":true|false,"signal":"correction|preference|outcome|none","signal_subtype":"<subtype if signal=correction, else empty string>","text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","rule_form":"<prohibition|preference|procedure|retract, empty string when not a rule-shaped candidate>","antecedent_source":"prose|trace|prior_tail|candidate|none","correction":{"agent_did":"","captain_verdict":"","redirect_target":""},"supersedes_query":"","reason":"<short reason, especially when flag=false>"}`;
+
+function trimmedString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function parseClassifierResult(output: string): ClassifierResult | null {
   try {
     const match = output.match(/\{[\s\S]*\}/);
     if (!match) return null;
     const parsed = JSON.parse(match[0]) as Partial<ClassifierResult>;
+    const correction = (parsed.correction && typeof parsed.correction === "object" ? parsed.correction : {}) as Partial<ClassifierResult["correction"]>;
     return {
       flag: parsed.flag === true,
-      text: typeof parsed.text === "string" ? parsed.text.trim() : "",
-      type: typeof parsed.type === "string" ? parsed.type.trim() : "",
-      scope: typeof parsed.scope === "string" ? parsed.scope.trim() : "",
-      reason: typeof parsed.reason === "string" ? parsed.reason.trim() : "",
+      text: trimmedString(parsed.text),
+      type: trimmedString(parsed.type),
+      scope: trimmedString(parsed.scope),
+      reason: trimmedString(parsed.reason),
+      // Absent on the legacy (correction mode off) schema — every one of these degrades to the
+      // inert member, and the server coerces unknown values the same way (plan §4.4).
+      signal: trimmedString(parsed.signal),
+      signal_subtype: trimmedString(parsed.signal_subtype),
+      rule_form: trimmedString(parsed.rule_form),
+      antecedent_source: trimmedString(parsed.antecedent_source),
+      correction: {
+        agent_did: trimmedString(correction.agent_did),
+        captain_verdict: trimmedString(correction.captain_verdict),
+        redirect_target: trimmedString(correction.redirect_target),
+      },
+      supersedes_query: trimmedString(parsed.supersedes_query),
     };
   } catch {
     return null;
@@ -749,9 +1107,9 @@ function summarizeCandidateDecision(data: any, fallbackText: string): string | n
   return null;
 }
 
-async function classifyMemoryCandidate(text: string, ctx: unknown, pi: ExtensionAPI): Promise<ClassifierResult | null> {
+async function classifyMemoryCandidate(text: string, ctx: unknown, pi: ExtensionAPI, correctionHint = ""): Promise<ClassifierResult | null> {
   const config = memoryConfig();
-  const prompt = `Delta:
+  const prompt = `${correctionHint}Delta:
 ${text}`;
   const result = await pi
     .exec(
@@ -771,7 +1129,7 @@ ${text}`;
         "--no-prompt-templates",
         "--no-context-files",
         "--system-prompt",
-        CLASSIFIER_SYSTEM_PROMPT,
+        config.correctionMode ? CORRECTION_SYSTEM_PROMPT : CLASSIFIER_SYSTEM_PROMPT,
         prompt,
       ],
       { cwd: cwdFromContext(ctx), timeout: CLASSIFIER_TIMEOUT_MS },
@@ -785,6 +1143,21 @@ async function writeClassifiedMemory(candidate: ClassifierResult, ctx: unknown):
   const config = memoryConfig();
   const scope = normalizeScope(candidate.scope) || "project";
   const projectId = resolveProjectId(ctx);
+  // project_context goes out for EVERY scope, unlike project_id — it is a scope-neutral hint the
+  // server persists but never uses for scope validation, visibility, or the review row's
+  // project_id column. Without it a global correction cannot be matched against the project
+  // memories it retires (plan §5.3c).
+  const evidence = config.correctionMode
+    ? {
+        project_context: projectId ?? null,
+        signal: candidate.signal,
+        signal_subtype: candidate.signal_subtype,
+        rule_form: candidate.rule_form,
+        antecedent_source: candidate.antecedent_source,
+        correction: candidate.correction,
+        supersedes_query: candidate.supersedes_query,
+      }
+    : {};
   const body: Record<string, unknown> = {
     user_id: config.userId,
     source: "pi:agent-end-classifier",
@@ -793,6 +1166,7 @@ async function writeClassifiedMemory(candidate: ClassifierResult, ctx: unknown):
         content: candidate.text,
         kind: normalizeKind(candidate.type),
         scope,
+        ...evidence,
         ...(scope === "project" ? { project_id: projectId } : {}),
         ...(scope === "session" && config.sessionId ? { session_id: config.sessionId } : {}),
       },
@@ -800,21 +1174,65 @@ async function writeClassifiedMemory(candidate: ClassifierResult, ctx: unknown):
   };
   if (scope === "project") body.project_id = projectId;
   if (scope === "session" && config.sessionId) body.session_id = config.sessionId;
-  const data = await memoryRequest("/v1/memories/candidates", body, timeoutSignal(AUTO_EXTRACT_TIMEOUT_MS));
-  return summarizeCandidateDecision(data, candidate.text);
+
+  // Output-side gate (plan §8.2e): correction.* and supersedes_query are verbatim conversation
+  // echoes, so the model can hand back a secret the input gate never had to judge on its own.
+  // A hit skips the write outright rather than retrying the same body.
+  if (containsSensitiveText(JSON.stringify(body))) return "skip — sensitive content in candidate";
+
+  const epochAtRequest = sessionEpoch;
+  let data: any;
+  try {
+    data = await memoryRequest("/v1/memories/candidates", body, timeoutSignal(AUTO_EXTRACT_TIMEOUT_MS));
+  } catch (error) {
+    // Classify the failure the same way the Claude Code hook does (plan §9.3). Pi has no
+    // transcript offset, so "terminal" only decides how the failure is described: a deterministic
+    // body rejection will never be accepted, everything else is worth another turn.
+    if (error instanceof MemoryApiError) {
+      const repairable = error.status === 401 || error.status === 403 ? "; check ASAKI_MEMORY_API_KEY" : "";
+      return outcomeForStatus(error.status) === "advance"
+        ? `skip — candidate rejected (${error.status})`
+        : `retry next turn — memory API ${error.status}${repairable}`;
+    }
+    throw error;
+  }
+  const summary = summarizeCandidateDecision(data, candidate.text);
+  // Only a candidate the server actually routed to the review queue may become the next turn's
+  // antecedent — matching Claude Code's `action == "review"` restriction — and only while the
+  // session that produced it is still the current one.
+  if (Array.isArray(data?.reviews) && data.reviews.length > 0 && epochAtRequest === sessionEpoch) {
+    priorCandidate = { epoch: sessionEpoch, text: candidate.text.slice(0, 300) };
+  }
+  return summary;
 }
 
 async function autoExtractMemory(messages: unknown, ctx: unknown, pi: ExtensionAPI): Promise<string | null> {
   const config = memoryConfig();
   if (!config.apiKey) return null;
+  // Nothing downstream can fire, so do not build a delta or spend this window's throttle state.
+  if (!config.autoExtract && !config.autoClassifier) return null;
 
   const now = Date.now();
-  if (now - lastAutoExtractAt < config.extractMinIntervalMs) return null;
 
+  // The delta is built BEFORE the throttle decision (plan §4.5): the correction override has to
+  // be able to see the text it is deciding about.
   // Keep the tail, not the head — the highest-value content in a long turn (a final "verified
   // working" / "decided to use X" conclusion) tends to land at the end, not the start.
-  const text = buildExtractionText(messages).slice(-AUTO_EXTRACT_MAX_CHARS);
+  const text = buildExtractionText(messages, {
+    actionTrace: config.actionTrace,
+    correctionMode: config.correctionMode,
+    repoRoot: findGitRoot(cwdFromContext(ctx)) ?? "",
+    priorCandidate: config.correctionMode && priorCandidate?.epoch === sessionEpoch ? priorCandidate.text : "",
+  }).slice(-AUTO_EXTRACT_MAX_CHARS);
   if (!text.trim() || containsSensitiveText(text)) return null;
+
+  const correctionSignalLines = config.correctionMode
+    ? text
+        .split("\n")
+        .filter((line) => CORRECTION_SIGNAL_RE.test(line))
+        .slice(0, 3)
+    : [];
+  if (throttleDecision(now, config.extractMinIntervalMs, correctionSignalLines.length > 0) === "skip") return null;
 
   if (config.autoExtract) {
     if (!EXTRACT_SIGNAL_RE.test(text)) return null;
@@ -841,7 +1259,9 @@ async function autoExtractMemory(messages: unknown, ctx: unknown, pi: ExtensionA
   // the same model-selection pattern as the atomic-commit extension, then write the pre-distilled
   // candidate via the same HTTP candidate endpoint as asaki_memory_add.
   lastAutoExtractAt = now;
-  const candidate = await classifyMemoryCandidate(text, ctx, pi);
+  const correctionHint =
+    correctionSignalLines.length > 0 ? `correction_suspected: true (lines that tripped the local pre-gate)\n${correctionSignalLines.join("\n")}\n` : "";
+  const candidate = await classifyMemoryCandidate(text, ctx, pi, correctionHint);
   if (!candidate) return null;
   if (!candidate.flag) return envFlagEnabled("ASAKI_MEMORY_DEBUG", false) && candidate.reason ? `skip — ${candidate.reason}` : null;
   if (!candidate.text) return null;
@@ -861,7 +1281,15 @@ export default function (pi: ExtensionAPI) {
     return new Text(`${theme.fg("mdHeading", "[Memory]")}\n${theme.fg("dim", `  ${details.join(" ")}`)}`, 0, 0);
   });
 
+  // Every session boundary (startup | reload | new | resume | fork) invalidates the prior
+  // candidate and the throttle window — Claude Code's equivalents are files keyed by SESSION_ID
+  // and therefore already start fresh per session (plan §3.4).
+  pi.on("session_before_switch", async () => {
+    resetSessionScopedState();
+  });
+
   pi.on("session_start", async (_event, ctx) => {
+    resetSessionScopedState();
     if (!ctx.hasUI) return;
     const banner = await buildSessionBanner(ctx);
     if (banner) pi.appendEntry("asaki-memory-banner", banner);

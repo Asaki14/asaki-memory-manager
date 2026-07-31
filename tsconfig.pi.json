@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    // The Pi host modules are declared as untyped stubs (integrations/pi/pi-host-modules.d.ts),
+    // so extension callbacks get no contextual parameter types. Checking this repo's own logic
+    // is the point of this config; requiring hand-annotation of every SDK callback is not.
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "lib": ["ES2022"],
+    "types": ["node"]
+  },
+  "include": ["integrations/pi/**/*.ts", "integrations/pi/**/*.d.ts"]
+}

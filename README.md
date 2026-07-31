@@ -166,6 +166,12 @@ export ASAKI_MEMORY_AUTO_CLASSIFIER="1"
 export ASAKI_MEMORY_STANDING_RULES="1"
 export ASAKI_MEMORY_CLASSIFIER_MODEL="openai-codex/gpt-5.6-luna"
 export ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS="300"
+# Opt-in, both default off. Correction mode makes the classifier detect the user correcting the
+# agent and record the evidence; action trace adds one redacted `Tool: <name> <arg>` line per
+# tool call to the delta. See integrations/claude-code/README.md for what action trace sends
+# off-machine before enabling it.
+export ASAKI_MEMORY_CORRECTION_MODE="0"
+export ASAKI_MEMORY_ACTION_TRACE="0"
 ```
 
 The classifier model can also be set via `classifierModel` in `~/.pi/agent/asaki-memory.json`. Keep `ASAKI_MEMORY_AUTO_EXTRACT=0`: server-side `/v1/memories/extract` is deprecated compatibility behavior and must not be enabled for routine capture.
