@@ -722,7 +722,7 @@ function redactTraceCommand(command: string, repoRoot: string): string {
 }
 
 // One Pi ToolCall → one trace line, or null when the whole line must be dropped. The gate runs
-// on the ORIGINAL argument (step 1) because redaction would rewrite `ssh -i /Users/a/.ssh/id_x`
+// on the ORIGINAL argument (step 1) because redaction would rewrite `ssh -i /home/a/.ssh/id_x`
 // into `ssh -i <path>`, which no longer matches the `.ssh/` rule; truncation runs last (step 3)
 // so it can neither bisect a credential nor cut away a token the gate was about to catch.
 function traceLineForToolCall(call: unknown, repoRoot: string): string | null {

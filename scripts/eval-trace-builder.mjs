@@ -93,15 +93,15 @@ check(
 );
 
 // --- Claude Code: R1–R5 worked examples from plan §3.1 ----------------------------------------
-check('R1 outside repo', traceLineForToolUse('Bash', { command: 'cat /Users/alice/Clients/Acme/2026-layoffs-list.xlsx' }, REPO_ROOT), 'Tool: bash cat <path>');
+check('R1 outside repo', traceLineForToolUse('Bash', { command: 'cat /home/alice/Clients/Acme/2026-layoffs-list.xlsx' }, REPO_ROOT), 'Tool: bash cat <path>');
 check('R2 uri', traceLineForToolUse('Bash', { command: 'aws s3 cp s3://acme-private-legal/settlement.pdf .' }, REPO_ROOT), 'Tool: bash aws s3 cp <uri:s3> .');
 check('R3 user@host', traceLineForToolUse('Bash', { command: "ssh deploy@acme-prod.internal 'systemctl restart api'" }, REPO_ROOT), "Tool: bash ssh <host> 'systemctl restart api'");
 check('R5 verbatim', traceLineForToolUse('Bash', { command: 'git commit -m "wip"' }, REPO_ROOT), 'Tool: bash git commit -m "wip"');
 check('R1 inside repo', traceLineForToolUse('Edit', { file_path: '/repo/src/index.ts' }, REPO_ROOT), 'Tool: edit src/index.ts');
-check('R1 path arg outside repo', traceLineForToolUse('Read', { file_path: '/Users/alice/Clients/Acme/2026-layoffs-list.xlsx' }, REPO_ROOT), 'Tool: read');
+check('R1 path arg outside repo', traceLineForToolUse('Read', { file_path: '/home/alice/Clients/Acme/2026-layoffs-list.xlsx' }, REPO_ROOT), 'Tool: read');
 check('R4 relative escape', redactToken('../../other-repo/secrets.ts', REPO_ROOT), '<path>');
-check('R1 as the value half of k=v', redactCommand('rsync --exclude=/Users/alice/private ./out', REPO_ROOT), 'rsync --exclude=<path> ./out');
-check('quoted absolute path still redacts', redactToken('"/Users/alice/private/file.txt"', REPO_ROOT), '"<path>"');
+check('R1 as the value half of k=v', redactCommand('rsync --exclude=/home/alice/private ./out', REPO_ROOT), 'rsync --exclude=<path> ./out');
+check('quoted absolute path still redacts', redactToken('"/home/alice/private/file.txt"', REPO_ROOT), '"<path>"');
 check('unknown tool emits the name alone', traceLineForToolUse('WebFetch', { url: 'https://internal.acme.test/x' }, REPO_ROOT), 'Tool: webfetch');
 check('gated arg drops the whole line', traceLineForToolUse('Bash', { command: 'wrangler secret put ADMIN_API_KEY' }, REPO_ROOT), null);
 check('missing repo root bounds every path', traceLineForToolUse('Read', { file_path: '/repo/src/index.ts' }, ''), 'Tool: read');
@@ -174,11 +174,11 @@ check(
 
 // --- Cross-client agreement on the shared rules ------------------------------------------------
 for (const command of [
-  'cat /Users/alice/Clients/Acme/2026-layoffs-list.xlsx',
+  'cat /home/alice/Clients/Acme/2026-layoffs-list.xlsx',
   'aws s3 cp s3://acme-private-legal/settlement.pdf .',
   "ssh deploy@acme-prod.internal 'systemctl restart api'",
   'git commit -m "wip"',
-  'rsync --exclude=/Users/alice/private ./out',
+  'rsync --exclude=/home/alice/private ./out',
 ]) {
   check(
     `both clients redact identically: ${command}`,

@@ -117,7 +117,7 @@ function isAbsolutePathToken(token) {
 }
 
 // R1–R5 for a single whitespace-delimited command token. Surrounding quotes are stripped for
-// classification and restored afterwards, so `'/Users/a/x'` still redacts.
+// classification and restored afterwards, so `'/home/a/x'` still redacts.
 export function redactToken(token, repoRoot) {
   if (!token) return token;
 
@@ -169,7 +169,7 @@ export function traceLineForToolUse(name, input, repoRoot) {
   const raw = input && typeof input === 'object' ? input[entry.arg] : undefined;
   if (typeof raw !== 'string' || !raw.trim()) return label;
 
-  // Step 1 — gate the ORIGINAL arg. Redaction rewrites `ssh -i /Users/a/.ssh/id_ed25519` into
+  // Step 1 — gate the ORIGINAL arg. Redaction rewrites `ssh -i /home/a/.ssh/id_ed25519` into
   // `ssh -i <path>`, which no longer matches the `.ssh/` rule, so gating must come first.
   if (containsTraceSensitive(raw) || containsSensitive(raw)) return null;
 

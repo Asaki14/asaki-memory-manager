@@ -7,7 +7,7 @@
       { "type": "text", "text": "好的，我先读一下文件。" },
       { "type": "thinking", "thinking": "internal reasoning that must never leave the machine" },
       { "type": "toolCall", "id": "c1", "name": "read", "arguments": { "path": "/repo/src/index.ts" } },
-      { "type": "toolCall", "id": "c2", "name": "read", "arguments": { "path": "/Users/alice/Clients/Acme/2026-layoffs-list.xlsx" } }
+      { "type": "toolCall", "id": "c2", "name": "read", "arguments": { "path": "/home/alice/Clients/Acme/2026-layoffs-list.xlsx" } }
     ]
   },
   { "role": "toolResult", "content": [{ "type": "text", "text": "export DATABASE_PASSWORD=supersecret123" }] },
@@ -16,7 +16,7 @@
     "stopReason": "toolUse",
     "content": [
       { "type": "toolCall", "id": "c3", "name": "bash", "arguments": { "command": "git commit -m \"wip\"" } },
-      { "type": "toolCall", "id": "c4", "name": "bash", "arguments": { "command": "ssh -i /Users/alice/.ssh/id_ed25519_acme_prod deploy@10.0.0.4" } },
+      { "type": "toolCall", "id": "c4", "name": "bash", "arguments": { "command": "ssh -i /home/alice/.ssh/id_ed25519_acme_prod deploy@10.0.0.4" } },
       { "type": "toolCall", "id": "c5", "name": "bash", "arguments": { "command": "aws s3 cp s3://acme-private-legal/settlement.pdf ." } },
       { "type": "toolCall", "id": "c6", "name": "bash", "arguments": { "command": "ssh deploy@acme-prod.internal 'systemctl restart api'" } },
       { "type": "toolCall", "id": "c7", "name": "todowrite", "arguments": { "todos": [] } },

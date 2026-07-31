@@ -43,9 +43,9 @@
   },
   {
     "name": "customer file path outside the repo",
-    "text": "/Users/alice/Clients/Acme/2026-layoffs-list.xlsx",
+    "text": "/home/alice/Clients/Acme/2026-layoffs-list.xlsx",
     "expect": "keep",
-    "note": "plan §8.1 probe 8 — no credential; bounded by the R1 path rule instead (E6)"
+    "note": "plan §8.1 probe 8 — no credential; bounded by the R1 path rule instead (E6). The plan writes its probes with macOS home paths; rewritten to /home/... because CI hygiene bans that prefix in tracked files, and R1 keys on the leading slash, not the prefix."
   },
   {
     "name": "wrangler secret",
@@ -73,7 +73,7 @@
   },
   {
     "name": "ssh -i key file",
-    "text": "ssh -i /Users/alice/.ssh/id_ed25519_acme_prod deploy@10.0.0.4",
+    "text": "ssh -i /home/alice/.ssh/id_ed25519_acme_prod deploy@10.0.0.4",
     "expect": "drop",
     "note": "plan §8.1 probe 13 — gate runs on the ORIGINAL arg, before redaction turns the key path into <path>"
   },
@@ -85,7 +85,7 @@
   },
   {
     "name": "confidential path outside the repo",
-    "text": "/Users/alice/work/project-chimera-acquisition/valuation.ts",
+    "text": "/home/alice/work/project-chimera-acquisition/valuation.ts",
     "expect": "keep",
     "note": "plan §8.1 probe 15 — bounded by R1 (E6)"
   },

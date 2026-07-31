@@ -3,7 +3,7 @@
 #
 # Contract: given ONE tool argument, does the per-line gate drop the whole trace line or keep it?
 # The gate is the trace list PLUS the canonical secret list, and it always runs on the ORIGINAL
-# argument — before redaction, which would otherwise rewrite `ssh -i /Users/a/.ssh/id_x` into
+# argument — before redaction, which would otherwise rewrite `ssh -i /home/a/.ssh/id_x` into
 # `ssh -i <path>` and manufacture a false negative.
 #
 # Both client copies are exercised per case and must agree with the fixture:
