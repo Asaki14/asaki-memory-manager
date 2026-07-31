@@ -41,7 +41,20 @@ environment (never hardcoded / never committed). Set them once in
   | autoExtract=on|off`) — no memory content. Pi additionally shows its
   local classifier state in the native extension banner. Mirrors the Pi extension's
   `buildSessionBanner()`: the agent decides for itself when to actually
-  search/read memories instead of receiving a startup memory dump.
+  search/read memories instead of receiving a startup memory dump. The one
+  content-bearing exception is the standing-rule block (see below).
+- `standing-rules.jq` — selection and rendering for the standing-rule block
+  `session-start.sh` emits ahead of the banner: ACTIVE `rule`/`preference`
+  memories (global always, project only on match, session never), capped at
+  `ASAKI_MEMORY_STANDING_RULES_MAX` (default 20) and 4000 characters, ordered
+  importance desc → recency desc → id, with a truncation marker when more
+  exist. It reuses the list response the banner already fetches, so it costs
+  no extra request. Unlike the banner it IS re-emitted on compact — standing
+  rules have to survive compaction. Set `ASAKI_MEMORY_STANDING_RULES=0` to
+  disable, `ASAKI_MEMORY_STANDING_RULES_KINDS=rule` to drop preferences.
+  KEEP IN SYNC with `src/services/standingRules.ts` (canonical) and its
+  verbatim copy in `../pi/asaki-memory.ts`; `npm run eval:standing-rules`
+  enforces it.
 - `user-prompt.sh` — UserPromptSubmit hook. Unconditionally injects one fixed
   instruction every turn: the agent itself reads user intent and decides
   whether `asaki_memory_search` is needed, and if so picks its own
