@@ -57,10 +57,10 @@ async function loadRegionModule(regions, preamble, exported) {
   }
 }
 
-// Returns { module, dispose } for the review-formatter region (plan E9). The region is
-// dependency-free, so it needs no preamble.
+// Returns { module, dispose } for the review-formatter region (plan E9, plus the lifecycle-report
+// renderer that shares the region). The region is dependency-free, so it needs no preamble.
 export async function loadPiReviewFormatter() {
-  return loadRegionModule(extractPiRegions('asaki-review-format'), [], ['formatReviewLine', 'correctionBlockLines']);
+  return loadRegionModule(extractPiRegions('asaki-review-format'), [], ['formatReviewLine', 'correctionBlockLines', 'formatLifecycleReport']);
 }
 
 // Returns { module, dispose } — call dispose() to remove the temp dir.

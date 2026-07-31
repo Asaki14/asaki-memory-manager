@@ -6,7 +6,8 @@ import { dedupeCandidateBatch, isAutoAddEligible, isUnsupervisedSource, processM
 import { extractMemoryCandidates } from './services/extraction';
 import { backfillPendingIndex, createMemory, deleteMemory, getMemory, listMemories, pruneStaleMemories, purgeMemory, searchMemories, updateMemory } from './services/memories';
 import { createMemoryReviews, listMemoryReviews, resolveMemoryReview } from './services/reviews';
-import { validateBackfillIndex, validateCreateMemory, validateCreateMemoryReviews, validateExtractMemories, validateListMemories, validateListMemoryReviews, validateMemoryIdInput, validatePruneStale, validateProcessCandidates, validatePurgeMemory, validateResolveMemoryReview, validateSearchMemories, validateUpdateMemory } from './utils/validation';
+import { lifecycleReport } from './services/memoryLifecycle';
+import { validateBackfillIndex, validateCreateMemory, validateCreateMemoryReviews, validateExtractMemories, validateLifecycleReport, validateListMemories, validateListMemoryReviews, validateMemoryIdInput, validatePruneStale, validateProcessCandidates, validatePurgeMemory, validateResolveMemoryReview, validateSearchMemories, validateUpdateMemory } from './utils/validation';
 
 type Bindings = Env;
 
@@ -121,8 +122,11 @@ app.post('/v1/memories/candidates', async (c) => {
   const reviewBucket = validation.data.filter((item) => isUnsupervisedSource(item.source));
 
   const decisions = autoBucket.length > 0 ? await processMemoryCandidates(c.env, autoBucket) : [];
-  const reviews = reviewBucket.length > 0 ? await createMemoryReviews(c.env, reviewBucket) : [];
-  return c.json({ decisions, reviews });
+  const queued = reviewBucket.length > 0 ? await createMemoryReviews(c.env, reviewBucket) : { reviews: [], reinforcements: [] };
+  // `reinforcements` only appears when a correction candidate reinforced an existing standing rule
+  // instead of queueing a row, so a response without recurrence stays byte-identical for clients.
+  const reinforcements = [...queued.reinforcements, ...decisions.flatMap((decision) => (decision.reinforcement ? [decision.reinforcement] : []))];
+  return c.json(reinforcements.length > 0 ? { decisions, reviews: queued.reviews, reinforcements } : { decisions, reviews: queued.reviews });
 });
 
 app.post('/v1/memories/extract', async (c) => {
@@ -170,8 +174,8 @@ app.post('/v1/memories/extract', async (c) => {
   }
 
   const decisions = autoBucket.length > 0 ? await processMemoryCandidates(c.env, autoBucket) : [];
-  const reviews = reviewBucket.length > 0 ? await createMemoryReviews(c.env, reviewBucket) : [];
-  return c.json({ decisions, reviews, extracted_count: extracted.length });
+  const queued = reviewBucket.length > 0 ? await createMemoryReviews(c.env, reviewBucket) : { reviews: [], reinforcements: [] };
+  return c.json({ decisions, reviews: queued.reviews, extracted_count: extracted.length });
 });
 
 app.post('/v1/memories/list', async (c) => {
@@ -207,6 +211,20 @@ app.post('/v1/memories/prune-stale', async (c) => {
   return c.json(result);
 });
 
+// Read-only lifecycle/system-health surface (captain decision 4): per-rule recurrence counts, the
+// repeat rate they aggregate into, and the long-idle standing rules a human has to judge keep/retire.
+// It never mutates or deletes anything — idle rules stay active and injected until a human decides.
+app.post('/v1/memories/lifecycle', async (c) => {
+  const body = await readJson(c);
+  if (!body.ok) return body.response;
+
+  const validation = validateLifecycleReport(body.body);
+  if (!validation.ok) return c.json({ error: validation.error }, 400);
+
+  const report = await lifecycleReport(c.env, validation.data);
+  return c.json(report);
+});
+
 app.post('/v1/memories/reviews', async (c) => {
   const body = await readJson(c);
   if (!body.ok) return body.response;
@@ -214,8 +232,8 @@ app.post('/v1/memories/reviews', async (c) => {
   const validation = validateCreateMemoryReviews(body.body);
   if (!validation.ok) return c.json({ error: validation.error }, 400);
 
-  const reviews = await createMemoryReviews(c.env, validation.data);
-  return c.json({ reviews }, 201);
+  const { reviews, reinforcements } = await createMemoryReviews(c.env, validation.data);
+  return c.json(reinforcements.length > 0 ? { reviews, reinforcements } : { reviews }, 201);
 });
 
 app.post('/v1/memories/reviews/list', async (c) => {

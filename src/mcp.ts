@@ -36,6 +36,36 @@ function truncateText(text: string, maxChars: number): string {
   return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
 }
 
+// How much of a stored correction quote is echoed on a memory line. The full quote (<=120 chars each,
+// see CORRECTION_ORIGIN_MAX_CHARS) stays in metadata_json and on the GET /v1/memories/:id row.
+const MEMORY_ORIGIN_QUOTE_CHARS = 60;
+
+// Lifecycle tail for memory lines: recurrence counter and correction provenance (captain decisions 4
+// + 9), both read out of metadata_json. Absent metadata renders nothing, so pre-0006 rows and plain
+// memories keep today's line. KEEP IN SYNC with formatMemoryLine() in integrations/pi/asaki-memory.ts.
+function lifecycleSuffix(item: Record<string, unknown>): string {
+  if (typeof item.metadata_json !== 'string' || !item.metadata_json.trim()) return '';
+  let meta: Record<string, any>;
+  try {
+    meta = JSON.parse(item.metadata_json);
+  } catch {
+    return '';
+  }
+  if (!meta || typeof meta !== 'object') return '';
+  let out = '';
+  const reinforcement = meta.reinforcement;
+  if (reinforcement && typeof reinforcement.count === 'number' && reinforcement.count > 0) {
+    out += ` reinforced=${reinforcement.count}x@${reinforcement.last_reinforced_at ?? '?'}`;
+  }
+  const origin = meta.correction_origin;
+  if (origin && typeof origin === 'object') {
+    const agent = truncateText(String(origin.agent_did ?? ''), MEMORY_ORIGIN_QUOTE_CHARS);
+    const verdict = truncateText(String(origin.captain_verdict ?? ''), MEMORY_ORIGIN_QUOTE_CHARS);
+    out += ` origin="${agent} → ${verdict}"`;
+  }
+  return out;
+}
+
 function formatLine(item: Record<string, unknown>, index?: number, maxContentChars?: number): string {
   const prefix = index == null ? '' : `${index + 1}. `;
   const id = item.id ? ` id=${item.id}` : '';
@@ -49,7 +79,7 @@ function formatLine(item: Record<string, unknown>, index?: number, maxContentCha
   const content = item.content ?? item.memory ?? item.text;
   const text = typeof content === 'string' ? content : JSON.stringify(item);
   const shown = maxContentChars == null ? text : truncateText(text, maxContentChars);
-  return `${prefix}${shown}${id}${scope}${kind}${status}${importance}${source}${createdAt}${updatedAt}`;
+  return `${prefix}${shown}${id}${scope}${kind}${status}${importance}${source}${createdAt}${updatedAt}${lifecycleSuffix(item)}`;
 }
 
 function formatScoreDetails(details: unknown): string {
@@ -105,6 +135,24 @@ function correctionBlockLines(item: Record<string, unknown>, candidate: Record<s
     }
   }
 
+  // Global-promotion suggestion: the same rule already exists in ANOTHER project, so this project
+  // correction is probably global. Accept it in one call with `asaki_memory_review_resolve
+  // {action:"add", promote_to_global:true}`; ignoring the line resolves it project-scoped as usual.
+  // Nothing is rescoped automatically, and this never touches the memory quoted on the line.
+  const promotions = item.promotion_candidates;
+  if (promotions === null) {
+    lines.push('   ⤷ promote: not computed (suggestion cap reached on this page; re-list with a narrower filter)');
+  } else if (Array.isArray(promotions)) {
+    for (const raw of promotions) {
+      const p = raw as Record<string, unknown>;
+      const content = typeof p.content === 'string' ? p.content : '';
+      const shown = content.length > SUPERSEDE_CONTENT_CHARS ? `${content.slice(0, SUPERSEDE_CONTENT_CHARS)}…` : content;
+      lines.push(
+        `   ⤷ promote: same rule in project ${p.target_project_id} as ${p.memory_id} [kind=${p.target_kind}] "${shown}"  (score=${num(p.score)} suggest: ${p.suggested_action})`
+      );
+    }
+  }
+
   // Written server-side when this correction refused to merge into the pending row it contradicts;
   // that row's text is not carried on this response, so the id is what there is to print.
   if (typeof candidate.supersedes_pending_review_id === 'string' && candidate.supersedes_pending_review_id) {
@@ -147,6 +195,58 @@ export function formatReviewLine(item: Record<string, unknown>, index?: number):
   }
 
   return `${prefix}${shownContent}${id}${status}${action}${memoryId}${scope}${kind}${source}${createdAt}${updatedAt}${dup}`;
+}
+
+// Lifecycle/system-health report rendering (captain decision 4). Two sections that answer two
+// different questions: recurrence = rules the agent had to be corrected on AGAIN (the repeat-rate
+// signal), idle = standing rules with no reinforcement and no retrieval hit, which a HUMAN judges
+// keep/retire. Nothing here is actionable by the agent alone — no line proposes a delete.
+//
+// KEEP the emitted text byte-identical to the copy in integrations/pi/asaki-memory.ts (inside
+// `// #region asaki-review-format`) — `npm run eval:review-format` fails on any drift. Self-contained
+// on purpose: that region is loaded as a standalone module with no helpers around it.
+export function formatLifecycleReport(data: Record<string, unknown>): string {
+  const LIFECYCLE_CONTENT_CHARS = 120;
+  const clip = (value: unknown): string => {
+    const text = typeof value === 'string' ? value : '';
+    return text.length > LIFECYCLE_CONTENT_CHARS ? `${text.slice(0, LIFECYCLE_CONTENT_CHARS)}…` : text;
+  };
+  const num = (value: unknown, digits: number): string => (typeof value === 'number' ? value.toFixed(digits) : '?');
+  const rows = (value: unknown): Record<string, any>[] => (Array.isArray(value) ? (value as Record<string, any>[]) : []);
+  const totals = (data.standing_rules && typeof data.standing_rules === 'object' ? data.standing_rules : {}) as Record<string, any>;
+  const scopeOf = (row: Record<string, any>): string => (row.scope === 'project' && row.project_id ? `project/${row.project_id}` : String(row.scope ?? '?'));
+
+  const lines = [
+    `Standing rules: ${totals.active ?? 0} active · ${totals.reinforced ?? 0} reinforced · ${totals.total_reinforcements ?? 0} total reinforcements · repeat_rate=${num(totals.repeat_rate, 3)}`,
+  ];
+
+  const recurrence = rows(data.recurrence);
+  lines.push('');
+  if (recurrence.length === 0) {
+    lines.push('Recurrence: none — no standing rule has been corrected again.');
+  } else {
+    lines.push('Recurrence (the agent repeated a mistake an existing rule already covers):');
+    recurrence.forEach((row, index) => {
+      lines.push(
+        `${index + 1}. ${row.id} [scope=${scopeOf(row)} kind=${row.kind} importance=${num(row.importance, 2)}] count=${row.count} last=${row.last_reinforced_at ?? '?'} subtype=${row.last_signal_subtype ?? 'unspecified'} "${clip(row.content)}"`
+      );
+    });
+  }
+
+  const idle = rows(data.idle_rules);
+  lines.push('');
+  if (idle.length === 0) {
+    lines.push(`Possibly stale: none idle for ${data.idle_days_threshold ?? '?'}d.`);
+  } else {
+    lines.push(`Possibly stale — judge keep/retire (no reinforcement and no retrieval hit in ${data.idle_days_threshold ?? '?'}d; never auto-deleted, never demoted out of injection):`);
+    idle.forEach((row, index) => {
+      lines.push(
+        `${index + 1}. ${row.id} [scope=${scopeOf(row)} kind=${row.kind} importance=${num(row.importance, 2)}] idle=${row.idle_days}d last_signal=${row.last_signal_at} reinforced=${row.reinforcement_count ?? 0}x "${clip(row.content)}"`
+      );
+    });
+  }
+
+  return lines.join('\n');
 }
 
 type BudgetedJoin = { text: string; shown: number; total: number };
@@ -433,6 +533,10 @@ const TOOLS: ToolDef[] = [
         action: { type: 'string', enum: ['add', 'merge', 'update', 'delete', 'ignore'] },
         memory_id: { type: 'string' },
         reason: { type: 'string' },
+        promote_to_global: {
+          type: 'boolean',
+          description: 'Accept the row\'s "⤷ promote:" suggestion: store the candidate as scope=global instead of project. Only valid with action=add, and only after the user approved promotion.',
+        },
       },
       required: ['id', 'action'],
     },
@@ -440,12 +544,37 @@ const TOOLS: ToolDef[] = [
       const body: Record<string, unknown> = { user_id: userId, action: args.action };
       if (args.memory_id) body.memory_id = args.memory_id;
       if (args.reason) body.reason = args.reason;
+      if (args.promote_to_global) body.promote_to_global = true;
       return { method: 'POST', path: `/v1/memories/reviews/${encodeURIComponent(args.id)}/resolve`, body };
     },
     format(data) {
       const review = data.review as Record<string, unknown> | undefined;
       const memory = data.memory as Record<string, unknown> | undefined;
-      return `${review ? `Resolved review: ${formatReviewLine(review)}` : 'Review resolved.'}${memory ? `\nMemory: ${formatLine(memory)}` : ''}`;
+      const promoted = data.promoted_to_global === true ? '\nPromoted to scope=global.' : '';
+      return `${review ? `Resolved review: ${formatReviewLine(review)}` : 'Review resolved.'}${memory ? `\nMemory: ${formatLine(memory)}` : ''}${promoted}`;
+    },
+  },
+  {
+    name: 'asaki_memory_lifecycle',
+    description:
+      'Memory-system health report: standing-rule repeat rate, per-rule recurrence counts (rules the agent had to be corrected on again), and long-idle standing rules needing a keep/retire verdict. Read-only. Use during an explicit memory audit.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string', description: 'Include this project\'s rules alongside global ones (no git detection on the server).' },
+        idle_days: { type: 'integer', minimum: 1, maximum: 3650, description: 'Idle threshold in days. Default 30 (~two 14-day audit cadences).' },
+        limit: { type: 'integer', minimum: 1, maximum: 100, description: 'Max rows per section. Default 20.' },
+      },
+    },
+    toRequest(args, userId) {
+      const body: Record<string, unknown> = { user_id: userId };
+      if (args.project_id) body.project_id = args.project_id;
+      if (args.idle_days != null) body.idle_days = args.idle_days;
+      if (args.limit != null) body.limit = args.limit;
+      return { method: 'POST', path: '/v1/memories/lifecycle', body };
+    },
+    format(data) {
+      return formatLifecycleReport(data);
     },
   },
   {

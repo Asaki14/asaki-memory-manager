@@ -2,8 +2,9 @@ import type { Env, MemoryReviewRecord, MemoryReviewRow } from '../types';
 import { UserFacingError } from '../utils/errors';
 import { createMemory, deleteMemory, getMemory, searchMemories, updateMemoryContent } from './memories';
 import { writeMemoryEvent } from './memoryEvents';
+import { parseMemoryMetadata, recordCorrectionOrigin, reinforceMemory, type ReinforcementResult } from './memoryLifecycle';
 import { BATCH_DEDUP_SIMILARITY_THRESHOLD, bestUsableMatch, heuristicDecision, lexicalSimilarity, mergeContent, usableMatches, type ProcessMemoryCandidateInput } from './candidateDecision';
-import { findLexicalMatch } from './candidates';
+import { findCrossProjectMatches, findLexicalMatch } from './candidates';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -77,6 +78,40 @@ export async function findSupersedeCandidates(
     }));
 }
 
+// Display-time global-promotion hint (captain decision 8): the same rule this project correction
+// states already exists as a project-scoped rule/preference in a DIFFERENT project, which is the
+// evidence that it is really a global rule.
+//
+// Unlike findSupersedeCandidates() this queries the candidate's OWN content, not `supersedes_query`:
+// promotion is a same-direction match ("this rule exists elsewhere too"), supersession is the
+// opposite direction ("this rule contradicts that memory"). Suggestion only — nothing is rescoped
+// here, and the review row's project_id is never touched. `project_context` is accepted as the
+// scope-neutral client hint, same precedence as the supersession lookup.
+export async function findPromotionCandidates(
+  env: Env,
+  candidate: ProcessMemoryCandidateInput,
+  reviewProjectId?: string | null,
+): Promise<NonNullable<MemoryReviewRow['promotion_candidates']>> {
+  if (candidate.signal !== 'correction') return [];
+  if (candidate.scope !== 'project') return [];
+  const projectId = candidate.project_id ?? candidate.project_context ?? reviewProjectId ?? null;
+  if (!projectId) return [];
+
+  const rows = await findCrossProjectMatches(env, candidate, projectId);
+  const seen = new Set<string>();
+  return usableMatches(candidate, rows)
+    .filter(({ match }) => (seen.has(match.id) ? false : (seen.add(match.id), true)))
+    .slice(0, 3)
+    .map(({ match, score }) => ({
+      memory_id: match.id,
+      content: match.content,
+      score,
+      target_project_id: match.project_id,
+      target_kind: match.kind,
+      suggested_action: 'promote_to_global' as const,
+    }));
+}
+
 // Catches the gap a review-queue-only dedup (findSimilarPendingReview below) can't: a candidate
 // that duplicates a memory that's already `active` (not merely another pending review). Only
 // preempts the review on a heuristic "ignore" (genuine duplicate, nothing new); "merge"/"update"/
@@ -134,9 +169,16 @@ function parseReview(row: MemoryReviewRecord): MemoryReviewRow {
   };
 }
 
-export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCandidateInput[]): Promise<MemoryReviewRow[]> {
+export interface CreateMemoryReviewsResult {
+  reviews: MemoryReviewRow[];
+  // Candidates that reinforced an existing standing rule instead of queueing a row (recurrence).
+  reinforcements: ReinforcementResult[];
+}
+
+export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCandidateInput[]): Promise<CreateMemoryReviewsResult> {
   const timestamp = nowIso();
   const reviews: MemoryReviewRow[] = [];
+  const reinforcements: ReinforcementResult[] = [];
   const createdIds: string[] = [];
   const mergedIds: string[] = [];
   const skippedDuplicateIds: string[] = [];
@@ -145,6 +187,15 @@ export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCan
     const activeDuplicate = await findActiveDuplicate(env, candidate);
     if (activeDuplicate) {
       skippedDuplicateIds.push(activeDuplicate.id);
+      // Recurrence (captain decision 4): a correction restating a rule that is already ACTIVE means
+      // the agent repeated a mistake that rule covers. Nothing is queued — the human already made
+      // this rule — but the rule gets a bounded importance bump and a recurrence counter, which is
+      // what makes repeat rate measurable (lifecycleReport()). Same-direction by construction: it is
+      // the candidate's own rule text that matched, not its `supersedes_query`.
+      if (candidate.signal === 'correction') {
+        const reinforcement = await reinforceMemory(env, activeDuplicate, candidate);
+        if (reinforcement) reinforcements.push(reinforcement);
+      }
       continue;
     }
 
@@ -254,14 +305,14 @@ export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCan
 
   if (createdIds.length > 0) {
     await writeMemoryEvent(env, {
-      userId: reviews[0].user_id,
+      userId: candidates[0].user_id,
       eventType: 'review_create',
       payload: { count: createdIds.length, review_ids: createdIds },
     });
   }
   if (mergedIds.length > 0) {
     await writeMemoryEvent(env, {
-      userId: reviews[0].user_id,
+      userId: candidates[0].user_id,
       eventType: 'review_merge',
       payload: { count: mergedIds.length, review_ids: mergedIds },
     });
@@ -274,7 +325,7 @@ export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCan
     });
   }
 
-  return reviews;
+  return { reviews, reinforcements };
 }
 
 // `signal` lives inside candidate_json, so both the correction-first ordering and the signal filter
@@ -288,6 +339,11 @@ const SIGNAL_EXPR = `(CASE WHEN json_valid(candidate_json) THEN COALESCE(json_ex
 // Suggestion lookups cost one search each, so cap how many a single response can trigger. Rows past
 // the cap report supersedes_candidates: null plus suggestions_truncated on the response.
 const MAX_SUPERSEDE_LOOKUPS_PER_RESPONSE = 20;
+
+// The promotion lookup is a separate D1 scan with its own eligibility (project-scoped corrections,
+// no `supersedes_query` needed), hence its own budget. Rows past it report promotion_candidates: null
+// and set the same `suggestions_truncated` flag — "some suggestion on this page was not computed".
+const MAX_PROMOTION_LOOKUPS_PER_RESPONSE = 20;
 
 export async function listMemoryReviews(env: Env, input: { user_id: string; status: 'pending' | 'resolved' | 'all'; project_id?: string | null; session_id?: string | null; source?: string | null; signal?: string | null; limit: number; offset: number; include_suggestions?: boolean }): Promise<{ reviews: MemoryReviewRow[]; suggestions_truncated: boolean }> {
   const clauses = ['user_id = ?'];
@@ -336,10 +392,22 @@ export async function listMemoryReviews(env: Env, input: { user_id: string; stat
   // for the first N of them in page order — everything else would be a search that can't produce a
   // suggestion anyway.
   const supersedeEligible = new Set<string>();
+  // `promotionShaped` is "this row could have a promotion suggestion at all"; `promotionEligible` is
+  // the subset inside this response's budget. The distinction matters: only a shaped-but-over-budget
+  // row may report `null` ("not computed"), never one that was simply never promotable.
+  const promotionShaped = new Set<string>();
+  const promotionEligible = new Set<string>();
   let suggestionsTruncated = false;
   for (const review of reviews) {
     if (review.status !== 'pending') continue;
     if (review.candidate.signal !== 'correction') continue;
+    // A project correction can be promotable without carrying a supersedes_query, so the two
+    // eligibility tests are independent.
+    if (review.candidate.scope === 'project' && (review.candidate.project_id ?? review.candidate.project_context ?? review.project_id)) {
+      promotionShaped.add(review.id);
+      if (promotionEligible.size >= MAX_PROMOTION_LOOKUPS_PER_RESPONSE) suggestionsTruncated = true;
+      else promotionEligible.add(review.id);
+    }
     if (!review.candidate.supersedes_query?.trim()) continue;
     if (supersedeEligible.size >= MAX_SUPERSEDE_LOOKUPS_PER_RESPONSE) {
       suggestionsTruncated = true;
@@ -360,19 +428,35 @@ export async function listMemoryReviews(env: Env, input: { user_id: string; stat
           : undefined;
       const supersedesField = supersedes === undefined ? {} : { supersedes_candidates: supersedes };
 
+      // Same three-state contract as supersedes: an array when computed, null when eligible but
+      // over budget, absent when the row was never eligible (so non-correction rows stay byte-clean).
+      const promotions = promotionEligible.has(review.id)
+        ? await findPromotionCandidates(env, review.candidate, review.project_id)
+        : promotionShaped.has(review.id)
+          ? null
+          : undefined;
+      const promotionField = promotions === undefined ? {} : { promotion_candidates: promotions };
+
       const match = await findBestMatch(env, review.candidate);
-      if (!match) return { ...review, potential_duplicate: null, ...supersedesField };
+      if (!match) return { ...review, potential_duplicate: null, ...supersedesField, ...promotionField };
       const { action, reason } = heuristicDecision(review.candidate, match);
-      return { ...review, potential_duplicate: { memory_id: match.id, content: match.content, action, reason }, ...supersedesField };
+      return { ...review, potential_duplicate: { memory_id: match.id, content: match.content, action, reason }, ...supersedesField, ...promotionField };
     })
   );
 
   return { reviews: withSuggestions, suggestions_truncated: suggestionsTruncated };
 }
 
-export async function resolveMemoryReview(env: Env, id: string, input: { user_id: string; action: 'add' | 'merge' | 'update' | 'delete' | 'ignore'; memory_id?: string | null; reason?: string | null }): Promise<{ review: MemoryReviewRow; memory?: Awaited<ReturnType<typeof createMemory>> }> {
+export async function resolveMemoryReview(env: Env, id: string, input: { user_id: string; action: 'add' | 'merge' | 'update' | 'delete' | 'ignore'; memory_id?: string | null; reason?: string | null; promote_to_global?: boolean }): Promise<{ review: MemoryReviewRow; memory?: Awaited<ReturnType<typeof createMemory>>; promoted_to_global?: boolean }> {
   const existing = await env.DB.prepare('SELECT * FROM memory_reviews WHERE id = ?1 AND user_id = ?2').bind(id, input.user_id).first<MemoryReviewRecord>();
   if (!existing) throw new UserFacingError('Review not found.');
+  // `promote_to_global` accepts the row's promotion suggestion (captain decision 8) in the same call
+  // that activates it. Only meaningful for `add`: merge/update write into an EXISTING memory, and
+  // rescoping someone else's memory as a side effect of resolving a review is exactly the silent
+  // rescope the decision forbids — those stay an explicit asaki_memory_update.
+  if (input.promote_to_global && input.action !== 'add') {
+    throw new UserFacingError('promote_to_global is only supported when action is add.');
+  }
 
   const review = parseReview(existing);
   const timestamp = nowIso();
@@ -405,9 +489,13 @@ export async function resolveMemoryReview(env: Env, id: string, input: { user_id
   // retry that re-applies the action (e.g. a second duplicate memory for 'add' whose first
   // copy nothing references). After the mutation, a trailing failure keeps the review
   // resolved and rethrows.
+  const promoted = input.promote_to_global === true && review.candidate.scope !== 'global';
+
   try {
     if (input.action === 'add') {
-      memory = await createMemory(env, review.candidate);
+      // Promotion is a human decision made at resolve time; the stored candidate is left untouched so
+      // the review row keeps saying what the classifier actually proposed.
+      memory = await createMemory(env, promoted ? { ...review.candidate, scope: 'global', project_id: null, session_id: null } : review.candidate);
       mutated = true;
     }
 
@@ -468,11 +556,21 @@ export async function resolveMemoryReview(env: Env, id: string, input: { user_id
     throw error;
   }
 
+  // Provenance on activation (captain decision 9): a correction that just became (or rewrote) an
+  // active memory stamps the compressed correction moment onto that memory, so its origin survives
+  // after nobody consults review rows any more. `delete` is excluded on purpose — there is no
+  // activated memory to carry provenance, only a retired one. Best-effort inside
+  // recordCorrectionOrigin(): the mutation above has already committed.
+  if (memory && (input.action === 'add' || input.action === 'update' || input.action === 'merge')) {
+    const origin = await recordCorrectionOrigin(env, memory, review.candidate, id);
+    if (origin) memory = { ...memory, metadata_json: JSON.stringify({ ...parseMemoryMetadata(memory.metadata_json), correction_origin: origin }) };
+  }
+
   await writeMemoryEvent(env, {
     memoryId,
     userId: input.user_id,
     eventType: 'review_resolve',
-    payload: { review_id: id, action: input.action, reason: input.reason ?? null },
+    payload: { review_id: id, action: input.action, reason: input.reason ?? null, promoted_to_global: promoted },
   });
 
   return {
@@ -486,5 +584,6 @@ export async function resolveMemoryReview(env: Env, id: string, input: { user_id
       resolved_at: timestamp,
     },
     memory,
+    ...(promoted ? { promoted_to_global: true } : {}),
   };
 }

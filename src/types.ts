@@ -114,6 +114,33 @@ export interface MemoryIdInput {
   user_id: string;
 }
 
+// Lifecycle metadata persisted in memories.metadata_json (migration 0006). Kept as the raw JSON
+// string on MemoryRow — every read path is a `SELECT *` into MemoryRow, so parsing at the row level
+// would mean touching all of them; callers that need the object use parseMemoryMetadata().
+export interface MemoryReinforcement {
+  count: number;
+  last_reinforced_at: string;
+  last_signal_subtype?: CandidateSignalSubtype | '' | null;
+  last_source?: string | null;
+}
+
+// Compressed correction provenance written when a correction review is resolved into an active
+// memory (captain decision 9): each quote is capped at 120 chars so the memory carries its origin
+// after the review row stops being consulted, without becoming a transcript.
+export interface MemoryCorrectionOrigin {
+  agent_did: string;
+  captain_verdict: string;
+  signal_subtype?: CandidateSignalSubtype | '' | null;
+  antecedent_source?: CandidateAntecedentSource | null;
+  review_id: string;
+  recorded_at: string;
+}
+
+export interface MemoryMetadata {
+  reinforcement?: MemoryReinforcement;
+  correction_origin?: MemoryCorrectionOrigin;
+}
+
 export interface MemoryRow {
   id: string;
   user_id: string;
@@ -130,6 +157,7 @@ export interface MemoryRow {
   created_at: string;
   updated_at: string;
   last_accessed_at: string | null;
+  metadata_json?: string | null;
 }
 
 export interface SearchScoreDetails {
@@ -180,5 +208,17 @@ export interface MemoryReviewRow extends Omit<MemoryReviewRecord, 'candidate_jso
     target_kind: MemoryKind;
     target_confidence: number;
     suggested_action: 'update' | 'delete';
+  }> | null;
+  // Display-time only (no column, no migration): the same rule already exists as a project-scoped
+  // rule/preference in a DIFFERENT project, so this project correction is probably a global rule
+  // (captain decision 8). A suggestion only — resolving with `promote_to_global` is the human's
+  // call. `null` means "eligible but not computed" (per-response cap hit), same as above.
+  promotion_candidates?: Array<{
+    memory_id: string;
+    content: string;
+    score: number;
+    target_project_id: string | null;
+    target_kind: MemoryKind;
+    suggested_action: 'promote_to_global';
   }> | null;
 }
