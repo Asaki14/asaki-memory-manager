@@ -90,9 +90,9 @@ environment (never hardcoded / never committed). Set them once in
     `systemMessage`.
 
 
-  Two opt-in flags extend this path, both **off by default**:
+  Two flags extend this path, both **on by default** (set either to `0` to opt out):
 
-  - `ASAKI_MEMORY_CORRECTION_MODE=1` — switches the classifier to the correction
+  - `ASAKI_MEMORY_CORRECTION_MODE` (default `1`) — runs the classifier on the correction
     prompt/schema: it detects the user correcting the agent, records the
     contrast pair (`agent_did` / `captain_verdict` / `redirect_target`), infers
     a durable rule, and sends the extra evidence fields on the candidate. It
@@ -100,14 +100,17 @@ environment (never hardcoded / never committed). Set them once in
     labelled `Prior context (ALREADY PROCESSED ...)` block, and lets one
     correction-signalled turn per throttle window fire an extra classifier call
     (a hard ceiling of 2 calls per window, never more).
-  - `ASAKI_MEMORY_ACTION_TRACE=1` — adds one `Tool: <name> <arg>` line per
-    assistant tool call to the delta, so a terse verdict ("别再自动 commit 了")
-    has a recoverable antecedent. **Read the exposure notice below before
-    turning this on.** Tool *results* and thinking blocks are never sent.
+  - `ASAKI_MEMORY_ACTION_TRACE` (default `1`) — adds one `Tool: <name> <arg>`
+    line per assistant tool call to the delta, so a terse verdict ("别再自动
+    commit 了") has a recoverable antecedent. **Read the exposure notice below
+    and decide whether to leave it on.** Tool *results* and thinking blocks are
+    never sent.
 
-  With both flags off, the prompt, the JSON schema, the POST body, the delta
-  text and the call frequency are exactly what they were before this feature
-  existed.
+  With correction mode off, the prompt, the JSON schema, the POST body and the
+  call frequency are exactly what they were before this feature existed — but
+  the delta text is byte-for-byte identical only when action trace is off as
+  well, since trace adds its `Tool:` lines to the delta regardless of correction
+  mode. Byte-identical input therefore requires **both** flags off.
 
   **What action trace sends off-machine.** Per tool call, one line leaves this
   machine: the tool name plus **one** argument, capped at 120 characters.
@@ -121,9 +124,9 @@ environment (never hardcoded / never committed). Set them once in
   look for secrets, not for confidentiality: `git commit -m "fix Acme pricing
   before the layoff announcement"` will be sent as written. If your working
   style routinely puts confidential material in commit messages or search
-  patterns, leave the flag off — correction mode still works on prose
-  antecedents without it, at lower recall. The flag is per-machine and takes
-  effect on the next Stop event.
+  patterns, set `ASAKI_MEMORY_ACTION_TRACE=0` — correction mode still works on
+  prose antecedents without it, at lower recall. The flag is per-machine and
+  takes effect on the next Stop event.
 
   Correction evidence written into `memory_reviews.candidate_json` persists in
   D1 indefinitely, including after a review is resolved or ignored.

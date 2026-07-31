@@ -197,12 +197,16 @@ ASAKI_BASE="${ASAKI_MEMORY_BASE_URL:-${ASAKI_MEMORY_API_URL:-}}"
 [ -z "$ASAKI_BASE" ] && exit 0
 AUTO_EXTRACT="${ASAKI_MEMORY_AUTO_EXTRACT:-0}"
 ASAKI_USER="${ASAKI_MEMORY_USER_ID:-asaki}"
-# Both default OFF. Correction mode gates the correction prompt/schema, the extra POST fields,
+# Both default ON. Correction mode gates the correction prompt/schema, the extra POST fields,
 # the tail carry-over, the prior-candidate line and the throttle override; action trace gates
-# only the `Tool:` lines inside the delta. With both off, the prompt, the schema, the POST body
-# and the delta text are byte-for-byte what they were before this feature existed.
-CORRECTION_MODE="${ASAKI_MEMORY_CORRECTION_MODE:-0}"
-ACTION_TRACE="${ASAKI_MEMORY_ACTION_TRACE:-0}"
+# only the `Tool:` lines inside the delta. Set either to 0 to fall back: with correction mode off
+# the prompt, the schema, the POST body and the call frequency are what they were before this
+# feature existed, and the input text is byte-for-byte identical ONLY when action trace is also
+# off (trace adds `Tool:` lines to the delta regardless of correction mode). Read the "What action
+# trace sends off-machine" notice in integrations/claude-code/README.md before leaving trace on:
+# non-path free text (commit messages, grep patterns) leaves this machine verbatim.
+CORRECTION_MODE="${ASAKI_MEMORY_CORRECTION_MODE:-1}"
+ACTION_TRACE="${ASAKI_MEMORY_ACTION_TRACE:-1}"
 MAX_DELTA_RETRIES="${ASAKI_MEMORY_MAX_DELTA_RETRIES:-5}"
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
