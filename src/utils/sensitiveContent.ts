@@ -17,8 +17,14 @@ const SENSITIVE_PATTERNS: RegExp[] = [
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/,
   // scheme://user:password@host style credential URLs.
   /:\/\/[^/\s:]+:[^/\s@]{6,}@/,
-  /\b(?:api[_-]?key|token|secret|password|passwd|authorization)\b\s*[:=]\s*["']?[^"'\s]{8,}/i,
-  /set\s+-gx\s+\w*(?:KEY|TOKEN|SECRET|PASSWORD)\w*\s+[^$\s][^\s]{8,}/i,
+  // `\b` around the keyword used to leave DATABASE_PASSWORD=… / MY_API_KEY=… uncaught, because `_`
+  // is a word character so there is no boundary between the prefix and the keyword. The keyword may
+  // now carry an identifier prefix, and a suffix that starts with `_`/`-` (so PASSWORD_PROD=… is
+  // caught while MAX_TOKENS=1000000 still is not).
+  /(?:^|[^A-Za-z0-9])[A-Za-z0-9_-]{0,64}(?:api[_-]?key|token|secret|password|passwd|authorization)(?:[_-][A-Za-z0-9_-]{0,64})?\s*[:=]\s*["']?[^"'\s]{8,}/i,
+  // fish exports: the repo's own convention is `set -x` / `set -gx` / `set -Ux`; matching only the
+  // literal `-gx` missed every other flag spelling.
+  /set(?:\s+--?[A-Za-z][A-Za-z0-9-]*)+\s+\w*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)\w*\s+[^$\s][^\s]{8,}/i,
 ];
 
 export function containsSensitiveContent(text: string): boolean {
