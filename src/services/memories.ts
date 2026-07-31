@@ -473,8 +473,8 @@ export async function deleteMemory(env: Env, id: string, userId: string): Promis
 // intact and recoverable), purgeMemory() is for content that should never have been stored
 // (a leaked credential, etc): it wipes the row's content, removes the Vectorize entry, and
 // deletes every prior memory_events row for this memory (which may themselves carry the raw
-// content in older payloads, from before payloads were minimized) before logging a single
-// content-free 'purge' event.
+// content in older payloads, from before payloads were minimized), and scrubs candidate_json on
+// every memory_reviews row that produced it, before logging a single content-free 'purge' event.
 export async function purgeMemory(env: Env, id: string, userId: string, reason: string | null): Promise<MemoryRow | null> {
   const existing = await getMemory(env, id, userId);
   if (!existing) return null;
@@ -504,11 +504,24 @@ export async function purgeMemory(env: Env, id: string, userId: string, reason: 
     .bind(updatedAt, existing.id, userId)
     .run();
 
+  // The review that produced this memory still holds the full candidate — including the raw
+  // correction evidence — in candidate_json, so purge has to scrub it too or the escape hatch
+  // leaks. Reviews are retained permanently by design; only the payload is destroyed.
+  const scrubbedReviews = await env.DB.prepare(
+    `UPDATE memory_reviews SET candidate_json = '{"purged":true}', updated_at = ?1 WHERE memory_id = ?2 AND user_id = ?3`
+  )
+    .bind(updatedAt, existing.id, userId)
+    .run();
+
   await writeMemoryEvent(env, {
     memoryId: existing.id,
     userId,
     eventType: 'purge',
-    payload: { reason, purged_prior_events: deletedEvents.meta?.changes ?? null },
+    payload: {
+      reason,
+      purged_prior_events: deletedEvents.meta?.changes ?? null,
+      scrubbed_reviews: scrubbedReviews.meta?.changes ?? null,
+    },
   });
 
   return { ...existing, content: '[purged]', status: 'deleted', index_status: 'pending', updated_at: updatedAt };

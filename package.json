@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit",
     "eval:candidates": "node --experimental-strip-types scripts/eval-candidates.ts",
     "eval:candidate-fields": "node --experimental-strip-types scripts/eval-candidate-fields.ts",
+    "eval:purge-scrub": "node --experimental-strip-types scripts/eval-purge-scrub.ts",
     "eval:search": "node --experimental-strip-types scripts/eval-search-scoring.ts",
     "eval:extraction": "bash scripts/eval-extraction.sh",
     "eval:extraction-guardrails": "node --experimental-strip-types scripts/eval-extraction-guardrails.ts",

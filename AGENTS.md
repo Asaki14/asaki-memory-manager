@@ -49,6 +49,7 @@ The Claude Code plugin is consumed straight from this repo; the Pi extension is 
 - `commands/memory.md`: Claude Code plugin `/memory` slash command (audit workflow; mirrors the Pi extension's `registerCommand("memory", ...)`).
 - `scripts/shadow-run-extraction.ts`: legacy server-extraction calibration tool; retained for compatibility investigations, not routine learning.
 - `scripts/backfill-index.ts`: manual Vectorize backfill trigger — calls `POST /v1/memories/backfill-index` (`backfillPendingIndex()` in `src/services/memories.ts`) in a loop to re-embed and re-upsert memories stuck at `index_status` `pending`/`failed`.
+- `scripts/eval-purge-scrub.ts`: offline unit coverage for `purgeMemory()`'s destruction paths (memories blanking, `memory_events` wipe, `memory_reviews.candidate_json` scrub) against a fake D1. Review rows are retained PERMANENTLY — the purge-time scrub is the only destruction path; there is deliberately no review prune endpoint or script.
 - `scripts/prune-stale.ts`: manual stale-memory cleanup — calls `POST /v1/memories/prune-stale` (`pruneStaleMemories()` in `src/services/memories.ts`) to soft-delete memories not accessed in N days. Defaults to dry-run; `--apply` is required to actually delete.
 - `scripts/eval-candidate-fields.ts`: offline unit coverage for the candidate evidence fields — coercion table, caps, the sensitive gate on all four evidence strings, and the two derivations. Run it after touching `validateCreateMemory` or the derivation tables.
 - `scripts/node-ts-resolver.mjs`: `registerTsResolver()` — resolve hook letting a `node --experimental-strip-types` eval import a `src/**` module that has *runtime* (not type-only) extensionless sibling imports. Register it before the value `import()`s, not as a static import.
@@ -62,6 +63,7 @@ npm install
 npm run typecheck
 npm run eval:candidates
 npm run eval:candidate-fields
+npm run eval:purge-scrub
 npm run eval:sensitive-pattern
 npm run eval:extraction
 npm run eval:classifier
