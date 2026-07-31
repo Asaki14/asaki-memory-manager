@@ -356,6 +356,22 @@ curl -X POST http://127.0.0.1:8787/v1/memories/reviews/<review-id>/resolve \
 
 Resolve actions: `add`, `merge`, `update`, `delete`, `ignore`. `merge`/`update`/`delete` require `memory_id`.
 
+`include_suggestions: true` additionally attaches, per pending correction row: `supersedes_candidates` (active memories this correction invalidates) and `promotion_candidates` (the same rule already exists as a project rule in a **different** project — evidence it should be global). Accept a promotion in one call with `{"action":"add","promote_to_global":true}`; it is valid only with `add`, and nothing is ever rescoped without it. Resolving a correction into an active memory also stamps the compressed correction moment (`agent_did` / `captain_verdict`, ≤120 chars each) into that memory's `metadata_json`.
+
+</details>
+
+<details>
+<summary><code>POST /v1/memories/lifecycle</code> — standing-rule health report (read-only)</summary>
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/memories/lifecycle \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -d '{"user_id":"alice","project_id":"demo-app","idle_days":30,"limit":20}'
+```
+
+Returns `standing_rules` (active / reinforced / total reinforcements / `repeat_rate`), `recurrence` (per-rule counts — the agent was corrected on that rule again) and `idle_rules` (standing rules with no reinforcement and no retrieval hit inside `idle_days`, default 30). Idle rules are surfaced for a **human** keep/retire verdict: nothing here deletes, archives, or demotes a rule, and `POST /v1/memories/prune-stale` deliberately never selects `rule`/`preference` memories.
+
 </details>
 
 ## Configuration
@@ -370,7 +386,7 @@ Resolve actions: `add`, `merge`, `update`, `delete`, `ignore`. `merge`/`update`/
 
 | Table | Purpose |
 | --- | --- |
-| `memories` | Memory body, scope, project/session metadata, kind, importance, confidence, status, index state. |
+| `memories` | Memory body, scope, project/session metadata, kind, importance, confidence, status, index state, plus `metadata_json` (reinforcement counters + correction provenance). |
 | `memory_events` | Append-only operational event log. |
 | `memory_reviews` | Pending and resolved candidate review queue. |
 

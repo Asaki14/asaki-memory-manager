@@ -60,6 +60,9 @@ export async function createMemory(env: Env, input: Required<Pick<CreateMemoryIn
     created_at: timestamp,
     updated_at: timestamp,
     last_accessed_at: null,
+    // Lifecycle metadata is always written after the row exists (see services/memoryLifecycle.ts):
+    // reinforcement counters and correction provenance both need the memory id.
+    metadata_json: null,
   };
 
   const embedding = await generateEmbedding(env, input.content);
@@ -516,8 +519,11 @@ export async function purgeMemory(env: Env, id: string, userId: string, reason: 
     }
   }
 
+  // metadata_json is blanked with the content: a correction-sourced memory carries the captain's
+  // verdict quote in `correction_origin` (see services/memoryLifecycle.ts), so leaving it behind
+  // would keep the very text purge exists to destroy.
   const updatedAt = nowIso();
-  await env.DB.prepare(`UPDATE memories SET content = '[purged]', status = 'deleted', index_status = 'pending', updated_at = ?1 WHERE id = ?2 AND user_id = ?3`)
+  await env.DB.prepare(`UPDATE memories SET content = '[purged]', status = 'deleted', index_status = 'pending', metadata_json = NULL, updated_at = ?1 WHERE id = ?2 AND user_id = ?3`)
     .bind(updatedAt, existing.id, userId)
     .run();
 
@@ -541,16 +547,22 @@ export async function purgeMemory(env: Env, id: string, userId: string, reason: 
     },
   });
 
-  return { ...existing, content: '[purged]', status: 'deleted', index_status: 'pending', updated_at: updatedAt };
+  return { ...existing, content: '[purged]', status: 'deleted', index_status: 'pending', metadata_json: null, updated_at: updatedAt };
 }
 
 export type StaleMemoryCandidate = Pick<MemoryRow, 'id' | 'user_id' | 'scope' | 'content' | 'kind' | 'importance' | 'last_accessed_at' | 'created_at'>;
 
+// Standing rules (`rule`/`preference`) are deliberately EXCLUDED from this bulk path: captain
+// decision 4 (2026-07-31) puts long-idle standing rules in front of a human as "possibly stale, judge
+// keep/retire" items — never on an automatic delete list, and never demoted out of session injection.
+// They surface via lifecycleReport()'s `idle_rules` instead (POST /v1/memories/lifecycle). Injection
+// also does not refresh last_accessed_at, so a rule obeyed every session looks untouched here — one
+// more reason this path must not judge them.
 export async function pruneStaleMemories(env: Env, params: { days: number; limit: number; apply: boolean }): Promise<{ checked: number; deleted: number; candidates: StaleMemoryCandidate[] }> {
   const cutoff = new Date(Date.now() - params.days * 86_400_000).toISOString();
   const result = await env.DB.prepare(
     `SELECT * FROM memories
-     WHERE status = 'active' AND COALESCE(last_accessed_at, created_at) < ?1
+     WHERE status = 'active' AND kind NOT IN ('rule', 'preference') AND COALESCE(last_accessed_at, created_at) < ?1
      ORDER BY COALESCE(last_accessed_at, created_at) ASC
      LIMIT ?2`
   )

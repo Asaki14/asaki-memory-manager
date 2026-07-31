@@ -17,9 +17,10 @@ import { loadPiReviewFormatter } from './pi-trace-region.mjs';
 
 // src/mcp.ts has type-only imports, so importing it strips to a side-effect-free module load; if
 // that ever stops being true this import is where it surfaces.
-const { formatReviewLine: mcpFormat } = await import('../src/mcp.ts');
+const { formatReviewLine: mcpFormat, formatLifecycleReport: mcpLifecycle } = await import('../src/mcp.ts');
 const { module: pi, dispose } = await loadPiReviewFormatter();
 const piFormat = pi.formatReviewLine as (item: unknown, index?: number) => string;
+const piLifecycle = pi.formatLifecycleReport as (data: unknown) => string;
 
 let pass = 0;
 const failures: string[] = [];
@@ -176,6 +177,78 @@ const longBlock = [
 ].join('\n');
 check('mcp / long supersession target is truncated', mcpFormat(longRow), longBlock);
 check('pi / long supersession target is truncated', piFormat(longRow), longBlock);
+
+// --- 5. the global-promotion suggestion (captain decision 8) -----------------------------------
+// A project correction whose rule already exists in ANOTHER project renders one `⤷ promote:` line per
+// suggestion, between the supersession lines and the contradicts line. Same three-state contract as
+// supersedes: array -> lines, null -> "not computed", absent -> nothing at all.
+const promotionRow = {
+  ...correctionRow,
+  supersedes_candidates: [],
+  promotion_candidates: [
+    { memory_id: 'mem_p2', content: '不要在未获得确认前自动 commit 任何仓库', score: 0.71, target_project_id: 'sport-live', target_kind: 'rule', suggested_action: 'promote_to_global' },
+  ],
+};
+const promotionBlock = [
+  '1. [correction · override_of_action · prohibition] 不要在未获得确认前自动 commit 本仓库的改动',
+  '   ⤷ agent: 直接跑了 git commit -m "wip"   →   captain: 「别再自动 commit 了」   (antecedent: trace)',
+  '   ⤷ promote: same rule in project sport-live as mem_p2 [kind=rule] "不要在未获得确认前自动 commit 任何仓库"  (score=0.71 suggest: promote_to_global)',
+  '   ⤷ contradicts pending review rev_44b',
+  '   id=rev_91c scope=project kind=rule importance=0.90 confidence=0.70',
+  '   source=claude-code:stop-classifier created_at=2026-07-31T02:11Z',
+].join('\n');
+check('mcp / promotion suggestion', mcpFormat(promotionRow, 0), promotionBlock);
+check('pi / promotion suggestion', piFormat(promotionRow, 0), promotionBlock);
+
+const promotionCapRow = { ...correctionRow, supersedes_candidates: undefined, promotion_candidates: null };
+const promotionCapBlock = [
+  '[correction · override_of_action · prohibition] 不要在未获得确认前自动 commit 本仓库的改动',
+  '   ⤷ agent: 直接跑了 git commit -m "wip"   →   captain: 「别再自动 commit 了」   (antecedent: trace)',
+  '   ⤷ promote: not computed (suggestion cap reached on this page; re-list with a narrower filter)',
+  '   ⤷ contradicts pending review rev_44b',
+  '   id=rev_91c scope=project kind=rule importance=0.90 confidence=0.70',
+  '   source=claude-code:stop-classifier created_at=2026-07-31T02:11Z',
+].join('\n');
+check('mcp / promotion cap reached', mcpFormat(promotionCapRow), promotionCapBlock);
+check('pi / promotion cap reached', piFormat(promotionCapRow), promotionCapBlock);
+
+// A row that was never promotable (no promotion_candidates key at all) must render exactly as before.
+check('mcp / no promotion key leaves the block unchanged', mcpFormat(correctionRow, 0), correctionBlock);
+check('pi / no promotion key leaves the block unchanged', piFormat(correctionRow, 0), correctionBlock);
+
+// --- 6. the lifecycle report (captain decision 4) ----------------------------------------------
+const lifecycleData = {
+  idle_days_threshold: 30,
+  standing_rules: { active: 17, reinforced: 3, total_reinforcements: 5, repeat_rate: 0.176 },
+  recurrence: [
+    { id: 'mem_7f3a', content: '不要在未获得确认前自动 commit', scope: 'project', project_id: 'asaki-memory-manager', kind: 'rule', importance: 0.9, count: 3, last_reinforced_at: '2026-07-30T09:00Z', last_signal_subtype: 'explicit_negation' },
+  ],
+  idle_rules: [
+    { id: 'mem_old', content: '偏好短句输出', scope: 'global', project_id: null, kind: 'preference', importance: 0.4, idle_days: 64, last_signal_at: '2026-05-28T09:00Z', reinforcement_count: 0 },
+  ],
+};
+const lifecycleText = [
+  'Standing rules: 17 active · 3 reinforced · 5 total reinforcements · repeat_rate=0.176',
+  '',
+  'Recurrence (the agent repeated a mistake an existing rule already covers):',
+  '1. mem_7f3a [scope=project/asaki-memory-manager kind=rule importance=0.90] count=3 last=2026-07-30T09:00Z subtype=explicit_negation "不要在未获得确认前自动 commit"',
+  '',
+  'Possibly stale — judge keep/retire (no reinforcement and no retrieval hit in 30d; never auto-deleted, never demoted out of injection):',
+  '1. mem_old [scope=global kind=preference importance=0.40] idle=64d last_signal=2026-05-28T09:00Z reinforced=0x "偏好短句输出"',
+].join('\n');
+check('mcp / lifecycle report', mcpLifecycle(lifecycleData), lifecycleText);
+check('pi / lifecycle report', piLifecycle(lifecycleData), lifecycleText);
+
+const emptyLifecycle = { idle_days_threshold: 30, standing_rules: { active: 17, reinforced: 0, total_reinforcements: 0, repeat_rate: 0 }, recurrence: [], idle_rules: [] };
+const emptyLifecycleText = [
+  'Standing rules: 17 active · 0 reinforced · 0 total reinforcements · repeat_rate=0.000',
+  '',
+  'Recurrence: none — no standing rule has been corrected again.',
+  '',
+  'Possibly stale: none idle for 30d.',
+].join('\n');
+check('mcp / lifecycle report with nothing to flag', mcpLifecycle(emptyLifecycle), emptyLifecycleText);
+check('pi / lifecycle report with nothing to flag', piLifecycle(emptyLifecycle), emptyLifecycleText);
 
 dispose();
 

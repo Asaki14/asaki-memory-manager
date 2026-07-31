@@ -68,6 +68,13 @@
    - 本地 `wrangler dev` 验证过：endpoint 正确捞出 pending 记忆、脚本正确分轮调用并汇总 checked/indexed 计数、`remaining_ids` 透传正确；受限于本地 dev 没有真实 Workers AI 凭证，`indexed` 计数在本地恒为 0（预期内——生产上跑 `npm run backfill:index` 才会真的重新生成 embedding），逻辑本身（查询条件、状态回写、分页）已核实无误。
    - 仍是手动触发，不做 cron/自动重试——跟 roadmap 既定方向一致。
 
+6. ~~记忆生命周期：强化/复发 + 跨项目提升建议 + 溯源~~ — 已实现并本地验证，**随下次发布进生产**（captain 2026-07-31 拍板项 4/8/9）
+   - 迁移 `0006_memory_metadata.sql` 加 `memories.metadata_json` 一列（自由 JSON，跟 `memory_reviews.candidate_json` 同思路），承载 `reinforcement`（复发计数 + 最近强化时间）与 `correction_origin`（纠正现场，agent 行为/主公原话各 120 字符）。
+   - 强化：纠正候选命中已 ACTIVE 的 `rule`/`preference` 时不再只是静默去重，而是 importance +0.05（上限 0.95，绝不下调人工设的更高值）+ 复发计数 +1，落 `reinforce` 事件；方向由"哪个查询命中"界定——候选自身文本命中＝同向（强化/提升），`supersedes_query` 命中＝反向（取代）。
+   - 系统健康：新增只读 `POST /v1/memories/lifecycle`（`src/services/memoryLifecycle.ts`）返回 repeat_rate、逐条复发计数、以及长期无信号（默认 30 天，≈两个 14 天审计周期）的常驻规则；后者只交人工裁决 keep/retire，永不自动删也不降权出注入，`prune-stale` 因此显式排除 `rule`/`preference`。
+   - 跨项目提升：project 纠正候选若在**别的项目**已有近似规则，review 行附 `⤷ promote:` 建议，人工可用 `asaki_memory_review_resolve {action:"add", promote_to_global:true}` 一键以 global 落库；不自动改 scope。
+   - 验证：`npm run typecheck` / `typecheck:pi`、新增 `npm run eval:lifecycle`（41 断言，含"生命周期路径不对常驻规则发 UPDATE/DELETE"的不变量）、`eval:review-format` 扩到 24 断言（提升建议行 + 生命周期报告两份拷贝逐字节一致）、`eval:purge-scrub` 增加 `metadata_json` 一并清空断言。
+
 ## 持续维护（非新投入，靠 eval 驱动）
 
 - 降低误 merge：`npm run eval:candidates` 已覆盖同关键词不同事实的 add/merge 判断。发现新误判案例时补 `test/fixtures/candidate-decisions.json`，不手调 magic number。
@@ -77,7 +84,7 @@
 ## 需要证据再做（不预先投入）
 
 - 记忆压缩与冲突治理：同一主题多条旧记忆归并成 summary、冲突记忆标记 conflict——个人规模下人工偶尔清理成本远低于建自动治理机制的成本，先攒观测数据看是否真有堆积。
-- 按命中率降权（非删除的 stale 建议）：仍无证据不投入，跟"生命周期策略"里已实现的硬删除是两回事。
+- 按命中率降权（非删除的 stale 建议）：仍不投入。常驻规则那一侧已由 `POST /v1/memories/lifecycle` 的 `idle_rules` 覆盖（只报不动、交人工裁决），其余 kind 的"降权而非删除"仍无证据。
 - 单元测试框架：目前只有 eval 回归（`eval:candidates`/`eval:search`/`eval:extraction`/`eval:extraction-guardrails`）+ smoke 脚本，`validation.ts` 每个函数的错误分支没有系统性覆盖。项目已经明确选了"eval 驱动"而不是传统单测——不无证据引入新测试框架；`validation.ts` 或别处真出一个具体 bug 时，优先补一条对应的 eval/guardrail case，而不是补一整套单测基础设施。
 
 ## 已评估并砍掉（不做）

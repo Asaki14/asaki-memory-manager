@@ -489,6 +489,36 @@ function formatAutoMemoryDisplay(results: Record<string, unknown>[], minScore: n
   return `Asaki memory search: injected ${lines.length}/${results.length} memories (autoMinScore=${minScore.toFixed(2)})\n${lines.join("\n")}`;
 }
 
+// How much of a stored correction quote is echoed on a memory line. The full quote (<=120 chars each)
+// stays in metadata_json and on the memory row itself.
+const MEMORY_ORIGIN_QUOTE_CHARS = 60;
+
+// Lifecycle tail for memory lines: recurrence counter and correction provenance, both read out of
+// metadata_json (server migration 0006). Absent metadata renders nothing, so pre-0006 rows and plain
+// memories keep today's line. KEEP IN SYNC with lifecycleSuffix() in src/mcp.ts.
+function lifecycleSuffix(item: any): string {
+  if (!item || typeof item.metadata_json !== "string" || !item.metadata_json.trim()) return "";
+  let meta: any;
+  try {
+    meta = JSON.parse(item.metadata_json);
+  } catch {
+    return "";
+  }
+  if (!meta || typeof meta !== "object") return "";
+  let out = "";
+  const reinforcement = meta.reinforcement;
+  if (reinforcement && typeof reinforcement.count === "number" && reinforcement.count > 0) {
+    out += ` reinforced=${reinforcement.count}x@${reinforcement.last_reinforced_at ?? "?"}`;
+  }
+  const origin = meta.correction_origin;
+  if (origin && typeof origin === "object") {
+    const agent = truncateText(String(origin.agent_did ?? ""), MEMORY_ORIGIN_QUOTE_CHARS);
+    const verdict = truncateText(String(origin.captain_verdict ?? ""), MEMORY_ORIGIN_QUOTE_CHARS);
+    out += ` origin="${agent} → ${verdict}"`;
+  }
+  return out;
+}
+
 function formatMemoryLine(item: any, index?: number, maxContentChars?: number): string {
   const prefix = index == null ? "" : `${index + 1}. `;
   const id = item.id ? ` id=${item.id}` : "";
@@ -502,7 +532,7 @@ function formatMemoryLine(item: any, index?: number, maxContentChars?: number): 
   const updatedAt = item.updated_at ? ` updated_at=${item.updated_at}` : "";
   const rawContent = item.content || item.memory || item.text || JSON.stringify(item);
   const content = maxContentChars == null ? rawContent : truncateText(String(rawContent), maxContentChars);
-  return `${prefix}${content}${id}${scope}${kind}${status}${importance}${confidence}${source}${createdAt}${updatedAt}`;
+  return `${prefix}${content}${id}${scope}${kind}${status}${importance}${confidence}${source}${createdAt}${updatedAt}${lifecycleSuffix(item)}`;
 }
 
 function formatScoreDetails(details: any): string {
@@ -554,6 +584,23 @@ function correctionBlockLines(item: any, candidate: any): string[] | null {
     }
   }
 
+  // Global-promotion suggestion: the same rule already exists in ANOTHER project, so this project
+  // correction is probably global. Accept it in one call with `asaki_memory_review_resolve
+  // {action:"add", promote_to_global:true}`; ignoring the line resolves it project-scoped as usual.
+  // Nothing is rescoped automatically, and this never touches the memory quoted on the line.
+  const promotions = item.promotion_candidates;
+  if (promotions === null) {
+    lines.push("   ⤷ promote: not computed (suggestion cap reached on this page; re-list with a narrower filter)");
+  } else if (Array.isArray(promotions)) {
+    for (const p of promotions) {
+      const content = typeof p.content === "string" ? p.content : "";
+      const shown = content.length > SUPERSEDE_CONTENT_CHARS ? `${content.slice(0, SUPERSEDE_CONTENT_CHARS)}…` : content;
+      lines.push(
+        `   ⤷ promote: same rule in project ${p.target_project_id} as ${p.memory_id} [kind=${p.target_kind}] "${shown}"  (score=${num(p.score)} suggest: ${p.suggested_action})`,
+      );
+    }
+  }
+
   // Written server-side when this correction refused to merge into the pending row it contradicts;
   // that row's text is not carried on this response, so the id is what there is to print.
   if (typeof candidate.supersedes_pending_review_id === "string" && candidate.supersedes_pending_review_id) {
@@ -595,6 +642,57 @@ function formatReviewLine(item: any, index?: number): string {
   }
 
   return `${prefix}${content}${id}${status}${action}${memoryId}${scope}${kind}${importance}${confidence}${source}${createdAt}${updatedAt}${dup}`;
+}
+
+// Lifecycle/system-health report rendering. Two sections that answer two different questions:
+// recurrence = rules the agent had to be corrected on AGAIN (the repeat-rate signal), idle = standing
+// rules with no reinforcement and no retrieval hit, which a HUMAN judges keep/retire. Nothing here is
+// actionable by the agent alone — no line proposes a delete.
+//
+// KEEP the emitted text byte-identical to the copy in src/mcp.ts — `npm run eval:review-format` fails
+// on any drift. Self-contained on purpose: this region is loaded as a standalone module.
+function formatLifecycleReport(data: any): string {
+  const LIFECYCLE_CONTENT_CHARS = 120;
+  const clip = (value: unknown): string => {
+    const text = typeof value === "string" ? value : "";
+    return text.length > LIFECYCLE_CONTENT_CHARS ? `${text.slice(0, LIFECYCLE_CONTENT_CHARS)}…` : text;
+  };
+  const num = (value: unknown, digits: number): string => (typeof value === "number" ? value.toFixed(digits) : "?");
+  const rows = (value: unknown): any[] => (Array.isArray(value) ? value : []);
+  const totals = data?.standing_rules && typeof data.standing_rules === "object" ? data.standing_rules : {};
+  const scopeOf = (row: any): string => (row.scope === "project" && row.project_id ? `project/${row.project_id}` : String(row.scope ?? "?"));
+
+  const lines = [
+    `Standing rules: ${totals.active ?? 0} active · ${totals.reinforced ?? 0} reinforced · ${totals.total_reinforcements ?? 0} total reinforcements · repeat_rate=${num(totals.repeat_rate, 3)}`,
+  ];
+
+  const recurrence = rows(data?.recurrence);
+  lines.push("");
+  if (recurrence.length === 0) {
+    lines.push("Recurrence: none — no standing rule has been corrected again.");
+  } else {
+    lines.push("Recurrence (the agent repeated a mistake an existing rule already covers):");
+    recurrence.forEach((row, index) => {
+      lines.push(
+        `${index + 1}. ${row.id} [scope=${scopeOf(row)} kind=${row.kind} importance=${num(row.importance, 2)}] count=${row.count} last=${row.last_reinforced_at ?? "?"} subtype=${row.last_signal_subtype ?? "unspecified"} "${clip(row.content)}"`,
+      );
+    });
+  }
+
+  const idle = rows(data?.idle_rules);
+  lines.push("");
+  if (idle.length === 0) {
+    lines.push(`Possibly stale: none idle for ${data?.idle_days_threshold ?? "?"}d.`);
+  } else {
+    lines.push(`Possibly stale — judge keep/retire (no reinforcement and no retrieval hit in ${data?.idle_days_threshold ?? "?"}d; never auto-deleted, never demoted out of injection):`);
+    idle.forEach((row, index) => {
+      lines.push(
+        `${index + 1}. ${row.id} [scope=${scopeOf(row)} kind=${row.kind} importance=${num(row.importance, 2)}] idle=${row.idle_days}d last_signal=${row.last_signal_at} reinforced=${row.reinforcement_count ?? 0}x "${clip(row.content)}"`,
+      );
+    });
+  }
+
+  return lines.join("\n");
 }
 // #endregion
 
@@ -1454,9 +1552,9 @@ Global scope discipline (the recurring failure mode this exists to catch): globa
 
 Workflow:
 1. Use asaki_memory_review_list with include_suggestions: true to inspect pending reviews, and handle corrections FIRST: call it once with signal: "correction", work through those rows, then call it again without the filter for everything else. A correction is the user telling the agent it got something wrong, so it is the highest-value row in the queue and the only kind that can retire an active memory. For any review with created_at older than 14 days, flag it explicitly in your output as "stale — pending review needs a decision" rather than treating it identically to a fresh review.
-2. Use asaki_memory_list to list global memories and current project memories.
-3. Analyze duplicates, stale items, noisy items, overlong items (>300 Chinese chars or ~600 ASCII chars; propose compression/splitting/doc-linking), wrong scope/kind (see Global scope discipline above), low-value items, pending reviews, and missing durable memories.
-4. Propose REVIEW_RESOLVE/DELETE/UPDATE(rescope)/MERGE/ADD/KEEP changes with reasons and affected ids. When a correction review prints "⤷ supersedes:" lines, prefer resolving it against that target — asaki_memory_review_resolve {action:"update", memory_id:<the id on that line>} to rewrite the old memory, {action:"delete", memory_id:…} when the suggestion says "suggest: delete" (the correction was a retraction) — over {action:"add"}, which leaves the contradicted memory active and retrievable. {action:"ignore"} rejects the inferred rule. Resolution never changes the target's scope: the suggestion line prints the target's current scope/kind/confidence, so if the scope is wrong, rescope it separately with asaki_memory_update. A "⤷ contradicts pending review <id>" line means two queued rows disagree — decide both, not one.
+2. Use asaki_memory_list to list global memories and current project memories. Then call asaki_memory_lifecycle once for the system-health view: standing-rule repeat rate, per-rule recurrence counts ("count=" means the agent had to be corrected on that rule again), and the "Possibly stale" bucket (standing rules with no reinforcement and no retrieval hit in the idle window, default 30 days).
+3. Analyze duplicates, stale items, noisy items, overlong items (>300 Chinese chars or ~600 ASCII chars; propose compression/splitting/doc-linking), wrong scope/kind (see Global scope discipline above), low-value items, pending reviews, and missing durable memories. For every "Possibly stale" rule the lifecycle report lists, form an explicit keep/retire recommendation for the user — that bucket exists for human judgment and is never an auto-delete list. A high "count=" rule is the opposite signal (the agent keeps violating it): consider sharpening its wording, not retiring it.
+4. Propose REVIEW_RESOLVE/DELETE/UPDATE(rescope)/MERGE/ADD/KEEP changes with reasons and affected ids. When a correction review prints "⤷ supersedes:" lines, prefer resolving it against that target — asaki_memory_review_resolve {action:"update", memory_id:<the id on that line>} to rewrite the old memory, {action:"delete", memory_id:…} when the suggestion says "suggest: delete" (the correction was a retraction) — over {action:"add"}, which leaves the contradicted memory active and retrievable. {action:"ignore"} rejects the inferred rule. Resolution never changes the target's scope: the suggestion line prints the target's current scope/kind/confidence, so if the scope is wrong, rescope it separately with asaki_memory_update. A "⤷ contradicts pending review <id>" line means two queued rows disagree — decide both, not one. A "⤷ promote:" line means the same rule already exists in ANOTHER project, so offer PROMOTE: asaki_memory_review_resolve {action:"add", promote_to_global:true} activates it as global in one call (valid only with action:"add"). Promotion is never automatic — if the cross-project match reads coincidental, resolve it project-scoped as usual.
 5. Use questionnaire before any write. Offer options like apply all high-confidence changes, resolve selected reviews, only deletes, only updates/additions, or skip.
 6. Execute approved changes using asaki_memory_review_resolve, asaki_memory_update, asaki_memory_delete, and asaki_memory_add.
 7. Use asaki_memory_review_create instead of asaki_memory_add for high-risk uncertain memories.
@@ -1759,6 +1857,52 @@ Safety:
 
 
   pi.registerTool({
+    name: "asaki_memory_lifecycle",
+    label: "Asaki Memory Lifecycle",
+    description: "Memory-system health report: standing-rule repeat rate, per-rule recurrence counts, and long-idle standing rules needing a keep/retire verdict.",
+    promptSnippet: "Read the Asaki memory lifecycle report during a memory audit to see repeat rate and possibly-stale standing rules.",
+    promptGuidelines: [
+      "Use asaki_memory_lifecycle during an explicit /memory audit; it is read-only and never changes a memory.",
+      "Long-idle standing rules are for the user to judge keep/retire — never propose auto-deleting them, and never demote them out of session injection.",
+    ],
+    parameters: Type.Object({
+      project_id: Type.Optional(Type.String({ description: "Project id override; includes that project's rules alongside global ones." })),
+      idle_days: Type.Optional(Type.Integer({ description: "Idle threshold in days (1-3650, default 30 ≈ two 14-day audit cadences).", minimum: 1, maximum: 3650 })),
+      limit: Type.Optional(Type.Integer({ description: "Max rows per section (1-100, default 20).", minimum: 1, maximum: 100 })),
+    }),
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      const config = memoryConfig();
+      const projectId = resolveProjectId(ctx, params.project_id);
+
+      onUpdate?.({
+        content: [{ type: "text", text: "Reading Asaki memory lifecycle report..." }],
+        details: {},
+      });
+
+      try {
+        const body: Record<string, unknown> = { user_id: config.userId };
+        if (projectId) body.project_id = projectId;
+        if (params.idle_days != null) body.idle_days = params.idle_days;
+        if (params.limit != null) body.limit = params.limit;
+
+        const data = await memoryRequest("/v1/memories/lifecycle", body, signal);
+        return {
+          content: [{ type: "text", text: formatLifecycleReport(data) }],
+          details: {
+            user_id: config.userId,
+            project_id: projectId,
+            repeat_rate: data?.standing_rules?.repeat_rate,
+            idle_count: Array.isArray(data?.idle_rules) ? data.idle_rules.length : 0,
+          },
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Asaki memory lifecycle failed: ${message}`);
+      }
+    },
+  });
+
+  pi.registerTool({
     name: "asaki_memory_review_create",
     label: "Asaki Memory Review Create",
     description: "Create a pending review item for a memory candidate instead of directly storing it.",
@@ -1888,6 +2032,11 @@ Safety:
       ),
       memory_id: Type.Optional(Type.String({ description: "Target memory id. Required when action is merge, update, or delete." })),
       reason: Type.Optional(Type.String({ description: "Short resolution reason." })),
+      promote_to_global: Type.Optional(
+        Type.Boolean({
+          description: 'Accept the row\'s "⤷ promote:" suggestion: store the candidate as scope=global instead of project. Only valid with action=add, and only after the user approved promotion.',
+        }),
+      ),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
       const config = memoryConfig();
@@ -1895,12 +2044,14 @@ Safety:
         const body: Record<string, unknown> = { user_id: config.userId, action: params.action };
         if (params.memory_id) body.memory_id = params.memory_id;
         if (params.reason) body.reason = params.reason;
+        if (params.promote_to_global) body.promote_to_global = true;
         const data = await memoryRequest(`/v1/memories/reviews/${params.id}/resolve`, body, signal);
         const review = data?.review;
         const memory = data?.memory;
+        const promoted = data?.promoted_to_global === true ? "\nPromoted to scope=global." : "";
         return {
-          content: [{ type: "text", text: `${review ? `Resolved review: ${formatReviewLine(review)}` : `Review ${params.id} resolved.`}${memory ? `\nMemory: ${formatMemoryLine(memory)}` : ""}` }],
-          details: { id: params.id, action: params.action, memory_id: memory?.id || params.memory_id },
+          content: [{ type: "text", text: `${review ? `Resolved review: ${formatReviewLine(review)}` : `Review ${params.id} resolved.`}${memory ? `\nMemory: ${formatMemoryLine(memory)}` : ""}${promoted}` }],
+          details: { id: params.id, action: params.action, memory_id: memory?.id || params.memory_id, promoted_to_global: data?.promoted_to_global === true },
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

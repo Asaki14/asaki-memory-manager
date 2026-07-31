@@ -122,6 +122,25 @@ RESOLVE_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/reviews/${REVIEW_ID}/
   -d "{\"user_id\":\"${USER_ID}\",\"action\":\"ignore\",\"reason\":\"smoke test\"}")
 printf '%s' "$RESOLVE_RESPONSE" | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); if (j.review?.status !== "resolved" || j.review?.resolved_action !== "ignore") process.exit(1); });'
 
+# Lifecycle report (read-only): shape check plus the invariant that promote_to_global is refused for
+# anything but `add` — an accepted promotion on merge/update would silently rescope another memory.
+LIFECYCLE_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/lifecycle" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_id\":\"${USER_ID}\",\"project_id\":\"${PROJECT_ID}\",\"idle_days\":30,\"limit\":5}")
+printf '%s' "$LIFECYCLE_RESPONSE" | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => { const j = JSON.parse(s); if (typeof j.standing_rules?.repeat_rate !== "number" || !Array.isArray(j.recurrence) || !Array.isArray(j.idle_rules) || j.idle_days_threshold !== 30) process.exit(1); });'
+
+PROMOTE_REVIEW_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/reviews" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_id\":\"${USER_ID}\",\"project_id\":\"${PROJECT_ID}\",\"source\":\"smoke-review-promote\",\"candidates\":[{\"content\":\"promotion guard candidate ${CONTENT}\",\"scope\":\"project\",\"kind\":\"rule\",\"importance\":0.1,\"confidence\":0.9}]}")
+PROMOTE_REVIEW_ID=$(printf '%s' "$PROMOTE_REVIEW_RESPONSE" | json_value 'reviews.0.id')
+PROMOTE_STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/memories/reviews/${PROMOTE_REVIEW_ID}/resolve" \
+  -H "Authorization: Bearer ${ADMIN_API_KEY}" -H 'Content-Type: application/json' \
+  -d "{\"user_id\":\"${USER_ID}\",\"action\":\"ignore\",\"promote_to_global\":true}")
+[[ "$PROMOTE_STATUS" == "400" ]] || { echo "expected 400 for promote_to_global with action=ignore, got ${PROMOTE_STATUS}"; exit 1; }
+curl_api -X POST "$BASE_URL/v1/memories/reviews/${PROMOTE_REVIEW_ID}/resolve" \
+  -H 'Content-Type: application/json' \
+  -d "{\"user_id\":\"${USER_ID}\",\"action\":\"ignore\",\"reason\":\"smoke test cleanup\"}" >/dev/null
+
 # Failed-side-effect regression: resolving with a memory_id that doesn't exist must fail (404)
 # without leaving the review permanently stuck "resolved" — resolveMemoryReview()'s atomic claim
 # now rolls the row back to pending on any side-effect failure so it stays retryable.

@@ -1,5 +1,6 @@
 import type { CandidateAntecedentSource, CandidateCorrectionEvidence, CandidateEvidenceFields, CandidateRuleForm, CandidateSignal, CandidateSignalSubtype, CreateMemoryInput, ExtractMemoriesInput, ListMemoriesInput, MemoryIdInput, MemoryKind, MemoryScope, MemoryStatus, SearchMemoriesInput, UpdateMemoryInput } from '../types';
 import { confidenceForAntecedent, importanceForSignal } from '../services/candidateDecision';
+import { DEFAULT_IDLE_RULE_DAYS } from '../services/memoryLifecycle';
 import { containsSensitiveContent } from './sensitiveContent';
 
 const SENSITIVE_CONTENT_ERROR = 'content looks like it contains a secret or credential; refusing to store it.';
@@ -378,16 +379,32 @@ export function validatePruneStale(value: unknown): { ok: true; data: { days: nu
   return { ok: true, data: { days, limit, apply: input.apply === true } };
 }
 
-export function validateResolveMemoryReview(value: unknown): { ok: true; data: { user_id: string; action: 'add' | 'merge' | 'update' | 'delete' | 'ignore'; memory_id?: string | null; reason?: string | null } } | { ok: false; error: string } {
+export function validateResolveMemoryReview(value: unknown): { ok: true; data: { user_id: string; action: 'add' | 'merge' | 'update' | 'delete' | 'ignore'; memory_id?: string | null; reason?: string | null; promote_to_global?: boolean } } | { ok: false; error: string } {
   if (!value || typeof value !== 'object') return { ok: false, error: 'Body must be a JSON object.' };
-  const input = value as { user_id?: unknown; action?: unknown; memory_id?: unknown; reason?: unknown };
+  const input = value as { user_id?: unknown; action?: unknown; memory_id?: unknown; reason?: unknown; promote_to_global?: unknown };
   const userId = validateUserId(input.user_id);
   if (!userId) return { ok: false, error: 'user_id is required.' };
   if (typeof input.action !== 'string' || !reviewActions.has(input.action)) return { ok: false, error: 'action must be add, merge, update, delete, or ignore.' };
   if (input.memory_id != null && (typeof input.memory_id !== 'string' || input.memory_id.trim().length === 0)) return { ok: false, error: 'memory_id must be a non-empty string when provided.' };
   if (input.reason != null && (typeof input.reason !== 'string' || input.reason.trim().length === 0)) return { ok: false, error: 'reason must be a non-empty string when provided.' };
   if ((input.action === 'merge' || input.action === 'update' || input.action === 'delete') && !input.memory_id) return { ok: false, error: 'memory_id is required when action is merge, update, or delete.' };
-  return { ok: true, data: { user_id: userId, action: input.action as 'add' | 'merge' | 'update' | 'delete' | 'ignore', memory_id: input.memory_id?.trim() ?? null, reason: input.reason?.trim() ?? null } };
+  // Accepts the review row's `promotion_candidates` hint in the same call that activates the rule.
+  // The action check lives in resolveMemoryReview() (it is the invariant, not the input shape).
+  if (input.promote_to_global !== undefined && typeof input.promote_to_global !== 'boolean') return { ok: false, error: 'promote_to_global must be a boolean.' };
+  return { ok: true, data: { user_id: userId, action: input.action as 'add' | 'merge' | 'update' | 'delete' | 'ignore', memory_id: input.memory_id?.trim() ?? null, reason: input.reason?.trim() ?? null, promote_to_global: input.promote_to_global === true } };
+}
+
+export function validateLifecycleReport(value: unknown): { ok: true; data: { user_id: string; project_id: string | null; idle_days: number; limit: number } } | { ok: false; error: string } {
+  if (!value || typeof value !== 'object') return { ok: false, error: 'Body must be a JSON object.' };
+  const input = value as { user_id?: unknown; project_id?: unknown; idle_days?: unknown; limit?: unknown };
+  const userId = validateUserId(input.user_id);
+  if (!userId) return { ok: false, error: 'user_id is required.' };
+  if (input.project_id != null && (typeof input.project_id !== 'string' || input.project_id.trim().length === 0)) return { ok: false, error: 'project_id must be a non-empty string when provided.' };
+  const idleDays = input.idle_days == null ? DEFAULT_IDLE_RULE_DAYS : input.idle_days;
+  if (typeof idleDays !== 'number' || !Number.isInteger(idleDays) || idleDays < 1 || idleDays > 3650) return { ok: false, error: 'idle_days must be an integer between 1 and 3650.' };
+  const limit = input.limit == null ? 20 : input.limit;
+  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 100) return { ok: false, error: 'limit must be an integer between 1 and 100.' };
+  return { ok: true, data: { user_id: userId, project_id: typeof input.project_id === 'string' ? input.project_id.trim() : null, idle_days: idleDays, limit } };
 }
 
 export function validatePurgeMemory(value: unknown): { ok: true; data: { user_id: string; reason: string | null } } | { ok: false; error: string } {
