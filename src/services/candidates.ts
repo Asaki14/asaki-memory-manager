@@ -1,6 +1,7 @@
 import type { Env, MemoryReviewRow, MemoryRow, SearchMemoriesInput, SearchResult } from '../types';
 import { createMemory, deleteMemory, searchMemories, updateMemoryContent } from './memories';
 import { writeMemoryEvent } from './memoryEvents';
+import { reinforceMemory, type ReinforcementResult } from './memoryLifecycle';
 import { scoreMemoryForSearch } from './searchScoring';
 
 import { bestUsableMatch, chooseDecision, hasContradictionSignal, hasForgetSignal, heuristicDecision, lexicalSimilarity, mergeContent, needsLlmDecision, type CandidateAction, type ProcessMemoryCandidateInput } from './candidateDecision';
@@ -13,6 +14,9 @@ export interface CandidateDecision {
   memory?: MemoryRow;
   matched_memory?: SearchResult;
   review?: MemoryReviewRow;
+  // Present only when this candidate reinforced an existing standing rule instead of producing a
+  // new memory (recurrence — see reinforceMemory()).
+  reinforcement?: ReinforcementResult;
   reason: string;
 }
 
@@ -104,6 +108,40 @@ export async function findLexicalMatch(env: Env, candidate: ProcessMemoryCandida
   return best && best.similarity >= 0.5 ? best : undefined;
 }
 
+// Cross-project sibling of findLexicalMatch(), for the global-promotion suggestion (captain decision
+// 8): does this project rule already exist as a project rule in a DIFFERENT project? searchMemories()
+// cannot answer that — isVisibleInScope() only ever admits the caller's own project — so this is a
+// deliberate, narrow D1 scan: active project-scoped rule/preference rows outside `excludeProjectId`,
+// bounded to the same 100 most-recently-touched rows findLexicalMatch() uses.
+//
+// Returns unfiltered rows scored like every other search path; the usable-match gate is the caller's
+// (usableMatches()), so "similar enough" means the same thing here as in dedup and supersession.
+export async function findCrossProjectMatches(env: Env, candidate: ProcessMemoryCandidateInput, excludeProjectId: string): Promise<SearchResult[]> {
+  const result = await env.DB.prepare(
+    `SELECT * FROM memories
+     WHERE user_id = ?1 AND status = 'active' AND scope = 'project'
+       AND project_id IS NOT NULL AND project_id <> ?2
+       AND kind IN ('rule', 'preference')
+     ORDER BY updated_at DESC
+     LIMIT 100`
+  )
+    .bind(candidate.user_id, excludeProjectId)
+    .all<MemoryRow>();
+
+  const searchInput: SearchMemoriesInput = {
+    query: candidate.content,
+    user_id: candidate.user_id,
+    project_id: candidate.project_id ?? null,
+    session_id: candidate.session_id ?? null,
+  };
+
+  return (result.results ?? []).map((row) => ({
+    ...row,
+    similarity: lexicalSimilarity(candidate.content, row.content),
+    ...scoreMemoryForSearch(row, searchInput, 0, 'keyword'),
+  }));
+}
+
 export async function processMemoryCandidate(env: Env, candidate: ProcessMemoryCandidateInput): Promise<CandidateDecision> {
   const similar = await searchMemories(env, {
     query: candidate.content,
@@ -125,7 +163,7 @@ export async function processMemoryCandidate(env: Env, candidate: ProcessMemoryC
   // instead of guessing.
   if (requiresLlm && !llm && match && (hasContradictionSignal(candidate.content) || hasForgetSignal(candidate.content))) {
     const { createMemoryReviews } = await import('./reviews');
-    const [review] = await createMemoryReviews(env, [candidate]);
+    const [review] = (await createMemoryReviews(env, [candidate])).reviews;
     // createMemoryReviews can decline to queue (its findActiveDuplicate check hit a heuristic
     // 'ignore') — report that honestly instead of claiming a review exists that doesn't.
     if (!review) {
@@ -148,13 +186,18 @@ export async function processMemoryCandidate(env: Env, candidate: ProcessMemoryC
   const decision = chooseDecision(candidate, match, llm);
 
   if (decision.action === 'ignore') {
+    // A correction that duplicates an ALREADY-ACTIVE standing rule is a recurrence, not noise: the
+    // agent repeated a mistake that rule already covers. Same-direction by construction — the
+    // candidate's own rule text matched (the opposite direction goes through `supersedes_query`,
+    // which never reaches this branch). Reinforce before returning; the row is still not re-added.
+    const reinforcement = match && candidate.signal === 'correction' ? await reinforceMemory(env, match, candidate) : null;
     await writeMemoryEvent(env, {
       memoryId: match?.id ?? null,
       userId: candidate.user_id,
       eventType: 'ignore',
-      payload: { candidate_kind: candidate.kind, candidate_scope: candidate.scope, candidate_content_length: candidate.content.length, matched_memory_id: match?.id, reason: decision.reason },
+      payload: { candidate_kind: candidate.kind, candidate_scope: candidate.scope, candidate_content_length: candidate.content.length, matched_memory_id: match?.id, reason: decision.reason, reinforced: reinforcement !== null },
     });
-    return { action: 'ignore', candidate, matched_memory: match, reason: decision.reason };
+    return { action: 'ignore', candidate, matched_memory: match, reason: decision.reason, ...(reinforcement ? { reinforcement } : {}) };
   }
 
   if (decision.action === 'merge' && match) {
