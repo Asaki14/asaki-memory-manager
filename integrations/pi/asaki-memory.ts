@@ -275,12 +275,17 @@ function memoryConfig() {
     autoExtract: envFlagEnabledConfig(process.env.ASAKI_MEMORY_AUTO_EXTRACT ?? fileConfig.autoExtract ?? fileConfig.auto_extract, false),
     autoClassifier: envFlagEnabledConfig(process.env.ASAKI_MEMORY_AUTO_CLASSIFIER ?? fileConfig.autoClassifier ?? fileConfig.auto_classifier, true),
     startupInject: envFlagEnabledConfig(process.env.ASAKI_MEMORY_STARTUP_INJECT ?? fileConfig.startupInject ?? fileConfig.startup_inject, true),
-    // Both default OFF (plan §11.1). Correction mode gates the correction prompt/schema, the
+    // Both default ON (plan §11.1). Correction mode gates the correction prompt/schema, the
     // extra POST fields, the prior-context block, the prior-candidate line and the throttle
-    // override; action trace gates only the `Tool:` lines inside the delta. With both off the
-    // prompt, the schema, the POST body and the delta text are what they were before.
-    correctionMode: envFlagEnabledConfig(process.env.ASAKI_MEMORY_CORRECTION_MODE ?? fileConfig.correctionMode ?? fileConfig.correction_mode, false),
-    actionTrace: envFlagEnabledConfig(process.env.ASAKI_MEMORY_ACTION_TRACE ?? fileConfig.actionTrace ?? fileConfig.action_trace, false),
+    // override; action trace gates only the `Tool:` lines inside the delta. Set either to 0 (env or
+    // ~/.pi/agent/asaki-memory.json) to fall back: with correction mode off the prompt, the schema,
+    // the POST body and the call frequency are what they were before, and the input text is
+    // byte-identical ONLY when action trace is off too. Action trace sends one redacted
+    // `Tool: <name> <arg>` line per tool call off-machine; paths/URIs/hosts are rewritten but
+    // non-path free text (commit messages, grep patterns) is not — see integrations/claude-code/
+    // README.md's exposure notice, which applies to this client as well.
+    correctionMode: envFlagEnabledConfig(process.env.ASAKI_MEMORY_CORRECTION_MODE ?? fileConfig.correctionMode ?? fileConfig.correction_mode, true),
+    actionTrace: envFlagEnabledConfig(process.env.ASAKI_MEMORY_ACTION_TRACE ?? fileConfig.actionTrace ?? fileConfig.action_trace, true),
     startupTopK: numberConfig(process.env.ASAKI_MEMORY_STARTUP_TOP_K, numberConfig(fileConfig.startupTopK ?? fileConfig.startup_top_k, DEFAULT_STARTUP_TOP_K)),
     extractMinIntervalMs:
       numberConfig(process.env.ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS, numberConfig(fileConfig.extractMinIntervalSeconds ?? fileConfig.extract_min_interval_seconds, DEFAULT_EXTRACT_MIN_INTERVAL_SECONDS)) * 1000,
@@ -509,6 +514,54 @@ function formatScoreDetails(details: any): string {
   return parts.length ? ` [${parts.join(" ")}]` : "";
 }
 
+// #region asaki-review-format
+// How much of a supersession target's content is quoted on its suggestion line.
+const SUPERSEDE_CONTENT_CHARS = 160;
+
+// Correction-aware review presentation. A `signal: "correction"` candidate is rendered as a block
+// instead of one line: the rule he is accepting or rejecting first, then the moment that produced it
+// (what the agent did → the captain's verdict) plus WHERE the antecedent came from, so a
+// trace-inferred rule visibly reads weaker than a prose-inferred one, then the supersession
+// suggestion carrying the target's CURRENT scope/kind/confidence — resolving a review never
+// rescopes the target automatically, and a 0.95 → 0.70 confidence overwrite has to be visible at
+// decision time. Accept the suggestion with `asaki_memory_review_resolve {action:"update",
+// memory_id:<the id on that line>}`; `suggested_action: "delete"` means the rule form was `retract`.
+// Non-correction rows keep today's single line, byte-for-byte.
+//
+// KEEP the emitted text byte-identical to the copy in src/mcp.ts — `npm run eval:review-format`
+// fails on any drift, and it also pins the deliberate asymmetry on the FALLBACK line, where only
+// this copy prints importance/confidence.
+function correctionBlockLines(item: any, candidate: any): string[] | null {
+  if (candidate.signal !== "correction") return null;
+
+  const text = (value: unknown): string => (typeof value === "string" && value.trim() ? value.trim() : "(unrecorded)");
+  const num = (value: unknown): string => (typeof value === "number" ? value.toFixed(2) : "?");
+  const correction = candidate.correction && typeof candidate.correction === "object" ? candidate.correction : {};
+  const antecedent = typeof candidate.antecedent_source === "string" && candidate.antecedent_source ? candidate.antecedent_source : "none";
+
+  const lines = [`   ⤷ agent: ${text(correction.agent_did)}   →   captain: ${text(correction.captain_verdict)}   (antecedent: ${antecedent})`];
+
+  const supersedes = item.supersedes_candidates;
+  if (supersedes === null) {
+    lines.push("   ⤷ supersedes: not computed (suggestion cap reached on this page; re-list with a narrower filter)");
+  } else if (Array.isArray(supersedes)) {
+    for (const s of supersedes) {
+      const content = typeof s.content === "string" ? s.content : "";
+      const shown = content.length > SUPERSEDE_CONTENT_CHARS ? `${content.slice(0, SUPERSEDE_CONTENT_CHARS)}…` : content;
+      lines.push(
+        `   ⤷ supersedes: ${s.memory_id} [scope=${s.target_scope} kind=${s.target_kind} confidence=${num(s.target_confidence)}] "${shown}"  (score=${num(s.score)} suggest: ${s.suggested_action})`,
+      );
+    }
+  }
+
+  // Written server-side when this correction refused to merge into the pending row it contradicts;
+  // that row's text is not carried on this response, so the id is what there is to print.
+  if (typeof candidate.supersedes_pending_review_id === "string" && candidate.supersedes_pending_review_id) {
+    lines.push(`   ⤷ contradicts pending review ${candidate.supersedes_pending_review_id}`);
+  }
+  return lines;
+}
+
 function formatReviewLine(item: any, index?: number): string {
   const prefix = index == null ? "" : `${index + 1}. `;
   const id = item.id ? ` id=${item.id}` : "";
@@ -528,8 +581,22 @@ function formatReviewLine(item: any, index?: number): string {
   const dup = potentialDuplicate
     ? ` potential_duplicate=[memory_id=${potentialDuplicate.memory_id} suggested=${potentialDuplicate.action} reason="${potentialDuplicate.reason}"]`
     : "";
+
+  const correctionLines = correctionBlockLines(item, candidate);
+  if (correctionLines) {
+    const subtype = typeof candidate.signal_subtype === "string" && candidate.signal_subtype ? candidate.signal_subtype : "unspecified";
+    const ruleForm = typeof candidate.rule_form === "string" && candidate.rule_form ? candidate.rule_form : "unspecified";
+    const meta = `${id}${status}${action}${memoryId}${scope}${kind}${importance}${confidence}`.trim();
+    const provenance = `${source}${createdAt}${updatedAt}${dup}`.trim();
+    return [`${prefix}[correction · ${subtype} · ${ruleForm}] ${content}`, ...correctionLines]
+      .concat(meta ? [`   ${meta}`] : [])
+      .concat(provenance ? [`   ${provenance}`] : [])
+      .join("\n");
+  }
+
   return `${prefix}${content}${id}${status}${action}${memoryId}${scope}${kind}${importance}${confidence}${source}${createdAt}${updatedAt}${dup}`;
 }
+// #endregion
 
 type AutoInjectMemoryResult = {
   context: string | null;
@@ -1386,14 +1453,14 @@ ${trimmedArgs ? `User focus: ${trimmedArgs}\n` : ""}
 Global scope discipline (the recurring failure mode this exists to catch): global memories get pulled into every project's context, so the bar is "genuinely useful in ANY conversation regardless of project" — cross-project dev preferences, communication/output style, secret-handling rules, this memory system's own operating rules, and durable personal/identity facts. It is NOT a dumping ground for system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs) that only happened to be captured while not inside a recognizable git repo — that content belongs in scope=project with project_id set to the relevant repo's basename (e.g. a dotfiles repo), even if it was captured elsewhere. For every global item ask "would this help in an unrelated project?" — if no, propose RESCOPE (UPDATE scope+project_id) rather than leaving it global. (This text is mirrored in commands/memory.md and the active classifier prompts; src/services/extraction.ts is legacy compatibility only.)
 
 Workflow:
-1. Use asaki_memory_review_list to inspect pending reviews. For any review with created_at older than 14 days, flag it explicitly in your output as "stale — pending review needs a decision" rather than treating it identically to a fresh review.
+1. Use asaki_memory_review_list with include_suggestions: true to inspect pending reviews, and handle corrections FIRST: call it once with signal: "correction", work through those rows, then call it again without the filter for everything else. A correction is the user telling the agent it got something wrong, so it is the highest-value row in the queue and the only kind that can retire an active memory. For any review with created_at older than 14 days, flag it explicitly in your output as "stale — pending review needs a decision" rather than treating it identically to a fresh review.
 2. Use asaki_memory_list to list global memories and current project memories.
 3. Analyze duplicates, stale items, noisy items, overlong items (>300 Chinese chars or ~600 ASCII chars; propose compression/splitting/doc-linking), wrong scope/kind (see Global scope discipline above), low-value items, pending reviews, and missing durable memories.
-4. Propose REVIEW_RESOLVE/DELETE/UPDATE(rescope)/MERGE/ADD/KEEP changes with reasons and affected ids.
+4. Propose REVIEW_RESOLVE/DELETE/UPDATE(rescope)/MERGE/ADD/KEEP changes with reasons and affected ids. When a correction review prints "⤷ supersedes:" lines, prefer resolving it against that target — asaki_memory_review_resolve {action:"update", memory_id:<the id on that line>} to rewrite the old memory, {action:"delete", memory_id:…} when the suggestion says "suggest: delete" (the correction was a retraction) — over {action:"add"}, which leaves the contradicted memory active and retrievable. {action:"ignore"} rejects the inferred rule. Resolution never changes the target's scope: the suggestion line prints the target's current scope/kind/confidence, so if the scope is wrong, rescope it separately with asaki_memory_update. A "⤷ contradicts pending review <id>" line means two queued rows disagree — decide both, not one.
 5. Use questionnaire before any write. Offer options like apply all high-confidence changes, resolve selected reviews, only deletes, only updates/additions, or skip.
 6. Execute approved changes using asaki_memory_review_resolve, asaki_memory_update, asaki_memory_delete, and asaki_memory_add.
 7. Use asaki_memory_review_create instead of asaki_memory_add for high-risk uncertain memories.
-8. Close the loop (few-shot self-iteration): classifier is the active/default background source; server extraction is deprecated. For every DELETE/RESCOPE/compression of a classifier-sourced memory, add a classifier regression case + matching few-shot in all prompt copies. Route to the legacy extraction eval only when source explicitly identifies the deprecated extraction path. Follow AGENTS.md "Few-shot self-iteration" and its TDD flow. If this audit is outside asaki-memory-manager, emit copy-pasteable classifier cases instead of editing. Never make these edits in report mode.
+8. Close the loop (few-shot self-iteration): classifier is the active/default background source; server extraction is deprecated. For every DELETE/RESCOPE/compression of a classifier-sourced memory, add a classifier regression case + matching few-shot in all prompt copies. If the row you rejected was a correction ("[correction · … · …]"), the fixture case must carry the correction block — the delta, the expected signal/signal_subtype/rule_form, and either the correct rule text or expectFlag: false. Route to the legacy extraction eval only when source explicitly identifies the deprecated extraction path. Follow AGENTS.md "Few-shot self-iteration" and its TDD flow. If this audit is outside asaki-memory-manager, emit copy-pasteable classifier cases instead of editing. Never make these edits in report mode.
 9. Report final changes and remaining recommendations.
 
 Safety:
@@ -1767,10 +1834,13 @@ Safety:
       project_id: Type.Optional(Type.String({ description: "Project id override." })),
       session_id: Type.Optional(Type.String({ description: "Session id override." })),
       source: Type.Optional(Type.String({ description: "Source filter." })),
+      signal: Type.Optional(
+        Type.String({ description: "Filter by candidate signal: correction, preference, outcome, none. Corrections sort first regardless; use correction to see only them during an audit." }),
+      ),
       limit: Type.Optional(Type.Integer({ description: "Max reviews to return (1-100, default 50).", minimum: 1, maximum: 100 })),
       offset: Type.Optional(Type.Integer({ description: "Pagination offset (default 0).", minimum: 0 })),
       include_suggestions: Type.Optional(
-        Type.Boolean({ description: "Attach a potential_duplicate hint (matched memory + suggested add/merge/update/delete/ignore) to each pending review. Default off." }),
+        Type.Boolean({ description: "Attach a potential_duplicate hint (matched memory + suggested add/merge/update/delete/ignore) to each pending review, plus supersedes_candidates on correction rows. Default off." }),
       ),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -1782,6 +1852,7 @@ Safety:
         if (sessionId) body.session_id = sessionId;
         if (params.status) body.status = params.status;
         if (params.source) body.source = params.source;
+        if (params.signal) body.signal = params.signal;
         if (params.limit != null) body.limit = params.limit;
         if (params.offset != null) body.offset = params.offset;
         if (params.include_suggestions) body.include_suggestions = true;

@@ -6,11 +6,11 @@
 // that this builder ever emits it.
 //
 // Two output modes:
-//   - action trace OFF (default): byte-for-byte the same text the previous inline builder
-//     produced — plain `User: ` / `Assistant: ` lines, joined by a blank line.
-//   - action trace ON (ASAKI_MEMORY_ACTION_TRACE=1): each assistant tool call also emits one
-//     `Tool: <name> <one whitelisted arg>` line. Tool RESULTS are never read; thinking blocks
-//     are never read.
+//   - action trace ON (default; ASAKI_MEMORY_ACTION_TRACE unset or 1): each assistant tool call
+//     also emits one `Tool: <name> <one whitelisted arg>` line. Tool RESULTS are never read;
+//     thinking blocks are never read.
+//   - action trace OFF (ASAKI_MEMORY_ACTION_TRACE=0): byte-for-byte the same text the previous
+//     inline builder produced — plain `User: ` / `Assistant: ` lines, joined by a blank line.
 //
 // Per-line pipeline order is load-bearing (plan §3.1):
 //   1. gate the ORIGINAL arg (trace-specific patterns + the canonical secret list) — on a hit
@@ -228,7 +228,10 @@ if (isMain()) {
   let stdin = '';
   process.stdin.on('data', (chunk) => (stdin += chunk));
   process.stdin.on('end', () => {
-    const actionTrace = !['', '0', 'false', 'off', 'no'].includes((process.env.ASAKI_MEMORY_ACTION_TRACE ?? '').toLowerCase());
+    // Defaults ON: an unset variable means "on" so the plugin's shipped default needs no env at
+    // all, while an explicit empty value keeps meaning "off" (an unset var in the hook reads as '').
+    const raw = process.env.ASAKI_MEMORY_ACTION_TRACE;
+    const actionTrace = raw == null ? true : !['', '0', 'false', 'off', 'no'].includes(raw.toLowerCase());
     process.stdout.write(buildDelta(stdin, { repoRoot: process.env.ASAKI_TRACE_REPO_ROOT ?? '', actionTrace }));
   });
 }
