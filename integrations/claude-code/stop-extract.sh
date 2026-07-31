@@ -528,7 +528,9 @@ Correction reasoning — build the contrast pair BEFORE writing the rule:
 
 Temporal attribution: agent_did MUST come from a line appearing BEFORE the verdict in reading order. "Tool:" lines appearing AFTER the verdict in the current delta are the agent repairing itself and must never be used as agent_did. If the only candidate action is post-verdict, treat the antecedent as unrecoverable.
 
-If the antecedent cannot be recovered, output flag=false, signal="correction", antecedent_source="none", reason="correction-without-antecedent" — never invent one.
+If the antecedent cannot be recovered, output flag=false, signal="correction", antecedent_source="none", reason="correction-without-antecedent" — never invent one. This applies ONLY when the user rejects an agent ACTION you cannot find. It does NOT apply to an explicit forget/retract request about an existing memory, rule or prior candidate ("forget that I prefer dark mode", "那条记忆不对") — that request IS its own antecedent, so it is flag=true with rule_form="retract" and needs no agent action at all.
+
+Corrections are the PRIORITY, not the only thing worth saving. A delta with no correction in it is judged exactly as it was before: a completed decision, fix, configuration state or stated preference is flag=true on its own merits and never needs a user verdict, approval or confirmation to qualify. "No correction here" is a reason to fall through to the checklist below, never a reason to answer flag=false. Judge self-containedness on what the sentence itself names — do not demand extra project context it does not need.
 
 Fields:
 - signal: correction | preference | outcome | none. Use "preference" for a stated preference/rule with no correction, "outcome" for a completed decision/fix/learning, "none" when flag=false and nothing was detected.
@@ -539,7 +541,7 @@ Fields:
   - repeat_complaint — 又…、还是…、说过了、都说了、第几次了、again, I already said
   - approval_after_change — 对了、这样就行、可以了、就这样、yes that is it (EXPLICIT approval only; never mine implicit acceptance)
   - futility_verdict — 何必、没必要、多余、想复杂了、overkill, why bother
-- rule_form: prohibition | preference | procedure | retract. Use "retract" only for an explicit request to drop or undo an existing memory or rule.
+- rule_form: prohibition | preference | procedure | retract. Use "retract" for an explicit request to drop or undo an existing memory, rule or prior candidate — including when the user also names a replacement in the same breath (the replacement goes in redirect_target and shapes text; the form stays retract).
 - antecedent_source: prose | trace | prior_tail | candidate | none — where agent_did came from. Use "trace" for a "Tool:" line in the current delta, "prior_tail" for anything inside the prior block, "candidate" for the "Prior memory candidate:" line, "prose" for assistant text, "none" when there is no antecedent.
 - supersedes_query: an AFFIRMATIVE restatement of the OLD behaviour the new rule retires, phrased the way the old memory would have been written — NOT the new negative rule. Empty string when nothing is being retired.
 - Never output importance or confidence. The server derives both from signal and antecedent_source.
@@ -571,12 +573,15 @@ Correction examples:
 - "Prior memory candidate: 每次编辑完成后自动 commit 并推送" … "User: 那条不对" -> flag=true, signal=correction, signal_subtype=explicit_negation, rule_form=retract, antecedent_source=candidate, text="不要在编辑完成后自动 commit 并推送", supersedes_query="每次编辑完成后自动 commit 并推送".
 - prior block "Tool: edit src/a.ts" … current delta "User: 不对" then "Tool: edit src/a.ts" -> the antecedent is the PRIOR action (antecedent_source=prior_tail); the post-verdict tool line is the repair and must be ignored.
 - "User: 不对" with nothing before it -> flag=false, signal=correction, antecedent_source=none, reason="correction-without-antecedent".
+- User says "forget that I prefer dark mode" -> flag=true, signal=correction, rule_form=retract, antecedent_source=prose, supersedes_query="prefers dark mode" (an explicit forget request is never "correction-without-antecedent").
+- "Prior memory candidate: Always run the full eval suite before every commit" … "User: that memory is wrong, drop it — only run it before a release" -> flag=true, rule_form=retract (NOT procedure), antecedent_source=candidate, redirect_target="only before a release".
 - "User: 这样不会有问题吗？" -> flag=false (a question is not a verdict).
 - "Assistant: 我上面那条改错了，已经修回来了" -> flag=false (the agent correcting itself is not a user correction).
 - One delta with "Assistant: 已修复登录超时" and "User: 别再自动 commit 了" -> emit ONLY the correction; the fix outcome is dropped.
 
 Non-correction examples (unchanged rules):
 - "解决了内存泄漏问题，已验证生效" -> flag=true (a previously-existing problem is now resolved).
+- "记忆里漏了缓存过期时间的配置项" … "已经补全，缓存过期时间统一改成 300 秒" -> flag=true (a concrete corrected configuration value is durable; do not demand an extra system/project identifier the sentence does not need).
 - "加了个测试用例，跑了一下全过了" -> flag=false (a routine step of ongoing work, no prior problem being resolved, nothing durable to recall later).
 - "这条需要改。要不要现在改？" -> flag=false (problem identified but fix/decision is still pending).
 - "FORGET_SIGNALS 正则用于识别类似 \"forget that I prefer dark mode\" 这种表达" -> flag=false (documentation-style explanation of code/prompt behavior, not an actual forget request).
@@ -590,7 +595,7 @@ Non-correction examples (unchanged rules):
 - "Music playing now" -> flag=false (transient UI/runtime status).
 - "先强制使用 Chafa；后续确认已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp" -> flag=true, scope=project, but distill only the final Kgp state (superseded intermediate states must not become separate memories).
 - "环境变量/API密钥统一存放在 ~/.config/fish/conf.d/api_keys.local.fish" -> flag=true, scope=project (machine-local shell paths belong to the dotfiles project, never global).
-- "一次性汇报放 scratchpad，不写入项目仓库" -> flag=true, scope=global (a reusable cross-project delivery preference; keep it concise).
+- "一次性汇报放 scratchpad，不写入项目仓库" -> flag=true, scope=global (where one-off artifacts go is a reusable cross-project delivery preference, so it stays global even though the sentence mentions 项目仓库; keep it concise).
 - "周会每项目 3–5 行，与豪哥日报区分；临时汇报放 scratchpad" -> flag=true, scope=project (mentor/reporting-specific conventions do not help in unrelated projects).
 - "Claude Code 的交付文本必须放在回合最后，否则后续工具调用可能使文本不展示" -> flag=true, scope=project (app-specific harness behavior is not global).
 - "用户希望针对技能和工具进行优化，列出推荐项并决定是否禁用" -> flag=false (an open optimization intention is not a completed decision or durable outcome).

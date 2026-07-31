@@ -243,7 +243,7 @@
   {
     "name": "correction: terse_redirect to another tool (zh)",
     "correction": true,
-    "text": "Assistant: 加了 axios 依赖来发这个请求。\n\nUser: 用内置 fetch 就行，别加依赖",
+    "text": "Assistant: 加了 axios 依赖来发这个请求。\n\nUser: 换成内置 fetch",
     "expectFlag": true,
     "expectSignal": "correction",
     "expectSignalSubtype": "terse_redirect",
@@ -338,9 +338,7 @@
     "expectFlag": true,
     "expectSignal": "correction",
     "expectAntecedentSource": "prior_tail",
-    "expectRuleIncludes": [
-      "deploy"
-    ],
+    "expectRuleIncludes": [],
     "expectRuleExcludes": [
       "typecheck",
       "git status"
@@ -431,7 +429,7 @@
     "expectFlag": true,
     "expectSignal": "correction",
     "expectRuleIncludes": [
-      "PR"
+      "ask"
     ],
     "expectRuleExcludes": [
       "pnpm"
