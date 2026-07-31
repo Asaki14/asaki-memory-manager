@@ -225,8 +225,10 @@ app.post('/v1/memories/reviews/list', async (c) => {
   const validation = validateListMemoryReviews(body.body);
   if (!validation.ok) return c.json({ error: validation.error }, 400);
 
-  const reviews = await listMemoryReviews(c.env, validation.data);
-  return c.json({ reviews });
+  const { reviews, suggestions_truncated } = await listMemoryReviews(c.env, validation.data);
+  // The flag only appears when it's true, so a response without suggestion truncation stays
+  // byte-identical to what clients already parse.
+  return c.json(suggestions_truncated ? { reviews, suggestions_truncated: true } : { reviews });
 });
 
 app.post('/v1/memories/reviews/:id/resolve', async (c) => {
