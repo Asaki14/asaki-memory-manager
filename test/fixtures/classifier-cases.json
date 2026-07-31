@@ -97,7 +97,8 @@
   {
     "name": "pos: removed package is durable current project state",
     "text": "Assistant: 已从 Pi 配置中彻底移除 Ponytail 包、extension、skills 和配置引用，并通过 TypeScript 检查。",
-    "expectFlag": true
+    "expectFlag": true,
+    "expectMaxImportance": 0.5
   },
   {
     "name": "neg: vague commit fragment has no durable context",
@@ -112,7 +113,8 @@
   {
     "name": "pos: superseded intermediate config retains only final state",
     "text": "Assistant: Herdr 中运行 Yazi 时先强制使用 Chafa；后续确认 Herdr 已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp。",
-    "expectFlag": true
+    "expectFlag": true,
+    "expectMaxImportance": 0.5
   },
   {
     "name": "pos: machine-local fish secret path is project-scoped",
@@ -120,7 +122,9 @@
     "expectFlag": true,
     "expectScope": "project",
     "expectMaxTextLength": 300,
-    "expectTextIncludes": ["api_keys.local.fish"]
+    "expectTextIncludes": [
+      "api_keys.local.fish"
+    ]
   },
   {
     "name": "pos: cross-project scratchpad preference stays concise and global",
@@ -128,7 +132,9 @@
     "expectFlag": true,
     "expectScope": "global",
     "expectMaxTextLength": 160,
-    "expectTextIncludes": ["scratchpad"]
+    "expectTextIncludes": [
+      "scratchpad"
+    ]
   },
   {
     "name": "pos: concrete dotfiles layout outcome is project-scoped",
@@ -136,7 +142,10 @@
     "expectFlag": true,
     "expectScope": "project",
     "expectMaxTextLength": 160,
-    "expectTextIncludes": ["10"]
+    "expectTextIncludes": [
+      "10"
+    ],
+    "expectMaxImportance": 0.5
   },
   {
     "name": "pos: overlong app implementation is compressed and project-scoped",
@@ -144,7 +153,10 @@
     "expectFlag": true,
     "expectScope": "project",
     "expectMaxTextLength": 300,
-    "expectTextIncludes": ["status_popup.sh"]
+    "expectTextIncludes": [
+      "status_popup.sh"
+    ],
+    "expectMaxImportance": 0.5
   },
   {
     "name": "neg: one-off Claude Design API procedure dump",
@@ -167,7 +179,9 @@
     "expectFlag": true,
     "expectScope": "project",
     "expectMaxTextLength": 160,
-    "expectTextIncludes": ["豪哥"]
+    "expectTextIncludes": [
+      "豪哥"
+    ]
   },
   {
     "name": "pos: Claude Code delivery behavior is app-specific and project-scoped",
@@ -175,11 +189,302 @@
     "expectFlag": true,
     "expectScope": "project",
     "expectMaxTextLength": 160,
-    "expectTextIncludes": ["Claude Code"]
+    "expectTextIncludes": [
+      "Claude Code"
+    ]
   },
   {
     "name": "neg: vague optimization intention is not a completed decision",
     "text": "Assistant: 用户希望针对技能和工具进行优化，列出推荐项并决定是否禁用。",
+    "expectFlag": false
+  },
+  {
+    "name": "correction: explicit_negation over an assistant claim (zh)",
+    "correction": true,
+    "text": "Assistant: 我把新记忆的默认 scope 设成了 global。\n\nUser: 不对，项目相关的东西不要进 global",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectSignalSubtype": "explicit_negation",
+    "expectAntecedentSource": "prose",
+    "expectRuleExcludes": [
+      "不对"
+    ]
+  },
+  {
+    "name": "correction: explicit_negation (en)",
+    "correction": true,
+    "text": "Assistant: I set the default review batch size to 100 rows.\n\nUser: no, that is wrong — never page more than 20 at a time here",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectSignalSubtype": "explicit_negation",
+    "expectAntecedentSource": "prose"
+  },
+  {
+    "name": "correction: override_of_action inferred from a trace line (zh)",
+    "correction": true,
+    "text": "Tool: bash git add -A\n\nTool: bash git commit -m \"wip\"\n\nUser: 别再自动 commit 了",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectSignalSubtype": "override_of_action",
+    "expectAntecedentSource": "trace",
+    "expectRuleIncludes": [
+      "commit"
+    ]
+  },
+  {
+    "name": "correction: override_of_action, revert an edit (en)",
+    "correction": true,
+    "text": "Assistant: I also reformatted the whole file while fixing the bug.\n\nUser: undo that, only touch the lines you need",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectSignalSubtype": "override_of_action",
+    "expectAntecedentSource": "prose"
+  },
+  {
+    "name": "correction: terse_redirect to another tool (zh)",
+    "correction": true,
+    "text": "Assistant: 加了 axios 依赖来发这个请求。\n\nUser: 用内置 fetch 就行，别加依赖",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectSignalSubtype": "terse_redirect",
+    "expectAntecedentSource": "prose"
+  },
+  {
+    "name": "correction: terse_redirect (en)",
+    "correction": true,
+    "text": "Assistant: I added a table of contents at the top of the README.\n\nUser: drop that, use the existing headings instead",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectSignalSubtype": "terse_redirect",
+    "expectAntecedentSource": "prose"
+  },
+  {
+    "name": "correction: repeat_complaint (zh)",
+    "correction": true,
+    "text": "Assistant: 我把这次工作的完整报告写进了仓库根目录的 REPORT.md。\n\nUser: 说过了，一次性汇报放 scratchpad，不写进仓库",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectSignalSubtype": "repeat_complaint",
+    "expectAntecedentSource": "prose"
+  },
+  {
+    "name": "correction: repeat_complaint (en)",
+    "correction": true,
+    "text": "Assistant: Pushed the branch straight to main after the tests passed.\n\nUser: again? I already said never push to main without asking",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectSignalSubtype": "repeat_complaint",
+    "expectAntecedentSource": "prose",
+    "expectRuleIncludes": [
+      "main"
+    ]
+  },
+  {
+    "name": "correction: approval_after_change (zh)",
+    "correction": true,
+    "text": "Assistant: 已经把审计流程改成只读模式，只报告不写入。\n\nUser: 对了，这样就行，以后审计都这样",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectSignalSubtype": "approval_after_change",
+    "expectAntecedentSource": "prose"
+  },
+  {
+    "name": "correction: approval_after_change (en)",
+    "correction": true,
+    "text": "Assistant: I moved the summary to the very end of the turn instead of the middle.\n\nUser: yes that is it, always do it that way",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectSignalSubtype": "approval_after_change",
+    "expectAntecedentSource": "prose"
+  },
+  {
+    "name": "correction: futility_verdict (zh)",
+    "correction": true,
+    "text": "Assistant: 为了这个接口加了三层缓存做兜底，还写了预热脚本。\n\nUser: 何必，先用最简实现",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectSignalSubtype": "futility_verdict",
+    "expectAntecedentSource": "prose",
+    "expectRuleExcludes": [
+      "何必"
+    ]
+  },
+  {
+    "name": "correction: futility_verdict (en)",
+    "correction": true,
+    "text": "Assistant: I generated a full migration plan with rollback scripts for this one-line config change.\n\nUser: overkill, why bother — just change the value",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectSignalSubtype": "futility_verdict",
+    "expectAntecedentSource": "prose"
+  },
+  {
+    "name": "order: the criticized action is in the prior block, the repair is post-verdict",
+    "correction": true,
+    "temporal": true,
+    "text": "Prior context (ALREADY PROCESSED — antecedent only, never extract from this block):\n\nTool: edit src/services/reviews.ts\n\nAssistant: 顺手把 reviews 列表的默认排序改成了按重要度。\n\n--- current delta below ---\n\nUser: 不对，排序不要动\n\nTool: edit src/services/reviews.ts",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectAntecedentSource": "prior_tail",
+    "expectRuleIncludes": [
+      "排序"
+    ]
+  },
+  {
+    "name": "order: post-verdict tool line must not become the antecedent",
+    "correction": true,
+    "temporal": true,
+    "text": "Prior context (ALREADY PROCESSED — antecedent only, never extract from this block):\n\nTool: bash npm run deploy\n\n--- current delta below ---\n\nUser: 别再自己 deploy 了，先问我\n\nTool: bash git status\n\nTool: bash npm run typecheck",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectAntecedentSource": "prior_tail",
+    "expectRuleIncludes": [
+      "deploy"
+    ],
+    "expectRuleExcludes": [
+      "typecheck",
+      "git status"
+    ]
+  },
+  {
+    "name": "order: prior prose antecedent with a repair in the current delta (en)",
+    "correction": true,
+    "temporal": true,
+    "text": "Prior context (ALREADY PROCESSED — antecedent only, never extract from this block):\n\nAssistant: I renamed every exported helper in that module to match the new convention.\n\n--- current delta below ---\n\nUser: put it back, renaming public exports needs my sign-off\n\nTool: bash git revert HEAD",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectAntecedentSource": "prior_tail",
+    "expectRuleExcludes": [
+      "revert HEAD"
+    ]
+  },
+  {
+    "name": "order: current-delta trace before the verdict is a valid antecedent",
+    "correction": true,
+    "temporal": true,
+    "text": "Tool: bash rm -rf dist\n\nUser: 别删构建产物，我还在用\n\nTool: bash npm run build",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectAntecedentSource": "trace",
+    "expectRuleExcludes": [
+      "npm run build"
+    ]
+  },
+  {
+    "name": "candidate: a verdict about the classifier own pending candidate",
+    "correction": true,
+    "text": "Prior context (ALREADY PROCESSED — antecedent only, never extract from this block):\n\nPrior memory candidate: 每次编辑完成后自动 commit 并推送\n\n--- current delta below ---\n\nUser: 那条记忆不对，我从来没让它自动推送",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectAntecedentSource": "candidate",
+    "expectRuleForm": "retract",
+    "expectSupersedesQueryIncludes": [
+      "commit"
+    ]
+  },
+  {
+    "name": "candidate: retract a pending candidate (en)",
+    "correction": true,
+    "text": "Prior context (ALREADY PROCESSED — antecedent only, never extract from this block):\n\nPrior memory candidate: Always run the full eval suite before every commit.\n\n--- current delta below ---\n\nUser: that memory is wrong, drop it — only run it before a release",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectAntecedentSource": "candidate",
+    "expectRuleForm": "retract",
+    "expectSupersedesQueryIncludes": [
+      "eval"
+    ]
+  },
+  {
+    "name": "competition: bug fix plus a correction in one delta",
+    "correction": true,
+    "competition": true,
+    "text": "Assistant: 已修复登录超时，根因是 token 刷新竞态，已验证生效。顺手也把改动 commit 了。\n\nUser: 别再自动 commit 了",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectRuleIncludes": [
+      "commit"
+    ],
+    "expectRuleExcludes": [
+      "登录超时",
+      "竞态"
+    ]
+  },
+  {
+    "name": "competition: config outcome plus a correction",
+    "correction": true,
+    "competition": true,
+    "text": "Assistant: paneru 四边 padding 已从 4 调整到 10。另外我把配置也换成了 A 方案。\n\nUser: 配置还是原来的 B 方案",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectRuleIncludes": [
+      "B"
+    ],
+    "expectRuleExcludes": [
+      "padding"
+    ]
+  },
+  {
+    "name": "competition: stated preference plus a correction (en)",
+    "correction": true,
+    "competition": true,
+    "text": "Assistant: Noted that you prefer pnpm for new projects. I also opened a PR for this change.\n\nUser: never open a PR without asking me first",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectRuleIncludes": [
+      "PR"
+    ],
+    "expectRuleExcludes": [
+      "pnpm"
+    ]
+  },
+  {
+    "name": "competition: task learning plus a correction",
+    "correction": true,
+    "competition": true,
+    "text": "Assistant: 学到 Vectorize 的 upsert 失败时要保留 D1 写入。我把这条经验直接写进 README 了。\n\nUser: 去掉，README 不放这种经验，写到 AGENTS.md",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectRuleIncludes": [
+      "AGENTS.md"
+    ],
+    "expectRuleExcludes": [
+      "Vectorize"
+    ]
+  },
+  {
+    "name": "neg: correction with no recoverable antecedent",
+    "correction": false,
+    "text": "User: 不对",
+    "expectFlag": false
+  },
+  {
+    "name": "neg: the agent correcting itself is not a user correction",
+    "correction": false,
+    "text": "Assistant: 我上面那条改错了，方向写反了，已经改回来并重新跑了 typecheck。",
+    "expectFlag": false
+  },
+  {
+    "name": "neg: a question that only reads like a complaint",
+    "correction": false,
+    "text": "User: 这样不会有问题吗？后面并发上来会不会打爆连接池",
+    "expectFlag": false
+  },
+  {
+    "name": "neg: a correction quoted inside prompt calibration text",
+    "correction": false,
+    "text": "Assistant: 在 CORRECTION_SIGNAL_PATTERN 里补了几个 marker，比如 User: 别再自动 commit 了 这种说法，用来触发 override。",
+    "expectFlag": false
+  },
+  {
+    "name": "neg: a one-off command is not a correction",
+    "correction": false,
+    "text": "User: 跑一下 eval:classifier",
+    "expectFlag": false
+  },
+  {
+    "name": "neg: objectless fragment after a verdict",
+    "correction": false,
+    "text": "Assistant: 调整了一下实现方式。\n\nUser: 不要嵌套",
     "expectFlag": false
   }
 ]

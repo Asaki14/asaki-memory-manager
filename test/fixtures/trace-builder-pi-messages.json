@@ -1,0 +1,29 @@
+[
+  { "role": "user", "content": [{ "type": "text", "text": "改一下 src/index.ts 的排序" }] },
+  {
+    "role": "assistant",
+    "stopReason": "toolUse",
+    "content": [
+      { "type": "text", "text": "好的，我先读一下文件。" },
+      { "type": "thinking", "thinking": "internal reasoning that must never leave the machine" },
+      { "type": "toolCall", "id": "c1", "name": "read", "arguments": { "path": "/repo/src/index.ts" } },
+      { "type": "toolCall", "id": "c2", "name": "read", "arguments": { "path": "/Users/alice/Clients/Acme/2026-layoffs-list.xlsx" } }
+    ]
+  },
+  { "role": "toolResult", "content": [{ "type": "text", "text": "export DATABASE_PASSWORD=supersecret123" }] },
+  {
+    "role": "assistant",
+    "stopReason": "toolUse",
+    "content": [
+      { "type": "toolCall", "id": "c3", "name": "bash", "arguments": { "command": "git commit -m \"wip\"" } },
+      { "type": "toolCall", "id": "c4", "name": "bash", "arguments": { "command": "ssh -i /Users/alice/.ssh/id_ed25519_acme_prod deploy@10.0.0.4" } },
+      { "type": "toolCall", "id": "c5", "name": "bash", "arguments": { "command": "aws s3 cp s3://acme-private-legal/settlement.pdf ." } },
+      { "type": "toolCall", "id": "c6", "name": "bash", "arguments": { "command": "ssh deploy@acme-prod.internal 'systemctl restart api'" } },
+      { "type": "toolCall", "id": "c7", "name": "todowrite", "arguments": { "todos": [] } },
+      { "type": "toolCall", "id": "c8", "name": "edit", "arguments": { "path": "/repo/src/index.ts" } },
+      { "type": "toolCall", "id": "c9", "name": "find", "arguments": { "pattern": "src/**/*.ts" } }
+    ]
+  },
+  { "role": "assistant", "stopReason": "stop", "content": [{ "type": "text", "text": "已提交改动。" }] },
+  { "role": "user", "content": [{ "type": "text", "text": "别再自动 commit 了" }] }
+]

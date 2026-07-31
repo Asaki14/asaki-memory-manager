@@ -42,6 +42,132 @@ set -uo pipefail
 # owner-only, overriding whatever the default umask (commonly 0022/0002) would otherwise allow.
 umask 077
 
+# ---------------------------------------------------------------------------------------------
+# Library region: patterns and the two pure decision functions, defined before this script reads
+# stdin so scripts/eval-throttle-state.sh can source it and exercise them without running a hook.
+# Everything below the ASAKI_MEMORY_STOP_EXTRACT_LIB guard is hook behaviour.
+# ---------------------------------------------------------------------------------------------
+
+# Sensitive-content gate: never send private keys, bearer tokens, provider API keys, AWS access
+# keys, or key=value secret assignments off-machine — applies to both the cloud extraction call
+# and the local classifier call (the classifier is still a real model call over the network).
+# A slice containing a secret must never be retried, since leaving it queued would just resend
+# the same secret in every future (larger) delta until it scrolls out of the transcript.
+# KEEP IN SYNC with the canonical server list in src/utils/sensitiveContent.ts, SENSITIVE_RE_LIST
+# in integrations/pi/asaki-memory.ts, and SENSITIVE_PATTERNS in build-delta.mjs. Both holes the
+# canonical list closed are carried here: the credential keyword may carry an identifier
+# prefix/suffix (so DATABASE_PASSWORD=… is caught, where the old `\b` form was not), and any fish
+# `set -x`/`-gx`/`-Ux` flag spelling matches, not only the literal `set -gx`.
+SENSITIVE_PATTERN='-----BEGIN [A-Z ]*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b|\bsk-[A-Za-z0-9-]{10,}\b|\b(ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{16,}\b|\bAKIA[0-9A-Z]{16}\b|\bxox[baprs]-[A-Za-z0-9-]{10,}\b|\bAIza[0-9A-Za-z_-]{20,}\b|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b|://[^/[:space:]:]+:[^/[:space:]@]{6,}@|(^|[^[:alnum:]])[[:alnum:]_-]{0,64}(api[_-]?key|token|secret|password|passwd|authorization)([_-][[:alnum:]_-]{0,64})?\s*[:=]\s*"?[^"'"'"' ]{8,}|set(\s+--?[[:alpha:]][[:alnum:]-]*)+\s+[[:alnum:]_]*(KEY|TOKEN|SECRET|PASSWORD|PASSWD)[[:alnum:]_]*\s+[^$[:space:]][^[:space:]]{8,}'
+
+# Correction pre-gate (plan §4.1). Used for exactly two things: the throttle override (§4.5) and
+# the `correction_suspected` prompt hint. It is deliberately NOT a pre-filter on the classifier
+# call — the default path still asks the model about every delta.
+# KEEP IN SYNC with CORRECTION_SIGNAL_RE in integrations/pi/asaki-memory.ts.
+CORRECTION_SIGNAL_PATTERN='不对|不是这样|错了|这不行|不用改了|别改|别再|改回|回到|还是原来的|还是之前|撤销|去掉|删掉|换成|直接用|就行|应该是|说过了|都说了|第几次|又.{0,6}了吗|对了|这样就行|可以了|就这样|何必|没必要|多余|想复杂了|that.{0,3}s wrong|that.{0,3}s not right|revert|undo that|put it back|drop that|use .{1,24} instead|i already said|yes that.{0,3}s it|overkill|why bother'
+
+# Reads a flag the way AUTO_EXTRACT is read (`0`/`false`/`off`/`no`/empty → off).
+is_flag_enabled() {
+  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    ""|0|false|off|no) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# Throttle state machine (plan §4.5). The window anchor and the "a call happened" stamp are
+# deliberately different files: an override must NOT restart the window, or every correction-
+# carrying Stop event would replenish its own override and the ceiling would not hold.
+#
+#   W = $WINDOW_START_FILE  written only by a normal fire
+#   O = $OVERRIDE_USED_FILE written only by an override fire (holds the W it was charged against)
+#   $LAST_EXTRACT_FILE      written by every fire; read only as the migration fallback for W
+#
+# Args: NOW INTERVAL SIGNAL(1|0). Echoes normal|override|skip and performs the state writes.
+# Ceiling: at most 2 calls per fixed window [W, W+I) — one T1 and one T2.
+throttle_decision() {
+  local now="$1" interval="$2" signal="${3:-0}"
+  local window=0 override_used=-1
+
+  if [ -f "$WINDOW_START_FILE" ]; then
+    window=$(cat "$WINDOW_START_FILE" 2>/dev/null || echo 0)
+  elif [ -f "$LAST_EXTRACT_FILE" ]; then
+    # First run after upgrading: fall back to the pre-existing stamp so the upgrade does not
+    # hand out a free extra call.
+    window=$(cat "$LAST_EXTRACT_FILE" 2>/dev/null || echo 0)
+  fi
+  case "$window" in ''|*[!0-9]*) window=0 ;; esac
+  if [ -f "$OVERRIDE_USED_FILE" ]; then
+    override_used=$(cat "$OVERRIDE_USED_FILE" 2>/dev/null || echo -1)
+  fi
+  case "$override_used" in ''|-1) override_used=-1 ;; *[!0-9]*) override_used=-1 ;; esac
+
+  # T0: clock moved backwards. T1: the window expired.
+  if [ "$window" -gt "$now" ] || [ $((now - window)) -ge "$interval" ]; then
+    echo "$now" >"$WINDOW_START_FILE"
+    echo "$now" >"$LAST_EXTRACT_FILE"
+    echo "normal"
+    return 0
+  fi
+
+  # T2: a correction signal, and this window's single override is still unspent. W is NOT moved.
+  if [ "$signal" = "1" ] && [ "$override_used" != "$window" ]; then
+    echo "$window" >"$OVERRIDE_USED_FILE"
+    echo "$now" >"$LAST_EXTRACT_FILE"
+    echo "override"
+    return 0
+  fi
+
+  # T3.
+  echo "skip"
+}
+
+# Offset consumption by failure class (plan §9.3). `curl -sf` used to turn every failure into the
+# same empty body, so a deterministic 400 was retried forever while a 429 and a permanently wrong
+# key were indistinguishable from it. Echoes advance|hold|giveup.
+#
+#   advance — this exact body will never be accepted (or was): consume the delta.
+#   hold    — repairable/retryable: leave the offset so the delta folds into the next one.
+#   giveup  — held too many times already: consume the delta loudly (the caller logs the code).
+#
+# Args: HTTP_CODE OFFSET. Uses $RETRY_FILE ("<offset> <count>") and $MAX_DELTA_RETRIES.
+outcome_for_status() {
+  local code="$1" offset="$2"
+  case "$code" in
+    2*)
+      rm -f "$RETRY_FILE" 2>/dev/null
+      echo "advance"
+      return 0
+      ;;
+    400|413|414|422)
+      # Deterministic body rejection (validation, sensitive-content reject, too large).
+      rm -f "$RETRY_FILE" 2>/dev/null
+      echo "advance"
+      return 0
+      ;;
+  esac
+
+  # Everything else — 401/403 (repairable auth/config), 404/405 (endpoint/config), 408/425/429,
+  # any 5xx, and `000` for a network error/timeout — holds the offset under a bounded budget.
+  local retry_offset="" retry_count=0
+  if [ -f "$RETRY_FILE" ]; then
+    read -r retry_offset retry_count <"$RETRY_FILE" 2>/dev/null
+  fi
+  case "${retry_count:-0}" in ''|*[!0-9]*) retry_count=0 ;; esac
+  if [ "${retry_offset:-}" != "$offset" ]; then retry_count=0; fi
+  retry_count=$((retry_count + 1))
+  echo "$offset $retry_count" >"$RETRY_FILE"
+
+  if [ "$retry_count" -gt "${MAX_DELTA_RETRIES:-5}" ]; then
+    rm -f "$RETRY_FILE" 2>/dev/null
+    echo "giveup"
+    return 0
+  fi
+  echo "hold"
+}
+
+# Sourced as a library (eval harness): stop here, before any hook side effects.
+[ -n "${ASAKI_MEMORY_STOP_EXTRACT_LIB:-}" ] && return 0 2>/dev/null || true
+
 INPUT=$(cat)
 
 # Guard against the block below re-triggering itself: when Claude Code is already forcing a
@@ -71,10 +197,22 @@ ASAKI_BASE="${ASAKI_MEMORY_BASE_URL:-${ASAKI_MEMORY_API_URL:-}}"
 [ -z "$ASAKI_BASE" ] && exit 0
 AUTO_EXTRACT="${ASAKI_MEMORY_AUTO_EXTRACT:-0}"
 ASAKI_USER="${ASAKI_MEMORY_USER_ID:-asaki}"
+# Both default OFF. Correction mode gates the correction prompt/schema, the extra POST fields,
+# the tail carry-over, the prior-candidate line and the throttle override; action trace gates
+# only the `Tool:` lines inside the delta. With both off, the prompt, the schema, the POST body
+# and the delta text are byte-for-byte what they were before this feature existed.
+CORRECTION_MODE="${ASAKI_MEMORY_CORRECTION_MODE:-0}"
+ACTION_TRACE="${ASAKI_MEMORY_ACTION_TRACE:-0}"
+MAX_DELTA_RETRIES="${ASAKI_MEMORY_MAX_DELTA_RETRIES:-5}"
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+GIT_ROOT=""
+if [ -n "$CWD" ]; then
+  GIT_ROOT=$(cd "$CWD" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null) || GIT_ROOT=""
+fi
 if [ -n "${ASAKI_MEMORY_PROJECT_ID:-}" ]; then
   ASAKI_PROJECT="$ASAKI_MEMORY_PROJECT_ID"
-elif [ -n "$CWD" ] && GIT_ROOT=$(cd "$CWD" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null) && [ -n "$GIT_ROOT" ]; then
+elif [ -n "$GIT_ROOT" ]; then
   ASAKI_PROJECT=$(basename "$GIT_ROOT")
 else
   ASAKI_PROJECT=$(basename "${CWD:-unknown}")
@@ -87,6 +225,16 @@ LOG_FILE="$STATE_DIR/${SESSION_ID}.log"
 REPORTED_FILE="$STATE_DIR/${SESSION_ID}.reported"
 CLASSIFIER_LOG_FILE="$STATE_DIR/${SESSION_ID}.classifier.log"
 CLASSIFIER_REPORTED_FILE="$STATE_DIR/${SESSION_ID}.classifier.reported"
+# Throttle state machine files (plan §4.5) plus the bounded-retry counter (§9.3). All keyed by
+# SESSION_ID, so a new session starts fresh.
+LAST_EXTRACT_FILE="$STATE_DIR/${SESSION_ID}.last_extract"
+WINDOW_START_FILE="$STATE_DIR/${SESSION_ID}.window_start"
+OVERRIDE_USED_FILE="$STATE_DIR/${SESSION_ID}.override_used"
+RETRY_FILE="$STATE_DIR/${SESSION_ID}.retry"
+# Tail carry-over (plan §3.2): the last few formatted lines of each successfully processed delta,
+# replayed into the next prompt as labelled antecedent-only context.
+TAIL_FILE="$STATE_DIR/${SESSION_ID}.tail"
+TAIL_MAX_LINES=8
 
 # The extraction/classifier calls run fire-and-forget in the background (see below), so their
 # result isn't known when this invocation exits. Instead, each Stop event first checks whether
@@ -205,16 +353,8 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
 fi
 trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
 
-# Throttle: skip firing another extraction/classifier call within the min interval since the
-# last one actually fired. Deliberately does NOT advance STATE_FILE below — the skipped delta
-# stays queued and gets folded into the next Stop event's (larger) increment instead of being
-# lost. Shared between the cloud and classifier paths since a session only ever runs one.
-LAST_EXTRACT_FILE="$STATE_DIR/${SESSION_ID}.last_extract"
 MIN_INTERVAL="${ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS:-300}"
 NOW_EPOCH=$(date +%s)
-LAST_EXTRACT=0
-[ -f "$LAST_EXTRACT_FILE" ] && LAST_EXTRACT=$(cat "$LAST_EXTRACT_FILE" 2>/dev/null || echo 0)
-[ $((NOW_EPOCH - LAST_EXTRACT)) -lt "$MIN_INTERVAL" ] && report_and_exit
 
 LAST=0
 [ -f "$STATE_FILE" ] && LAST=$(cat "$STATE_FILE" 2>/dev/null || echo 0)
@@ -222,40 +362,32 @@ TOTAL=$(wc -l <"$TRANSCRIPT" | tr -d ' ')
 [ -z "$TOTAL" ] && TOTAL=0
 [ "$TOTAL" -le "$LAST" ] && report_and_exit
 
-TEXT=$(sed -n "$((LAST + 1)),${TOTAL}p" "$TRANSCRIPT" | node -e '
-let s = "";
-process.stdin.on("data", (d) => (s += d));
-process.stdin.on("end", () => {
-  const out = [];
-  for (const line of s.split("\n")) {
-    if (!line.trim()) continue;
-    let j;
-    try { j = JSON.parse(line); } catch { continue; }
-    if (j.type === "user" && j.message && typeof j.message.content === "string") {
-      out.push("User: " + j.message.content.trim());
-    } else if (j.type === "assistant" && j.message && Array.isArray(j.message.content)) {
-      const text = j.message.content.filter((c) => c.type === "text").map((c) => c.text).join(" ").trim();
-      if (text) out.push("Assistant: " + text);
-    }
-  }
-  process.stdout.write(out.join("\n\n"));
-});
-')
+# The delta is built BEFORE the throttle decision (plan §4.5): the correction override has to be
+# able to see the text it is deciding about. Costs one sed + one node pass per Stop event even
+# when the decision is "skip" — a few ms on a 20k-char slice.
+# The builder lives in build-delta.mjs so it is testable offline (scripts/eval-trace-builder.mjs).
+TEXT=$(sed -n "$((LAST + 1)),${TOTAL}p" "$TRANSCRIPT" \
+  | ASAKI_MEMORY_ACTION_TRACE="$ACTION_TRACE" ASAKI_TRACE_REPO_ROOT="$GIT_ROOT" node "$HOOK_DIR/build-delta.mjs")
 
-# Sensitive-content gate: never send private keys, bearer tokens, provider API keys, AWS access
-# keys, or key=value secret assignments off-machine — applies to both the cloud extraction call
-# and the local classifier call (the classifier is still a real model call over the network).
-# A slice containing a secret must never be retried, since leaving it queued would just resend
-# the same secret in every future (larger) delta until it scrolls out of the transcript.
-# KEEP IN SYNC with SENSITIVE_RE_LIST in integrations/pi/asaki-memory.ts and
-# scripts/shadow-run-extraction.ts. sk-/sk-proj-/sk-ant- use a hyphen (not an underscore) to
-# actually match real OpenAI/Anthropic keys, and this now also covers Slack xox- tokens,
-# Google AIza- keys, JWTs, and user:pass@host credential URLs.
-SENSITIVE_PATTERN='-----BEGIN [A-Z ]*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~+/=-]{16,}\b|\bsk-[A-Za-z0-9-]{10,}\b|\b(ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{16,}\b|\bAKIA[0-9A-Z]{16}\b|\bxox[baprs]-[A-Za-z0-9-]{10,}\b|\bAIza[0-9A-Za-z_-]{20,}\b|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b|://[^/[:space:]:]+:[^/[:space:]@]{6,}@|\b(api[_-]?key|token|secret|password|passwd|authorization)\b\s*[:=]\s*"?[^"'"'"' ]{8,}|set\s+-gx\s+[[:alnum:]_]*(KEY|TOKEN|SECRET|PASSWORD)[[:alnum:]_]*\s+[^$[:space:]][^[:space:]]{8,}'
+# Whole-delta sensitive gate. Per-trace-line gating already ran inside the builder on the
+# original (un-redacted) tool arguments; this is the second line of defence over the assembled
+# text, and it still consumes the offset on a hit.
 if echo "$TEXT" | grep -qiE -e "$SENSITIVE_PATTERN"; then
   echo "$TOTAL" >"$STATE_FILE"
   report_and_exit
 fi
+
+# Throttle: at most one normal fire per MIN_INTERVAL window, plus at most one correction-signal
+# override charged against that same window. A skip deliberately does NOT advance STATE_FILE —
+# the skipped delta stays queued and folds into the next Stop event's (larger) increment.
+CORRECTION_SIGNAL=0
+CORRECTION_SIGNAL_LINES=""
+if is_flag_enabled "$CORRECTION_MODE"; then
+  CORRECTION_SIGNAL_LINES=$(printf '%s' "$TEXT" | grep -iE -e "$CORRECTION_SIGNAL_PATTERN" | head -n 3)
+  [ -n "$CORRECTION_SIGNAL_LINES" ] && CORRECTION_SIGNAL=1
+fi
+THROTTLE_DECISION=$(throttle_decision "$NOW_EPOCH" "$MIN_INTERVAL" "$CORRECTION_SIGNAL")
+[ "$THROTTLE_DECISION" = "skip" ] && report_and_exit
 
 if [ "$AUTO_EXTRACT" = "1" ]; then
   # Content gate: only proceed if the delta contains at least one durable-memory signal marker
@@ -285,8 +417,6 @@ if [ "$AUTO_EXTRACT" = "1" ]; then
   # project_id is still sent as a hint for whichever candidates resolve to project scope.
   BODY=$(jq -cn --arg text "$TEXT" --arg user "$ASAKI_USER" --arg project "$ASAKI_PROJECT" \
     '{text: $text, user_id: $user, project_id: $project, source: "claude-code:auto-extract"}')
-
-  echo "$NOW_EPOCH" >"$LAST_EXTRACT_FILE"
 
   (
     RESP=$(curl -sf --max-time 20 -X POST "${ASAKI_BASE}/v1/memories/extract" \
@@ -377,12 +507,169 @@ Classify (only meaningful when flag=true):
 Be conservative: when genuinely unsure, prefer flag=false — a missed candidate falls back to the existing prompt-based reminder, a false alarm costs the main agent one wasted turn.
 
 Output your FINAL answer as compact JSON only, no other prose before or after it: {"flag":true|false,"text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","reason":"<short reason, especially when flag=false>"}'
-  CLASSIFIER_PROMPT=$(printf 'Delta:\n%s' "$TEXT")
+  # Correction mode (plan §6). Superset of the prompt above: same checklist and few-shot set,
+  # plus correction detection, the contrast pair, rule-form grammar and the extra output fields.
+  # KEEP IN SYNC — byte-identical — with CORRECTION_SYSTEM_PROMPT in
+  # integrations/pi/asaki-memory.ts and scripts/eval-classifier.sh.
+  CORRECTION_SYSTEM_PROMPT='You are a memory-candidate detector, not a writer. Given a conversation delta, decide if it contains something worth saving as a durable memory, and if so pre-distill it into ready-to-write fields — the client executes the write itself via HTTP after your response (the server then routes it to a review queue), so make the call carefully here.
 
-  echo "$NOW_EPOCH" >"$LAST_EXTRACT_FILE"
+PRIORITY: the user correcting the agent outranks everything else. A correction is any turn where the user rejects, reverses, narrows, or explicitly approves what the agent just did. If one delta contains BOTH a correction and an ordinary outcome/preference, emit ONLY the correction — the competitor is dropped, not downgraded. At most one candidate per delta.
+
+Input shape. The delta may contain:
+- "User:" / "Assistant:" lines — conversation prose, in transcript order.
+- "Tool: <name> <arg>" lines — one line per agent tool call, with paths, URIs and hosts already redacted. Tool results and thinking are never shown to you.
+- An optional block that starts with "Prior context (ALREADY PROCESSED — antecedent only, never extract from this block):" and ends at the line "--- current delta below ---". Everything above that delimiter was already processed in an earlier turn: use it ONLY as the antecedent of a correction, and never extract a memory out of it.
+- An optional "Prior memory candidate: <text>" line inside that prior block — the memory candidate this classifier proposed last time. A verdict about "那条记忆" / "that memory" refers to it.
+
+Correction reasoning — build the contrast pair BEFORE writing the rule:
+1. correction.agent_did — what the agent produced or attempted, taken from assistant prose, a "Tool:" line, the prior block, or the prior memory candidate.
+2. correction.captain_verdict — the user words, verbatim, trimmed.
+3. correction.redirect_target — what the user pointed to instead (empty for a pure prohibition).
+
+Temporal attribution: agent_did MUST come from a line appearing BEFORE the verdict in reading order. "Tool:" lines appearing AFTER the verdict in the current delta are the agent repairing itself and must never be used as agent_did. If the only candidate action is post-verdict, treat the antecedent as unrecoverable.
+
+If the antecedent cannot be recovered, output flag=false, signal="correction", antecedent_source="none", reason="correction-without-antecedent" — never invent one.
+
+Fields:
+- signal: correction | preference | outcome | none. Use "preference" for a stated preference/rule with no correction, "outcome" for a completed decision/fix/learning, "none" when flag=false and nothing was detected.
+- signal_subtype, only when signal=correction (otherwise empty string):
+  - explicit_negation — 不对、不是这样、错了、这不行、no that is wrong, that is not right
+  - override_of_action — 不用改了、别改、改回、回到…、还是原来的、撤销、revert, undo that, put it back
+  - terse_redirect — 去掉、删掉、换成、直接用、应该是…、use X instead, drop that
+  - repeat_complaint — 又…、还是…、说过了、都说了、第几次了、again, I already said
+  - approval_after_change — 对了、这样就行、可以了、就这样、yes that is it (EXPLICIT approval only; never mine implicit acceptance)
+  - futility_verdict — 何必、没必要、多余、想复杂了、overkill, why bother
+- rule_form: prohibition | preference | procedure | retract. Use "retract" only for an explicit request to drop or undo an existing memory or rule.
+- antecedent_source: prose | trace | prior_tail | candidate | none — where agent_did came from. Use "trace" for a "Tool:" line in the current delta, "prior_tail" for anything inside the prior block, "candidate" for the "Prior memory candidate:" line, "prose" for assistant text, "none" when there is no antecedent.
+- supersedes_query: an AFFIRMATIVE restatement of the OLD behaviour the new rule retires, phrased the way the old memory would have been written — NOT the new negative rule. Empty string when nothing is being retired.
+- Never output importance or confidence. The server derives both from signal and antecedent_source.
+
+Rule phrasing per rule_form:
+- prohibition → 不要<动作>（<场景/对象>） / Never <action> when <scope>. The object must be named; an objectless fragment is flag=false.
+- preference → <场景>下优先<Y>，不要<X> / Prefer Y over X when <scope>. Name both alternatives.
+- procedure → <触发条件>时先<步骤> / When <trigger>, do <step> first.
+- retract → still phrased as a usable negative rule, never the bare verdict.
+
+Two invariants:
+1. The verdict is never the memory. "不对" / "何必" may appear only in correction.captain_verdict, never in text.
+2. The rule must survive the death of the conversation: no 这个 / 该文件 / 上面那版 / 主公说的 in text.
+
+Apply this checklist to every candidate, correction or not:
+1. Durable — will this still matter later, not just for the current task.
+2. Actually happened — a completed decision/fact/fix, not a proposal, question, or hypothetical.
+3. Not noise — not chit-chat, a one-off command, or quoted code/CLI output/prompt text used only to explain how something works (even if the quoted text itself sounds like a preference/rule).
+4. Self-contained — understandable on its own, without the rest of the conversation.
+5. Right scope — see scope rule below.
+
+Do NOT flag: an in-progress/undecided plan, a problem report that ends by asking whether to fix it, routine implementation-progress update within ongoing work, or prompt/eval calibration notes that quote hypothetical user inputs. Actual user forget/retract requests are durable and should be flag=true.
+
+Correction examples:
+- "Tool: bash git commit -m \"wip\"" … "User: 别再自动 commit 了" -> flag=true, signal=correction, signal_subtype=override_of_action, rule_form=prohibition, antecedent_source=trace, text="不要在未获得确认前自动 commit 本仓库的改动".
+- "Assistant: 顺手把首页布局重排了" … "User: 回打开前的页面" -> flag=true, signal=correction, signal_subtype=override_of_action, rule_form=prohibition, antecedent_source=prose, text="修改页面时不要顺手重排既有布局，改完后回到用户打开前的页面状态".
+- "Assistant: 加了三层缓存做兜底" … "User: 何必" -> flag=true, signal=correction, signal_subtype=futility_verdict, rule_form=preference, antecedent_source=prose, text="没有实测瓶颈时不要预先加多层缓存兜底，先用最简实现".
+- "Assistant: 把配置改成 A 方案" … "User: 还是原来的好" -> flag=true, signal=correction, signal_subtype=override_of_action, rule_form=preference, antecedent_source=prose, text="该项目配置保留原方案 B，不要换成 A 方案", supersedes_query="该项目配置改用 A 方案".
+- "Prior memory candidate: 每次编辑完成后自动 commit 并推送" … "User: 那条不对" -> flag=true, signal=correction, signal_subtype=explicit_negation, rule_form=retract, antecedent_source=candidate, text="不要在编辑完成后自动 commit 并推送", supersedes_query="每次编辑完成后自动 commit 并推送".
+- prior block "Tool: edit src/a.ts" … current delta "User: 不对" then "Tool: edit src/a.ts" -> the antecedent is the PRIOR action (antecedent_source=prior_tail); the post-verdict tool line is the repair and must be ignored.
+- "User: 不对" with nothing before it -> flag=false, signal=correction, antecedent_source=none, reason="correction-without-antecedent".
+- "User: 这样不会有问题吗？" -> flag=false (a question is not a verdict).
+- "Assistant: 我上面那条改错了，已经修回来了" -> flag=false (the agent correcting itself is not a user correction).
+- One delta with "Assistant: 已修复登录超时" and "User: 别再自动 commit 了" -> emit ONLY the correction; the fix outcome is dropped.
+
+Non-correction examples (unchanged rules):
+- "解决了内存泄漏问题，已验证生效" -> flag=true (a previously-existing problem is now resolved).
+- "加了个测试用例，跑了一下全过了" -> flag=false (a routine step of ongoing work, no prior problem being resolved, nothing durable to recall later).
+- "这条需要改。要不要现在改？" -> flag=false (problem identified but fix/decision is still pending).
+- "FORGET_SIGNALS 正则用于识别类似 \"forget that I prefer dark mode\" 这种表达" -> flag=false (documentation-style explanation of code/prompt behavior, not an actual forget request).
+- User says "forget that I prefer dark mode" -> flag=true (actual forget/retract request).
+- "prompt 里加了 few-shot 正例，比如 User: 以后都用 pnpm" -> flag=false (prompt/eval calibration quoting a hypothetical user input).
+- "已将变更推送至 origin/main，提交为 8df25dd" -> flag=false (one-off delivery status, not durable memory).
+- "Node.js new URL().hostname 对 IPv6 loopback 返回 [::1]" -> flag=false (generic technical trivia, not a user/project memory).
+- "点点数据的 App 详情页是 JS SPA，WebFetch 抓不到价格，后续改用官方 API" -> flag=true, scope=project (tool/site-specific learning never belongs in global scope).
+- "已从 Pi 配置中彻底移除 Ponytail 包、extension、skills 和配置引用" -> flag=true, scope=project (durable current configuration state).
+- "type: fix" -> flag=false (vague commit fragment with no self-contained durable fact).
+- "Music playing now" -> flag=false (transient UI/runtime status).
+- "先强制使用 Chafa；后续确认已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp" -> flag=true, scope=project, but distill only the final Kgp state (superseded intermediate states must not become separate memories).
+- "环境变量/API密钥统一存放在 ~/.config/fish/conf.d/api_keys.local.fish" -> flag=true, scope=project (machine-local shell paths belong to the dotfiles project, never global).
+- "一次性汇报放 scratchpad，不写入项目仓库" -> flag=true, scope=global (a reusable cross-project delivery preference; keep it concise).
+- "周会每项目 3–5 行，与豪哥日报区分；临时汇报放 scratchpad" -> flag=true, scope=project (mentor/reporting-specific conventions do not help in unrelated projects).
+- "Claude Code 的交付文本必须放在回合最后，否则后续工具调用可能使文本不展示" -> flag=true, scope=project (app-specific harness behavior is not global).
+- "用户希望针对技能和工具进行优化，列出推荐项并决定是否禁用" -> flag=false (an open optimization intention is not a completed decision or durable outcome).
+- "paneru 四边 padding 4→10，与 sketchybar 左侧 10px 对齐" -> flag=true, scope=project, and distill the final 10px state rather than the change history.
+- A long SketchyBar popup implementation report -> flag=true, scope=project, but compress it to the stable entry point, switching mechanism, and fallback behavior within 300 characters.
+- "Claude Design 画布页（.dc.html）不在 DesignSync MCP 文件树里（get_file 404）。浏览器登录态下可直接调 Omelette API：读取 GetFile，写回用 UploadFile，DeleteFile 删文件；大段 HTML 下载用 Blob+anchor，上传方向页内 fetch 后再 SHA-256 对齐本地。" -> flag=false (raw one-off API procedure dump, not an explicit repeat-use convention or established project workflow).
+- "用户希望不使用嵌套并复用同一个 herdr 进程和 server" -> flag=false ("不使用嵌套" lacks an object and cannot stand alone).
+- "手动拖高 Ghostty 窗口以填补当前布局缺口" -> flag=false (transient manual UI adjustment).
+
+If flag=true, distill: compress the candidate into exactly ONE self-contained sentence for text, same language as the source. Preference/rule should be roughly 40-160 characters; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 characters. No bullet lists. One fact per memory — never chain multiple facts with semicolons/commas. Never paste raw code, CLI output, or a multi-paragraph narrative.
+
+Classify (only meaningful when flag=true):
+- type: preference | rule | fact | decision | task_learning | bug_fix | workflow. A correction is normally "rule", or "preference" for a taste-level redirect.
+- scope rule: "global" only if the statement would genuinely help in ANY unrelated project (cross-project dev preferences, communication/output style, secret-handling rules, durable personal/identity facts), and "project" for everything else, including system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs, OS-level fixes) even when it was not said inside a recognizable project. When ambiguous, prefer "project".
+
+Be conservative: when genuinely unsure, prefer flag=false — a missed candidate falls back to the existing prompt-based reminder, a false alarm costs the main agent one wasted turn.
+
+Output your FINAL answer as compact JSON only, no other prose before or after it: {"flag":true|false,"signal":"correction|preference|outcome|none","signal_subtype":"<subtype if signal=correction, else empty string>","text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","rule_form":"<prohibition|preference|procedure|retract, empty string when not a rule-shaped candidate>","antecedent_source":"prose|trace|prior_tail|candidate|none","correction":{"agent_did":"","captain_verdict":"","redirect_target":""},"supersedes_query":"","reason":"<short reason, especially when flag=false>"}'
+  # additionalProperties:false forces every field to be emitted; importance/confidence are
+  # deliberately absent — the server derives both (plan §6.1/§9.1).
+  # KEEP IN SYNC with CORRECTION_SCHEMA in scripts/eval-classifier.sh and the ClassifierResult
+  # parse in integrations/pi/asaki-memory.ts.
+  CORRECTION_SCHEMA='{"type":"object","properties":{"flag":{"type":"boolean"},"signal":{"type":"string"},"signal_subtype":{"type":"string"},"text":{"type":"string"},"type":{"type":"string"},"scope":{"type":"string"},"rule_form":{"type":"string"},"antecedent_source":{"type":"string"},"correction":{"type":"object","properties":{"agent_did":{"type":"string"},"captain_verdict":{"type":"string"},"redirect_target":{"type":"string"}},"required":["agent_did","captain_verdict","redirect_target"],"additionalProperties":false},"supersedes_query":{"type":"string"},"reason":{"type":"string"}},"required":["flag","signal","signal_subtype","text","type","scope","rule_form","antecedent_source","correction","supersedes_query","reason"],"additionalProperties":false}'
+
+  if is_flag_enabled "$CORRECTION_MODE"; then
+    ACTIVE_SYSTEM_PROMPT="$CORRECTION_SYSTEM_PROMPT"
+    ACTIVE_SCHEMA="$CORRECTION_SCHEMA"
+    # Prior block (plan §3.2/§3.4): already-processed tail lines plus, at most, the last memory
+    # candidate the server actually queued for review. Labelled and delimited so "prior" vs
+    # "current" is machine-visible rather than inferred from position, and never reordered.
+    PRIOR_BLOCK=""
+    PRIOR_TAIL=$(tail -n "$TAIL_MAX_LINES" "$TAIL_FILE" 2>/dev/null)
+    # `review` is logged only on a successful candidate POST the server routed to the queue —
+    # `failed` and `skipped` lines must never become an antecedent. `fromjson?` skips partial
+    # lines instead of aborting the pipeline.
+    # A candidate from this morning must not be blamed for this afternoon: only the last 30
+    # minutes count. The log stamps are UTC `%FT%TZ`, which is fixed-width, so a plain string
+    # comparison against the cutoff is a correct chronological comparison.
+    PRIOR_CANDIDATE=""
+    if [ -f "$CLASSIFIER_LOG_FILE" ]; then
+      PRIOR_CUTOFF_TS=$(date -u -r "$((NOW_EPOCH - 1800))" +%FT%TZ 2>/dev/null || date -u -d "@$((NOW_EPOCH - 1800))" +%FT%TZ 2>/dev/null || echo "")
+      PRIOR_CANDIDATE=$(tail -n 50 "$CLASSIFIER_LOG_FILE" 2>/dev/null \
+        | awk -v cutoff="$PRIOR_CUTOFF_TS" '{ ts = $1; sub(/^[^ ]+ /, ""); if (cutoff == "" || ts >= cutoff) print }' \
+        | jq -rR 'fromjson? | select(.action == "review") | .memory // ""' 2>/dev/null | tail -n 1)
+      PRIOR_CANDIDATE="${PRIOR_CANDIDATE:0:300}"
+    fi
+    if [ -n "$PRIOR_TAIL" ] || [ -n "$PRIOR_CANDIDATE" ]; then
+      PRIOR_BLOCK="Prior context (ALREADY PROCESSED — antecedent only, never extract from this block):"
+      [ -n "$PRIOR_TAIL" ] && PRIOR_BLOCK="${PRIOR_BLOCK}
+${PRIOR_TAIL}"
+      [ -n "$PRIOR_CANDIDATE" ] && PRIOR_BLOCK="${PRIOR_BLOCK}
+Prior memory candidate: ${PRIOR_CANDIDATE}"
+      PRIOR_BLOCK="${PRIOR_BLOCK}
+--- current delta below ---"
+    fi
+    CORRECTION_HINT=""
+    if [ "$CORRECTION_SIGNAL" = "1" ]; then
+      CORRECTION_HINT="correction_suspected: true (lines that tripped the local pre-gate)
+${CORRECTION_SIGNAL_LINES}
+"
+    fi
+    # Hint first, then the labelled prior block, then the delta — so nothing sits between the
+    # `--- current delta below ---` delimiter and the current delta it introduces.
+    CLASSIFIER_PROMPT=$(printf '%s%sDelta:\n%s' "$CORRECTION_HINT" "${PRIOR_BLOCK:+$PRIOR_BLOCK$'\n'}" "$TEXT")
+    # Carried into the NEXT prompt, but only once this delta is actually processed (written
+    # below). Transcript order is preserved and nothing is deduplicated: the trace line format
+    # carries no timestamp, so order is the only temporal signal the model gets.
+    TAIL_LINES=$(printf '%s\n' "$TEXT" | grep -v '^[[:space:]]*$' | tail -n "$TAIL_MAX_LINES")
+    [ -n "$TAIL_LINES" ] && TAIL_LINES="${TAIL_LINES}
+"
+  else
+    ACTIVE_SYSTEM_PROMPT="$CLASSIFIER_SYSTEM_PROMPT"
+    ACTIVE_SCHEMA="$CLASSIFIER_SCHEMA"
+    CLASSIFIER_PROMPT=$(printf 'Delta:\n%s' "$TEXT")
+    TAIL_LINES=""
+  fi
 
   (
-    RESP=$(claude -p --safe-mode --tools "" --model "$CLASSIFIER_MODEL" --system-prompt "$CLASSIFIER_SYSTEM_PROMPT" --json-schema "$CLASSIFIER_SCHEMA" "$CLASSIFIER_PROMPT" 2>>"$CLASSIFIER_LOG_FILE")
+    RESP=$(claude -p --safe-mode --tools "" --model "$CLASSIFIER_MODEL" --system-prompt "$ACTIVE_SYSTEM_PROMPT" --json-schema "$ACTIVE_SCHEMA" "$CLASSIFIER_PROMPT" 2>>"$CLASSIFIER_LOG_FILE")
     CLAUDE_STATUS=$?
     RESP_SINGLE_LINE=$(echo "$RESP" | tr '\n' ' ' | sed -E 's/```(json)?//g')
     # STATE_FILE only advances once the delta's FINAL outcome is known: a valid flag=false
@@ -413,25 +700,95 @@ Output your FINAL answer as compact JSON only, no other prose before or after it
       # gets the identical server-side dedup/merge pipeline (src/services/candidates.ts). No
       # Claude/MCP/claude-p involved in this step at all — a real HTTP round trip, so the result
       # is whatever the server actually decided, never a model's unverifiable self-report.
-      CANDIDATE_BODY=$(jq -cn --arg content "$TEXT_FIELD" --arg kind "$TYPE_FIELD" --arg scope "$SCOPE_FIELD" \
-        --arg user "$ASAKI_USER" --arg project "$ASAKI_PROJECT" '
-        {user_id: $user, source: "claude-code:stop-classifier",
-         candidates: [{content: $content, kind: $kind, scope: $scope} + (if $scope == "project" then {project_id: $project} else {} end)]}')
-      ADD_RESP=$(curl -sf --max-time 20 -X POST "${ASAKI_BASE}/v1/memories/candidates" \
+      if is_flag_enabled "$CORRECTION_MODE"; then
+        # project_context is sent for EVERY scope, unlike project_id — it is a scope-neutral hint
+        # the server persists but never uses for scope validation, visibility, or the review row
+        # project_id column. Without it a global correction cannot be matched against the
+        # project memories it retires (plan §5.3c).
+        CANDIDATE_BODY=$(jq -cn --arg content "$TEXT_FIELD" --arg kind "$TYPE_FIELD" --arg scope "$SCOPE_FIELD" \
+          --arg user "$ASAKI_USER" --arg project "$ASAKI_PROJECT" \
+          --arg signal "$(echo "$RESP_SINGLE_LINE" | jq -r '.signal // ""')" \
+          --arg signal_subtype "$(echo "$RESP_SINGLE_LINE" | jq -r '.signal_subtype // ""')" \
+          --arg rule_form "$(echo "$RESP_SINGLE_LINE" | jq -r '.rule_form // ""')" \
+          --arg antecedent_source "$(echo "$RESP_SINGLE_LINE" | jq -r '.antecedent_source // ""')" \
+          --arg agent_did "$(echo "$RESP_SINGLE_LINE" | jq -r '.correction.agent_did // ""')" \
+          --arg captain_verdict "$(echo "$RESP_SINGLE_LINE" | jq -r '.correction.captain_verdict // ""')" \
+          --arg redirect_target "$(echo "$RESP_SINGLE_LINE" | jq -r '.correction.redirect_target // ""')" \
+          --arg supersedes_query "$(echo "$RESP_SINGLE_LINE" | jq -r '.supersedes_query // ""')" '
+          {user_id: $user, source: "claude-code:stop-classifier",
+           candidates: [{content: $content, kind: $kind, scope: $scope, project_context: $project,
+                         signal: $signal, signal_subtype: $signal_subtype, rule_form: $rule_form,
+                         antecedent_source: $antecedent_source,
+                         correction: {agent_did: $agent_did, captain_verdict: $captain_verdict, redirect_target: $redirect_target},
+                         supersedes_query: $supersedes_query}
+                        + (if $scope == "project" then {project_id: $project} else {} end)]}')
+      else
+        CANDIDATE_BODY=$(jq -cn --arg content "$TEXT_FIELD" --arg kind "$TYPE_FIELD" --arg scope "$SCOPE_FIELD" \
+          --arg user "$ASAKI_USER" --arg project "$ASAKI_PROJECT" '
+          {user_id: $user, source: "claude-code:stop-classifier",
+           candidates: [{content: $content, kind: $kind, scope: $scope} + (if $scope == "project" then {project_id: $project} else {} end)]}')
+      fi
+
+      # Output-side gate (plan §8.2e): correction.* and supersedes_query are verbatim
+      # conversation echoes, so the model can hand back a secret the input gate already passed
+      # (it gates the delta, not the model's quoting of it). A hit consumes the offset and skips
+      # the write — resending the same body would just resend the same secret.
+      if echo "$CANDIDATE_BODY" | grep -qiE -e "$SENSITIVE_PATTERN"; then
+        echo "$TOTAL" >"$STATE_FILE"
+        FINAL_JSON=$(jq -cn '{action: "skipped", memory: "", reason: "sensitive-content-in-candidate"}')
+        echo "$(date -u +%FT%TZ) ${FINAL_JSON}" >>"$CLASSIFIER_LOG_FILE"
+        exit 0
+      fi
+
+      # PID-suffixed: the lock only guards the foreground phase, so two background jobs for
+      # the same session can overlap and must not share a response file.
+      ADD_BODY_FILE="$STATE_DIR/${SESSION_ID}.add-response.$$"
+      # `-sf` used to collapse every failure into the same empty body, so a deterministic 400 was
+      # retried forever while a 429 or a wrong key looked identical to it. Capture the status and
+      # branch on failure class instead (plan §9.3). `000` = network error/timeout.
+      HTTP_CODE=$(curl -s -o "$ADD_BODY_FILE" -w '%{http_code}' --max-time 20 -X POST "${ASAKI_BASE}/v1/memories/candidates" \
         -H "Authorization: Bearer ${ASAKI_MEMORY_API_KEY}" \
         -H "Content-Type: application/json" \
         -d "$CANDIDATE_BODY" 2>>"$CLASSIFIER_LOG_FILE")
+      [ -z "$HTTP_CODE" ] && HTTP_CODE="000"
+      ADD_RESP=$(cat "$ADD_BODY_FILE" 2>/dev/null)
+      rm -f "$ADD_BODY_FILE" 2>/dev/null
+      OUTCOME=$(outcome_for_status "$HTTP_CODE" "$TOTAL")
       # The server routes this "claude-code:stop-classifier" source straight to the review queue
       # (never decisions) — see isUnsupervisedSource() in src/services/candidateDecision.ts.
       ACTION=$(echo "$ADD_RESP" | jq -r 'if (.decisions // [] | length) > 0 then .decisions[0].action elif (.reviews // [] | length) > 0 then "review" else "failed" end' 2>/dev/null)
       [ -z "$ACTION" ] && ACTION="failed"
-      if [ "$ACTION" != "failed" ]; then
-        echo "$TOTAL" >"$STATE_FILE"
+      REASON=""
+      case "$OUTCOME" in
+        advance)
+          echo "$TOTAL" >"$STATE_FILE"
+          if [ "$ACTION" = "failed" ]; then
+            REASON="rejected-${HTTP_CODE}"
+            ACTION="skipped"
+          fi
+          ;;
+        giveup)
+          # Held this delta the whole retry budget and it still will not land. Consume it, loudly.
+          echo "$TOTAL" >"$STATE_FILE"
+          ACTION="skipped"
+          REASON="give-up-after-${MAX_DELTA_RETRIES}-${HTTP_CODE}"
+          ;;
+        *)
+          ACTION="failed"
+          case "$HTTP_CODE" in
+            401|403) REASON="http-${HTTP_CODE}; check ASAKI_MEMORY_API_KEY" ;;
+            *) REASON="http-${HTTP_CODE}" ;;
+          esac
+          ;;
+      esac
+      if [ -n "$TAIL_LINES" ] && [ "$ACTION" != "failed" ]; then
+        printf '%s' "$TAIL_LINES" >"$TAIL_FILE"
       fi
-      FINAL_JSON=$(jq -cn --arg action "$ACTION" --arg memory "$TEXT_FIELD" '{action: $action, memory: $memory, reason: ""}')
+      FINAL_JSON=$(jq -cn --arg action "$ACTION" --arg memory "$TEXT_FIELD" --arg reason "$REASON" '{action: $action, memory: $memory, reason: $reason}')
     else
       if [ "$CLASSIFIER_OK" -eq 1 ]; then
         echo "$TOTAL" >"$STATE_FILE"
+        [ -n "$TAIL_LINES" ] && printf '%s' "$TAIL_LINES" >"$TAIL_FILE"
       fi
       REASON_FIELD=$(echo "$RESP_SINGLE_LINE" | jq -r '.reason // ""' 2>/dev/null)
       FINAL_JSON=$(jq -cn --arg reason "$REASON_FIELD" '{action: "skipped", memory: "", reason: $reason}')

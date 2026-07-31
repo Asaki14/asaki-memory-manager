@@ -1,0 +1,148 @@
+[
+  {
+    "name": "curl -u user:pass",
+    "text": "curl -u alice:supersecret123 https://example.test",
+    "expect": "drop",
+    "note": "plan §8.1 probe 1 — missed by the canonical gate, caught by the trace list"
+  },
+  {
+    "name": "curl -H auth header",
+    "text": "curl -H 'X-Api-Key abcdefghijklmnop' https://example.test",
+    "expect": "drop",
+    "note": "plan §8.1 probe 2"
+  },
+  {
+    "name": "sshpass",
+    "text": "sshpass -p supersecret123 ssh host",
+    "expect": "drop",
+    "note": "plan §8.1 probe 3"
+  },
+  {
+    "name": "export with space-separated value",
+    "text": "export DATABASE_PASSWORD supersecret123",
+    "expect": "drop",
+    "note": "plan §8.1 probe 4 — unbounded identifier"
+  },
+  {
+    "name": "export with = value",
+    "text": "export DATABASE_PASSWORD=supersecret123",
+    "expect": "drop",
+    "note": "plan §8.1 probe 5 — also true in the canonical gate since the word-boundary fix"
+  },
+  {
+    "name": "fish set -x",
+    "text": "set -x DATABASE_PASSWORD supersecret123",
+    "expect": "drop",
+    "note": "plan §8.1 probe 6 — the flag spelling the old `set -gx`-only rule missed"
+  },
+  {
+    "name": "credential URL",
+    "text": "psql postgres://admin:hunter2hunter2@db.internal/prod",
+    "expect": "drop",
+    "note": "plan §8.1 probe 7 — canonical gate already caught this one; R2 would also redact it"
+  },
+  {
+    "name": "customer file path outside the repo",
+    "text": "/Users/alice/Clients/Acme/2026-layoffs-list.xlsx",
+    "expect": "keep",
+    "note": "plan §8.1 probe 8 — no credential; bounded by the R1 path rule instead (E6)"
+  },
+  {
+    "name": "wrangler secret",
+    "text": "wrangler secret put ADMIN_API_KEY --env prod",
+    "expect": "drop",
+    "note": "plan §8.1 probe 9"
+  },
+  {
+    "name": "ordinary commit must survive",
+    "text": "git commit -m 'wip'",
+    "expect": "keep",
+    "note": "plan §8.1 probe 10 — true negative, must keep passing"
+  },
+  {
+    "name": "Authorization bearer echo",
+    "text": "echo 'Authorization: Bearer abcdefghijklmnopqrstuvwx'",
+    "expect": "drop",
+    "note": "plan §8.1 probe 11 — canonical gate"
+  },
+  {
+    "name": "mysql inline password",
+    "text": "mysql -u root -phunter2hunter2 -e 'select 1'",
+    "expect": "drop",
+    "note": "plan §8.1 probe 12"
+  },
+  {
+    "name": "ssh -i key file",
+    "text": "ssh -i /Users/alice/.ssh/id_ed25519_acme_prod deploy@10.0.0.4",
+    "expect": "drop",
+    "note": "plan §8.1 probe 13 — gate runs on the ORIGINAL arg, before redaction turns the key path into <path>"
+  },
+  {
+    "name": "private bucket URI",
+    "text": "aws s3 cp s3://acme-private-legal/settlement.pdf .",
+    "expect": "keep",
+    "note": "plan §8.1 probe 14 — no credential; bounded by the R2 URI rule instead (E6)"
+  },
+  {
+    "name": "confidential path outside the repo",
+    "text": "/Users/alice/work/project-chimera-acquisition/valuation.ts",
+    "expect": "keep",
+    "note": "plan §8.1 probe 15 — bounded by R1 (E6)"
+  },
+  {
+    "name": "gh auth login",
+    "text": "gh auth login --with-token",
+    "expect": "drop"
+  },
+  {
+    "name": "aws configure",
+    "text": "aws configure set aws_secret_access_key wJalrXUtnFEMI",
+    "expect": "drop"
+  },
+  {
+    "name": "1Password read",
+    "text": "op read op://private/deploy/password",
+    "expect": "drop"
+  },
+  {
+    "name": "keychain lookup",
+    "text": "security find-generic-password -s asaki -w",
+    "expect": "drop"
+  },
+  {
+    "name": "dotenv file argument",
+    "text": "cat .env.production",
+    "expect": "drop"
+  },
+  {
+    "name": "aws credentials file",
+    "text": "cat ~/.aws/credentials",
+    "expect": "drop"
+  },
+  {
+    "name": "bare credential assignment",
+    "text": "GITHUB_TOKEN=ghp_abcdefghijklmnop npm publish",
+    "expect": "drop"
+  },
+  {
+    "name": "ordinary build command",
+    "text": "npm run typecheck",
+    "expect": "keep"
+  },
+  {
+    "name": "ordinary grep",
+    "text": "grep -rn 'importanceForSignal' src/",
+    "expect": "keep"
+  },
+  {
+    "name": "token count flag is not a credential",
+    "text": "node bench.mjs --max-tokens 4096",
+    "expect": "keep"
+  },
+  {
+    "name": "ssh without a key file",
+    "text": "ssh deploy@acme-prod.internal 'systemctl restart api'",
+    "expect": "keep",
+    "note": "no credential in the line; the host is bounded by R3 instead (E6)"
+  }
+]

@@ -1,0 +1,173 @@
+{
+  "throttle": [
+    {
+      "name": "storm 1: fresh session, first event fires normally",
+      "reset": true,
+      "now": 1000,
+      "interval": 300,
+      "signal": 1,
+      "expect": "normal",
+      "expectWindow": "1000",
+      "expectOverride": ""
+    },
+    {
+      "name": "storm 2: correction inside the window spends the single override",
+      "now": 1010,
+      "interval": 300,
+      "signal": 1,
+      "expect": "override",
+      "expectWindow": "1000",
+      "expectOverride": "1000"
+    },
+    {
+      "name": "storm 3: override already spent for this window",
+      "now": 1020,
+      "interval": 300,
+      "signal": 1,
+      "expect": "skip",
+      "expectWindow": "1000",
+      "expectOverride": "1000"
+    },
+    {
+      "name": "storm 4: still the same window",
+      "now": 1150,
+      "interval": 300,
+      "signal": 1,
+      "expect": "skip",
+      "expectWindow": "1000",
+      "expectOverride": "1000"
+    },
+    {
+      "name": "storm 5: last second of the window",
+      "now": 1299,
+      "interval": 300,
+      "signal": 1,
+      "expect": "skip",
+      "expectWindow": "1000",
+      "expectOverride": "1000"
+    },
+    {
+      "name": "storm 6: window expires exactly at the boundary",
+      "now": 1300,
+      "interval": 300,
+      "signal": 1,
+      "expect": "normal",
+      "expectWindow": "1300",
+      "expectOverride": "1000"
+    },
+    {
+      "name": "storm 7: new window brings a fresh override budget",
+      "now": 1305,
+      "interval": 300,
+      "signal": 1,
+      "expect": "override",
+      "expectWindow": "1300",
+      "expectOverride": "1300"
+    },
+    {
+      "name": "storm 8: budget spent again",
+      "now": 1310,
+      "interval": 300,
+      "signal": 1,
+      "expect": "skip",
+      "expectWindow": "1300",
+      "expectOverride": "1300"
+    },
+    {
+      "name": "no signal inside the window is a plain skip",
+      "reset": true,
+      "presetWindow": "2000",
+      "now": 2100,
+      "interval": 300,
+      "signal": 0,
+      "expect": "skip",
+      "expectWindow": "2000",
+      "expectOverride": ""
+    },
+    {
+      "name": "T0: clock moved backwards, window is re-anchored to now",
+      "reset": true,
+      "presetWindow": "5000",
+      "now": 1000,
+      "interval": 300,
+      "signal": 0,
+      "expect": "normal",
+      "expectWindow": "1000",
+      "expectOverride": ""
+    },
+    {
+      "name": "MIN_INTERVAL=0 degenerates to always-normal, override unused",
+      "reset": true,
+      "now": 4000,
+      "interval": 0,
+      "signal": 1,
+      "expect": "normal",
+      "expectWindow": "4000",
+      "expectOverride": ""
+    },
+    {
+      "name": "MIN_INTERVAL=0 second event is still normal",
+      "now": 4001,
+      "interval": 0,
+      "signal": 1,
+      "expect": "normal",
+      "expectWindow": "4001",
+      "expectOverride": ""
+    },
+    {
+      "name": "upgrade: missing window falls back to .last_extract, no free call",
+      "reset": true,
+      "presetLastExtract": "1000",
+      "now": 1100,
+      "interval": 300,
+      "signal": 0,
+      "expect": "skip",
+      "expectWindow": "",
+      "expectOverride": ""
+    },
+    {
+      "name": "upgrade: a correction may still override against the inherited window",
+      "presetLastExtract": "1000",
+      "now": 1150,
+      "interval": 300,
+      "signal": 1,
+      "expect": "override",
+      "expectWindow": "",
+      "expectOverride": "1000"
+    },
+    {
+      "name": "fresh session (all state files absent) fires immediately",
+      "reset": true,
+      "now": 9000,
+      "interval": 300,
+      "signal": 0,
+      "expect": "normal",
+      "expectWindow": "9000",
+      "expectOverride": ""
+    }
+  ],
+  "status": [
+    { "name": "200 success advances", "reset": true, "code": "200", "offset": 10, "expect": "advance" },
+    { "name": "201 success advances", "reset": true, "code": "201", "offset": 10, "expect": "advance" },
+    { "name": "400 deterministic rejection advances", "reset": true, "code": "400", "offset": 10, "expect": "advance" },
+    { "name": "413 too large advances", "reset": true, "code": "413", "offset": 10, "expect": "advance" },
+    { "name": "422 unprocessable advances", "reset": true, "code": "422", "offset": 10, "expect": "advance" },
+    { "name": "401 repairable auth holds", "reset": true, "code": "401", "offset": 10, "expect": "hold" },
+    { "name": "403 forbidden holds", "reset": true, "code": "403", "offset": 10, "expect": "hold" },
+    { "name": "404 endpoint error holds", "reset": true, "code": "404", "offset": 10, "expect": "hold" },
+    { "name": "429 rate limit holds", "reset": true, "code": "429", "offset": 10, "expect": "hold" },
+    { "name": "500 holds", "reset": true, "code": "500", "offset": 10, "expect": "hold" },
+    { "name": "503 missing ADMIN_API_KEY holds", "reset": true, "code": "503", "offset": 10, "expect": "hold" },
+    { "name": "000 network error holds", "reset": true, "code": "000", "offset": 10, "expect": "hold" },
+    { "name": "418 unknown status is treated as retryable", "reset": true, "code": "418", "offset": 10, "expect": "hold" },
+    { "name": "429 sequence 1/6", "reset": true, "code": "429", "offset": 42, "expect": "hold" },
+    { "name": "429 sequence 2/6", "code": "429", "offset": 42, "expect": "hold" },
+    { "name": "429 sequence 3/6", "code": "429", "offset": 42, "expect": "hold" },
+    { "name": "429 sequence 4/6", "code": "429", "offset": 42, "expect": "hold" },
+    { "name": "429 sequence 5/6", "code": "429", "offset": 42, "expect": "hold" },
+    { "name": "429 sequence 6/6 gives up", "code": "429", "offset": 42, "expect": "giveup" },
+    { "name": "a different offset gets a fresh retry budget", "code": "429", "offset": 43, "expect": "hold" },
+    { "name": "success after holds resets the counter", "code": "200", "offset": 43, "expect": "advance" },
+    { "name": "and the next failure starts from one again", "code": "429", "offset": 43, "expect": "hold" }
+  ]
+}
