@@ -36,19 +36,21 @@ The Claude Code plugin is consumed straight from this repo; the Pi extension is 
 - `src/types.ts`: shared types.
 - `src/services/memories.ts`: memory creation and search.
 - `src/services/candidates.ts`: candidate deduplication and merge decisions.
-- `src/services/candidateDecision.ts`: pure candidate decision heuristics and eval target.
+- `src/services/candidateDecision.ts`: pure candidate decision heuristics and eval target; also owns `importanceForSignal()` / `confidenceForAntecedent()`, which return `number | null` where `null` means "no derivation, keep today's default".
 - `src/services/reviews.ts`: memory review queue creation, listing, and resolution.
 - `src/services/memoryEvents.ts`: event logging.
 - `src/ai/embeddings.ts`: Workers AI embedding helpers.
-- `src/utils/validation.ts`: request validation.
+- `src/utils/validation.ts`: request validation. `validateCreateMemory` also threads the correction-classifier evidence fields (`signal`, `signal_subtype`, `rule_form`, `antecedent_source`, `correction`, `supersedes_query`, `supersedes_pending_review_id`, `project_context`) — enum coercion is total (unknown → the inert member, never a 400), evidence strings are truncated rather than rejected, and the only 400 they can cause is the sensitive gate.
 - `src/utils/errors.ts`: `UserFacingError` — the only service-thrown error class whose message route handlers forward to API clients; any other exception falls through to the sanitized generic 500.
-- `src/utils/sensitiveContent.ts`: server-side secret/credential detection gate, applied in `validateCreateMemory`/`validateUpdateMemory`/`validateExtractMemories` before any Workers AI call or D1/Vectorize write. Client-side copies in `integrations/pi/asaki-memory.ts`, `integrations/claude-code/stop-extract.sh`, and `scripts/shadow-run-extraction.ts` are a separate, known-stale pattern set — not kept in sync with this file.
+- `src/utils/sensitiveContent.ts`: server-side secret/credential detection gate, applied in `validateCreateMemory`/`validateUpdateMemory`/`validateExtractMemories` before any Workers AI call or D1/Vectorize write. Client-side copies in `integrations/pi/asaki-memory.ts`, `integrations/claude-code/stop-extract.sh`, and `scripts/shadow-run-extraction.ts` are a separate, known-stale pattern set — not kept in sync with this file. `npm run eval:sensitive-pattern` exercises this canonical gate directly plus the mirrored shell pattern inside `scripts/eval-sensitive-pattern.sh`; the client copies still carry the pre-fix keyword/`set -gx` rules and are updated in the client batch of the correction-classifier work.
 - `src/services/extraction.ts`: deprecated server-extraction compatibility path; not an active/default memory source.
 - `integrations/pi/asaki-memory.ts`: optional Pi extension.
 - `commands/memory.md`: Claude Code plugin `/memory` slash command (audit workflow; mirrors the Pi extension's `registerCommand("memory", ...)`).
 - `scripts/shadow-run-extraction.ts`: legacy server-extraction calibration tool; retained for compatibility investigations, not routine learning.
 - `scripts/backfill-index.ts`: manual Vectorize backfill trigger — calls `POST /v1/memories/backfill-index` (`backfillPendingIndex()` in `src/services/memories.ts`) in a loop to re-embed and re-upsert memories stuck at `index_status` `pending`/`failed`.
 - `scripts/prune-stale.ts`: manual stale-memory cleanup — calls `POST /v1/memories/prune-stale` (`pruneStaleMemories()` in `src/services/memories.ts`) to soft-delete memories not accessed in N days. Defaults to dry-run; `--apply` is required to actually delete.
+- `scripts/eval-candidate-fields.ts`: offline unit coverage for the candidate evidence fields — coercion table, caps, the sensitive gate on all four evidence strings, and the two derivations. Run it after touching `validateCreateMemory` or the derivation tables.
+- `scripts/node-ts-resolver.mjs`: `registerTsResolver()` — resolve hook letting a `node --experimental-strip-types` eval import a `src/**` module that has *runtime* (not type-only) extensionless sibling imports. Register it before the value `import()`s, not as a static import.
 - `scripts/eval-classifier.sh`: regression eval for the Claude Code local Stop-hook memory-candidate classifier (the `AUTO_EXTRACT=0` branch of `integrations/claude-code/stop-extract.sh`) — hits `claude -p --safe-mode` for real against `test/fixtures/classifier-cases.json`, no Worker/API key needed since nothing gets written.
 - The active "Global scope discipline" text lives in four places that must stay in sync: `commands/memory.md`, `integrations/pi/asaki-memory.ts`'s `/memory` command, and `CLASSIFIER_SYSTEM_PROMPT` in both `integrations/claude-code/stop-extract.sh` and `integrations/pi/asaki-memory.ts`; `scripts/eval-classifier.sh` carries the eval copy. `src/services/extraction.ts` keeps a legacy compatibility copy only.
 
@@ -58,6 +60,8 @@ The Claude Code plugin is consumed straight from this repo; the Pi extension is 
 npm install
 npm run typecheck
 npm run eval:candidates
+npm run eval:candidate-fields
+npm run eval:sensitive-pattern
 npm run eval:extraction
 npm run eval:classifier
 npm run shadow-run:extraction -- <transcript.jsonl> --user <id> --project <id>
@@ -129,3 +133,10 @@ Before publishing:
 - README examples use placeholders, not production credentials or personal endpoints.
 - License exists.
 - If CI is added, ensure the publishing token has GitHub `workflow` scope before pushing workflow files.
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.

@@ -14,7 +14,41 @@ export interface Env {
   RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
 }
 
-export interface CreateMemoryInput {
+export type CandidateSignal = 'correction' | 'preference' | 'outcome' | 'none';
+export type CandidateSignalSubtype =
+  | 'explicit_negation'
+  | 'override_of_action'
+  | 'terse_redirect'
+  | 'repeat_complaint'
+  | 'approval_after_change'
+  | 'futility_verdict';
+export type CandidateRuleForm = 'prohibition' | 'preference' | 'procedure' | 'retract';
+export type CandidateAntecedentSource = 'prose' | 'trace' | 'prior_tail' | 'candidate' | 'none';
+
+export interface CandidateCorrectionEvidence {
+  agent_did: string;
+  captain_verdict: string;
+  redirect_target: string;
+}
+
+// Correction-classifier evidence carried alongside a candidate. None of these are columns on
+// `memories` (createMemory binds explicit columns), so they survive only inside
+// memory_reviews.candidate_json — which is free-form TEXT, hence no migration.
+// `supersedes_pending_review_id` is written server-side when a correction refuses to merge into a
+// non-correction pending review; `project_context` is a scope-neutral client hint that must never
+// be used for scope validation, visibility, or the memory_reviews.project_id column.
+export interface CandidateEvidenceFields {
+  signal?: CandidateSignal;
+  signal_subtype?: CandidateSignalSubtype | '';
+  rule_form?: CandidateRuleForm;
+  antecedent_source?: CandidateAntecedentSource;
+  correction?: CandidateCorrectionEvidence;
+  supersedes_query?: string | null;
+  supersedes_pending_review_id?: string | null;
+  project_context?: string | null;
+}
+
+export interface CreateMemoryInput extends CandidateEvidenceFields {
   content: string;
   user_id: string;
   scope?: MemoryScope;

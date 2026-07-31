@@ -60,6 +60,36 @@
     "expectMatch": true
   },
   {
+    "name": "pos: prefixed env assignment (FOO_PASSWORD=)",
+    "text": "export DATABASE_PASSWORD=supersecret123",
+    "expectMatch": true
+  },
+  {
+    "name": "pos: prefixed key assignment (MY_API_KEY=)",
+    "text": "MY_API_KEY=abcdefghijklmnop",
+    "expectMatch": true
+  },
+  {
+    "name": "pos: suffixed secret assignment (PASSWORD_PROD:)",
+    "text": "DATABASE_PASSWORD_PROD: hunter2hunter2",
+    "expectMatch": true
+  },
+  {
+    "name": "pos: fish set -x secret export (non -gx flag)",
+    "text": "set -x DATABASE_PASSWORD supersecret123",
+    "expectMatch": true
+  },
+  {
+    "name": "neg: plural keyword with a numeric limit (MAX_TOKENS=)",
+    "text": "MAX_TOKENS=1000000000",
+    "expectMatch": false
+  },
+  {
+    "name": "neg: keyword identifier without an assignment",
+    "text": "TOKEN_COUNT is 12345678 for that transcript",
+    "expectMatch": false
+  },
+  {
     "name": "neg: casual mention of sk cache, no key",
     "text": "we use sk cache for speedup, nothing sensitive here",
     "expectMatch": false

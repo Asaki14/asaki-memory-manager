@@ -1,11 +1,59 @@
-import type { CreateMemoryInput, SearchResult } from '../types';
+import type { CandidateAntecedentSource, CandidateEvidenceFields, CandidateSignal, CandidateSignalSubtype, CreateMemoryInput, MemoryKind, SearchResult } from '../types';
 
 export type CandidateAction = 'add' | 'merge' | 'update' | 'delete' | 'ignore';
 
-export interface ProcessMemoryCandidateInput extends Required<Pick<CreateMemoryInput, 'content' | 'user_id' | 'scope' | 'kind' | 'importance' | 'confidence'>> {
+export interface ProcessMemoryCandidateInput extends Required<Pick<CreateMemoryInput, 'content' | 'user_id' | 'scope' | 'kind' | 'importance' | 'confidence'>>, CandidateEvidenceFields {
   project_id?: string | null;
   session_id?: string | null;
   source?: string | null;
+}
+
+// Corrections outrank everything else, and every non-correction signal is demoted to 0.4 so a
+// correction cannot be crowded out by routine candidates queued in the same window.
+const CORRECTION_SUBTYPE_IMPORTANCE: Record<CandidateSignalSubtype, number> = {
+  explicit_negation: 0.9,
+  override_of_action: 0.9,
+  repeat_complaint: 0.9,
+  terse_redirect: 0.8,
+  futility_verdict: 0.8,
+  approval_after_change: 0.7,
+};
+const CORRECTION_DEFAULT_IMPORTANCE = 0.8;
+const NON_CORRECTION_IMPORTANCE = 0.4;
+
+// `null` means "no derivation" — a representable state, distinct from any number, so the caller
+// can fall back to today's default (0.5) without a signal-less candidate ever being re-priced.
+// `kind` is part of the contract signature (it selects the intended kind per signal) but does not
+// change the number today; keep it so a kind-sensitive tuning stays a body-only change.
+export function importanceForSignal(
+  signal: CandidateSignal | undefined,
+  signalSubtype: CandidateSignalSubtype | '' | undefined,
+  kind: MemoryKind,
+): number | null {
+  if (signal === 'correction') {
+    if (signalSubtype && signalSubtype in CORRECTION_SUBTYPE_IMPORTANCE) return CORRECTION_SUBTYPE_IMPORTANCE[signalSubtype];
+    return CORRECTION_DEFAULT_IMPORTANCE;
+  }
+  if (signal === 'preference' || signal === 'outcome') return NON_CORRECTION_IMPORTANCE;
+  return null;
+}
+
+// A rule inferred from a lossy 120-char tool trace must not land at confidence 1.0 and then
+// overwrite a human-set confidence on the memory it supersedes. `null` = no derivation, so every
+// existing caller (which sends no antecedent_source) keeps today's default of 1.
+export function confidenceForAntecedent(source: CandidateAntecedentSource | undefined): number | null {
+  switch (source) {
+    case 'prose':
+      return 0.85;
+    case 'candidate':
+      return 0.75;
+    case 'trace':
+      return 0.7;
+    case 'prior_tail':
+      return 0.65;
+    default:
+      return null;
+  }
 }
 
 function normalizeText(value: string): string {
