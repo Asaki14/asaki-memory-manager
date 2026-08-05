@@ -101,7 +101,7 @@ function tokenDecision(candidate: string, existing: string): CandidateAction | n
   return null;
 }
 
-function matchSimilarity(candidate: ProcessMemoryCandidateInput, match: SearchResult): number {
+export function matchSimilarity(candidate: ProcessMemoryCandidateInput, match: SearchResult): number {
   const lexical = lexicalSimilarity(candidate.content, match.content);
   const semantic = match.similarity >= 0.78 ? match.similarity : 0;
   return Math.max(lexical, semantic);
@@ -163,6 +163,15 @@ export function capCandidates<T extends { importance: number }>(candidates: T[],
 // the same fact" means the same thing whether the comparison is against an existing memory, a
 // sibling candidate in the same extraction batch, or (via reviews.ts) an existing pending review.
 export const BATCH_DEDUP_SIMILARITY_THRESHOLD = 0.5;
+
+// Capture-time near-duplicate parking (2026-08-05 memory audit: 57 pending reviews resolved, 48 of
+// them ignored). One recurring noise class was a candidate restating a rule that is ALREADY active
+// but not word-for-word, so none of heuristicDecision()'s deterministic `ignore` rules fire and the
+// row lands in the pending queue like a fresh fact. The display-time hints on that queue put a true
+// duplicate at similarity 0.824 and an unrelated pair at 0.138 — a wide, empty gap. 0.8 sits just
+// under the observed duplicate and far above the observed non-duplicate; the existing `ignore` band
+// (>= 0.95, plus the substring/token-superset rules) is untouched and still decides first.
+export const NEAR_DUPLICATE_PARK_THRESHOLD = 0.8;
 
 // Auto-extracted candidates below this importance, or scoped globally, skip straight-to-`add`
 // and go to the memory_reviews queue instead — matches the standing preference to not

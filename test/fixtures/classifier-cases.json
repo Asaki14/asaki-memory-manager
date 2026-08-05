@@ -490,5 +490,30 @@
     "correction": false,
     "text": "Tool: bash fm-wake-drain.sh --verify\n\nAssistant: 收到监控信号后我顺手跑了一次状态探查，确认 drain 已经完成。\n\nUser: 关掉这个自动核查",
     "expectFlag": false
+  },
+  {
+    "name": "neg: plan-review verdict and blocker list are pipeline state",
+    "text": "Assistant: 独立审查已判定方案 v2 不通过，结论是 rework，阻塞项 B-2 至 B-8 共 7 条，其中 B-4 与 B-7 为硬阻塞，必须在动代码前解决。",
+    "expectFlag": false
+  },
+  {
+    "name": "neg: eval batch pass rate is a run statistic",
+    "text": "Assistant: 本轮 eval 已跑完并确认基线：classifier 57/60 通过，correction recall 92%、precision 100%，这三个数字作为后续批次的对比参考点。",
+    "expectFlag": false
+  },
+  {
+    "name": "neg: completed one-off data edit whose record is the edited file",
+    "text": "Assistant: 已修复名单文件里的域名错误：chart-data.csv 第 42 行邮箱域名从 old-corp.com 改成 new-corp.com，已验证生效并合并进 main。",
+    "expectFlag": false
+  },
+  {
+    "name": "neg: a doc/skill file update is itself the record of itself",
+    "text": "Assistant: 已把 /memory 审计流程的第 4 步补写进 commands/memory.md 的 workflow 段落，并同步到 Pi 扩展里的同名命令，两边措辞一致。",
+    "expectFlag": false
+  },
+  {
+    "name": "neg: restating a rule the same delta says is already recorded",
+    "text": "Assistant: 复核了一遍现有规则，push 前检查明文密钥这条依然有效，本轮没有新增或修改任何规则。",
+    "expectFlag": false
   }
 ]

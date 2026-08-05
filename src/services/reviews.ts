@@ -3,14 +3,14 @@ import { UserFacingError } from '../utils/errors';
 import { createMemory, deleteMemory, getMemory, searchMemories, updateMemoryContent } from './memories';
 import { writeMemoryEvent } from './memoryEvents';
 import { parseMemoryMetadata, recordCorrectionOrigin, reinforceMemory, type ReinforcementResult } from './memoryLifecycle';
-import { BATCH_DEDUP_SIMILARITY_THRESHOLD, bestUsableMatch, heuristicDecision, lexicalSimilarity, mergeContent, usableMatches, type ProcessMemoryCandidateInput } from './candidateDecision';
+import { BATCH_DEDUP_SIMILARITY_THRESHOLD, NEAR_DUPLICATE_PARK_THRESHOLD, bestUsableMatch, heuristicDecision, lexicalSimilarity, matchSimilarity, mergeContent, usableMatches, type ProcessMemoryCandidateInput } from './candidateDecision';
 import { findCrossProjectMatches, findLexicalMatch } from './candidates';
 
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-// Shared by findActiveDuplicate (creation-time preemption) and listMemoryReviews'
+// Shared by classifyAgainstActive (creation-time preemption/parking) and listMemoryReviews'
 // include_suggestions (display-time hint): the same search + deterministic-match machinery
 // processMemoryCandidate() uses for the auto-add bucket (searchMemories + findLexicalMatch +
 // bestUsableMatch), stopping at the deterministic heuristic — no LLM dedup call here.
@@ -118,10 +118,22 @@ export async function findPromotionCandidates(
 // "delete" verdicts still require human judgment via the normal review path, since auto-mutating
 // an active memory from an unvetted (global/low-importance) candidate would defeat the point of
 // routing it to review in the first place.
-async function findActiveDuplicate(env: Env, candidate: ProcessMemoryCandidateInput) {
+//
+// Second band, added after the 2026-08-05 audit: a match the heuristic scores >=
+// NEAR_DUPLICATE_PARK_THRESHOLD but below any of its `ignore` rules is "the same rule, reworded".
+// Those get PARKED (see parkReason) rather than skipped or queued.
+async function classifyAgainstActive(env: Env, candidate: ProcessMemoryCandidateInput) {
   const match = await findBestMatch(env, candidate);
   if (!match) return undefined;
-  return heuristicDecision(candidate, match).action === 'ignore' ? match : undefined;
+  return { match, action: heuristicDecision(candidate, match).action, similarity: matchSimilarity(candidate, match) };
+}
+
+// Parking, not deleting: the candidate is written as a review row that is already `resolved` with
+// `resolved_action = 'ignore'`, pointing at the active memory it duplicates and carrying the score in
+// `reason`. It never shows up as pending work, and it stays fully inspectable through the existing
+// reviews list (`status: "resolved"`) with no schema change and no new endpoint.
+function parkReason(memoryId: string, similarity: number): string {
+  return `Auto-parked as a near-duplicate of active memory ${memoryId}. similarity=${similarity.toFixed(3)} >= ${NEAR_DUPLICATE_PARK_THRESHOLD}`;
 }
 
 // Finds an existing pending review that's "the same fact" as `candidate`, so repeated mentions
@@ -173,18 +185,23 @@ export interface CreateMemoryReviewsResult {
   reviews: MemoryReviewRow[];
   // Candidates that reinforced an existing standing rule instead of queueing a row (recurrence).
   reinforcements: ReinforcementResult[];
+  // Candidates written straight to `resolved`/`ignore` as near-duplicates of an active memory.
+  parked: MemoryReviewRow[];
 }
 
 export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCandidateInput[]): Promise<CreateMemoryReviewsResult> {
   const timestamp = nowIso();
   const reviews: MemoryReviewRow[] = [];
   const reinforcements: ReinforcementResult[] = [];
+  const parked: MemoryReviewRow[] = [];
   const createdIds: string[] = [];
   const mergedIds: string[] = [];
   const skippedDuplicateIds: string[] = [];
+  const parkedIds: string[] = [];
 
   for (const candidate of candidates) {
-    const activeDuplicate = await findActiveDuplicate(env, candidate);
+    const active = await classifyAgainstActive(env, candidate);
+    const activeDuplicate = active?.action === 'ignore' ? active.match : undefined;
     if (activeDuplicate) {
       skippedDuplicateIds.push(activeDuplicate.id);
       // Recurrence (captain decision 4): a correction restating a rule that is already ACTIVE means
@@ -196,6 +213,40 @@ export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCan
         const reinforcement = await reinforceMemory(env, activeDuplicate, candidate);
         if (reinforcement) reinforcements.push(reinforcement);
       }
+      continue;
+    }
+
+    // Near-duplicate parking: the same rule reworded enough to slip past every deterministic
+    // `ignore` rule. Corrections are exempt on purpose — a correction legitimately restates the old
+    // rule in order to retire or amend it, so similarity to that rule is evidence, not noise, and
+    // only a human may act on it.
+    if (active && candidate.signal !== 'correction' && active.similarity >= NEAR_DUPLICATE_PARK_THRESHOLD) {
+      const parkedId = crypto.randomUUID();
+      const reason = parkReason(active.match.id, active.similarity);
+      await env.DB.prepare(
+        `INSERT INTO memory_reviews (
+          id, user_id, status, candidate_json, resolved_action, memory_id, project_id, session_id, source, reason, created_at, updated_at, resolved_at
+        ) VALUES (?1, ?2, 'resolved', ?3, 'ignore', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`
+      )
+        .bind(parkedId, candidate.user_id, JSON.stringify(candidate), active.match.id, candidate.project_id ?? null, candidate.session_id ?? null, candidate.source ?? null, reason, timestamp, timestamp, timestamp)
+        .run();
+
+      parkedIds.push(parkedId);
+      parked.push({
+        id: parkedId,
+        user_id: candidate.user_id,
+        status: 'resolved',
+        candidate,
+        resolved_action: 'ignore',
+        memory_id: active.match.id,
+        project_id: candidate.project_id ?? null,
+        session_id: candidate.session_id ?? null,
+        source: candidate.source ?? null,
+        reason,
+        created_at: timestamp,
+        updated_at: timestamp,
+        resolved_at: timestamp,
+      });
       continue;
     }
 
@@ -324,8 +375,15 @@ export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCan
       payload: { count: skippedDuplicateIds.length, matched_memory_ids: skippedDuplicateIds },
     });
   }
+  if (parkedIds.length > 0) {
+    await writeMemoryEvent(env, {
+      userId: candidates[0].user_id,
+      eventType: 'review_park_duplicate',
+      payload: { count: parkedIds.length, review_ids: parkedIds },
+    });
+  }
 
-  return { reviews, reinforcements };
+  return { reviews, reinforcements, parked };
 }
 
 // `signal` lives inside candidate_json, so both the correction-first ordering and the signal filter

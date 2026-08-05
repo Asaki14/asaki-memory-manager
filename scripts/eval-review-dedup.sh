@@ -2,7 +2,7 @@
 # Regression eval for the pending-review dedup added to createMemoryReviews()
 # (src/services/reviews.ts): a near-duplicate candidate submitted while an earlier one is still
 # pending should merge into the existing review row instead of creating a second one. Also covers
-# findActiveDuplicate(): a candidate that duplicates an already-`active` memory (not merely
+# classifyAgainstActive(): a candidate that duplicates an already-`active` memory (not merely
 # another pending review) should be skipped entirely, not queued for review. Cases 4-6 cover the
 # correction-aware exceptions: corrections and non-corrections never merge into each other, two
 # corrections of the same subtype/rule form do, and a merge rewrites the row's `source` column.

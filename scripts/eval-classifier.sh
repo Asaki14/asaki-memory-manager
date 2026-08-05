@@ -60,6 +60,11 @@ Apply this checklist:
 
 Do NOT flag: an in-progress/undecided plan, a problem report that ends by asking whether to fix it, routine implementation-progress update within ongoing work, or prompt/eval calibration notes that quote hypothetical user inputs. Actual user forget/retract requests are durable and should be flag=true.
 
+Three noise classes that read like durable outcomes but are not — all flag=false:
+- Pipeline state: plan/review verdicts, blocker lists, eval pass rates, batch statistics, rollout gate numbers. They describe one run of a process and the next run replaces them.
+- A completed one-off edit to content or documentation whose own record is the artifact it changed (one row in a data file, a doc/skill/prompt file update). The durable configuration or behaviour state a change leaves behind still qualifies; the edit event by itself does not.
+- A restatement of a rule the delta itself presents as already recorded, already in effect, or unchanged. Flag it only when the delta actually establishes or changes the rule.
+
 Two contrastive examples:
 - "解决了内存泄漏问题，已验证生效" -> flag=true (a previously-existing problem is now resolved).
 - "加了个测试用例，跑了一下全过了" -> flag=false (a routine step of ongoing work, no prior problem being resolved, nothing durable to recall later).
@@ -84,6 +89,10 @@ Two contrastive examples:
 - "Claude Design 画布页（.dc.html）不在 DesignSync MCP 文件树里（get_file 404）。浏览器登录态下可直接调 Omelette API：读取 GetFile，写回用 UploadFile，DeleteFile 删文件；大段 HTML 下载用 Blob+anchor，上传方向页内 fetch 后再 SHA-256 对齐本地。" -> flag=false (raw one-off API procedure dump, not an explicit repeat-use convention or established project workflow).
 - "用户希望不使用嵌套并复用同一个 herdr 进程和 server" -> flag=false ("不使用嵌套" lacks an object and cannot stand alone).
 - "手动拖高 Ghostty 窗口以填补当前布局缺口" -> flag=false (transient manual UI adjustment).
+- "独立审查判定方案 v2 不通过，阻塞项 B-2 至 B-8 需在动代码前解决" -> flag=false (a plan-review verdict and its blocker list are pipeline state, replaced by the next review round).
+- "classifier eval 57/60 通过，correction recall 92%、precision 100%，作为后续批次的对比参考点" -> flag=false (eval pass rates and batch statistics describe one run, not durable knowledge).
+- "已把审计流程的第 4 步补写进 commands/memory.md 的 workflow 段落" -> flag=false (a completed one-off edit to a data or doc file is already recorded by that file; only the durable configuration or behaviour state it leaves behind would qualify).
+- "复核了一遍现有规则，push 前检查明文密钥这条依然有效，本轮没有新增或修改任何规则" -> flag=false (restating an already-recorded rule adds nothing; flag only when the delta establishes or changes it).
 
 If flag=true, distill: compress the candidate into exactly ONE self-contained sentence for `text`, same language as the source. Preference/rule should be roughly 40-160 characters; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 characters. No bullet lists. One fact per memory — never chain multiple facts with semicolons/commas. Never paste raw code, CLI output, or a multi-paragraph narrative.
 
@@ -151,6 +160,11 @@ Apply this checklist to every candidate, correction or not:
 
 Do NOT flag: an in-progress/undecided plan, a problem report that ends by asking whether to fix it, routine implementation-progress update within ongoing work, or prompt/eval calibration notes that quote hypothetical user inputs. Actual user forget/retract requests are durable and should be flag=true.
 
+Three noise classes that read like durable outcomes but are not — all flag=false:
+- Pipeline state: plan/review verdicts, blocker lists, eval pass rates, batch statistics, rollout gate numbers. They describe one run of a process and the next run replaces them.
+- A completed one-off edit to content or documentation whose own record is the artifact it changed (one row in a data file, a doc/skill/prompt file update). The durable configuration or behaviour state a change leaves behind still qualifies; the edit event by itself does not.
+- A restatement of a rule the delta itself presents as already recorded, already in effect, or unchanged. Flag it only when the delta actually establishes or changes the rule.
+
 Correction examples:
 - "Tool: bash git commit -m \"wip\"" … "User: 别再自动 commit 了" -> flag=true, signal=correction, signal_subtype=override_of_action, rule_form=prohibition, antecedent_source=trace, text="不要在未获得确认前自动 commit 本仓库的改动".
 - "Assistant: 顺手把首页布局重排了" … "User: 回打开前的页面" -> flag=true, signal=correction, signal_subtype=override_of_action, rule_form=prohibition, antecedent_source=prose, text="修改页面时不要顺手重排既有布局，改完后回到用户打开前的页面状态".
@@ -191,6 +205,10 @@ Non-correction examples (unchanged rules):
 - "Claude Design 画布页（.dc.html）不在 DesignSync MCP 文件树里（get_file 404）。浏览器登录态下可直接调 Omelette API：读取 GetFile，写回用 UploadFile，DeleteFile 删文件；大段 HTML 下载用 Blob+anchor，上传方向页内 fetch 后再 SHA-256 对齐本地。" -> flag=false (raw one-off API procedure dump, not an explicit repeat-use convention or established project workflow).
 - "用户希望不使用嵌套并复用同一个 herdr 进程和 server" -> flag=false ("不使用嵌套" lacks an object and cannot stand alone).
 - "手动拖高 Ghostty 窗口以填补当前布局缺口" -> flag=false (transient manual UI adjustment).
+- "独立审查判定方案 v2 不通过，阻塞项 B-2 至 B-8 需在动代码前解决" -> flag=false (a plan-review verdict and its blocker list are pipeline state, replaced by the next review round).
+- "classifier eval 57/60 通过，correction recall 92%、precision 100%，作为后续批次的对比参考点" -> flag=false (eval pass rates and batch statistics describe one run, not durable knowledge).
+- "已把审计流程的第 4 步补写进 commands/memory.md 的 workflow 段落" -> flag=false (a completed one-off edit to a data or doc file is already recorded by that file; only the durable configuration or behaviour state it leaves behind would qualify).
+- "复核了一遍现有规则，push 前检查明文密钥这条依然有效，本轮没有新增或修改任何规则" -> flag=false (restating an already-recorded rule adds nothing; flag only when the delta establishes or changes it).
 
 If flag=true, distill: compress the candidate into exactly ONE self-contained sentence for text, same language as the source. Preference/rule should be roughly 40-160 characters; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 characters. No bullet lists. One fact per memory — never chain multiple facts with semicolons/commas. Never paste raw code, CLI output, or a multi-paragraph narrative.
 
