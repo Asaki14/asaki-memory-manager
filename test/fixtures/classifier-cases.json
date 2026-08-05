@@ -484,5 +484,11 @@
     "correction": false,
     "text": "Assistant: 调整了一下实现方式。\n\nUser: 不要嵌套",
     "expectFlag": false
+  },
+  {
+    "name": "neg: one-off directive to stop one redundant check is not a standing prohibition",
+    "correction": false,
+    "text": "Tool: bash fm-wake-drain.sh --verify\n\nAssistant: 收到监控信号后我顺手跑了一次状态探查，确认 drain 已经完成。\n\nUser: 关掉这个自动核查",
+    "expectFlag": false
   }
 ]
