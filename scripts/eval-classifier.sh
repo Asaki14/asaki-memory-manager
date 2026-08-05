@@ -163,6 +163,7 @@ Correction examples:
 - "Prior memory candidate: Always run the full eval suite before every commit" … "User: that memory is wrong, drop it — only run it before a release" -> flag=true, rule_form=retract (NOT procedure), antecedent_source=candidate, redirect_target="only before a release".
 - "User: 这样不会有问题吗？" -> flag=false (a question is not a verdict).
 - "Assistant: 我上面那条改错了，已经修回来了" -> flag=false (the agent correcting itself is not a user correction).
+- "Tool: bash fm-wake-drain.sh --verify" … "User: 关掉这个自动核查" -> flag=false (a 这个/这次-scoped verdict switches off ONE specific redundant run and is not durable; only widen a verdict into a standing prohibition when the user words themselves generalize, e.g. 别再/以后/每次/again).
 - One delta with "Assistant: 已修复登录超时" and "User: 别再自动 commit 了" -> emit ONLY the correction; the fix outcome is dropped.
 
 Non-correction examples (unchanged rules):
