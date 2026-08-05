@@ -122,11 +122,17 @@ app.post('/v1/memories/candidates', async (c) => {
   const reviewBucket = validation.data.filter((item) => isUnsupervisedSource(item.source));
 
   const decisions = autoBucket.length > 0 ? await processMemoryCandidates(c.env, autoBucket) : [];
-  const queued = reviewBucket.length > 0 ? await createMemoryReviews(c.env, reviewBucket) : { reviews: [], reinforcements: [] };
+  const queued = reviewBucket.length > 0 ? await createMemoryReviews(c.env, reviewBucket) : { reviews: [], reinforcements: [], parked: [] };
   // `reinforcements` only appears when a correction candidate reinforced an existing standing rule
   // instead of queueing a row, so a response without recurrence stays byte-identical for clients.
+  // `parked_duplicates` follows the same rule for candidates auto-resolved as near-duplicates.
   const reinforcements = [...queued.reinforcements, ...decisions.flatMap((decision) => (decision.reinforcement ? [decision.reinforcement] : []))];
-  return c.json(reinforcements.length > 0 ? { decisions, reviews: queued.reviews, reinforcements } : { decisions, reviews: queued.reviews });
+  return c.json({
+    decisions,
+    reviews: queued.reviews,
+    ...(reinforcements.length > 0 ? { reinforcements } : {}),
+    ...(queued.parked.length > 0 ? { parked_duplicates: queued.parked } : {}),
+  });
 });
 
 app.post('/v1/memories/extract', async (c) => {
@@ -232,8 +238,12 @@ app.post('/v1/memories/reviews', async (c) => {
   const validation = validateCreateMemoryReviews(body.body);
   if (!validation.ok) return c.json({ error: validation.error }, 400);
 
-  const { reviews, reinforcements } = await createMemoryReviews(c.env, validation.data);
-  return c.json(reinforcements.length > 0 ? { reviews, reinforcements } : { reviews }, 201);
+  const { reviews, reinforcements, parked } = await createMemoryReviews(c.env, validation.data);
+  return c.json({
+    reviews,
+    ...(reinforcements.length > 0 ? { reinforcements } : {}),
+    ...(parked.length > 0 ? { parked_duplicates: parked } : {}),
+  }, 201);
 });
 
 app.post('/v1/memories/reviews/list', async (c) => {
