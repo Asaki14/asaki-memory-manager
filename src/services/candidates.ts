@@ -164,8 +164,9 @@ export async function processMemoryCandidate(env: Env, candidate: ProcessMemoryC
   if (requiresLlm && !llm && match && (hasContradictionSignal(candidate.content) || hasForgetSignal(candidate.content))) {
     const { createMemoryReviews } = await import('./reviews');
     const [review] = (await createMemoryReviews(env, [candidate])).reviews;
-    // createMemoryReviews can decline to queue (its findActiveDuplicate check hit a heuristic
-    // 'ignore') — report that honestly instead of claiming a review exists that doesn't.
+    // createMemoryReviews can decline to queue (its classifyAgainstActive check hit a heuristic
+    // 'ignore', or parked the candidate as a near-duplicate) — report that honestly instead of
+    // claiming a review exists that doesn't.
     if (!review) {
       return {
         action: 'ignore',
