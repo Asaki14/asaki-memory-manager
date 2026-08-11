@@ -747,5 +747,15 @@
       "explicit": null
     },
     "expectProjectId": ""
+  },
+  {
+    "name": "neg: audit duplicate - shorter repeat of an already-recorded bash fix",
+    "text": "Assistant: 修复 asaki-memory 记忆提取全线失效的 bash 3.2 bug（${TEXT: -20000} 返回空），已推送 e07ac92 并验证部署。",
+    "expectFlag": false
+  },
+  {
+    "name": "neg: audit stale intermediate session-start state",
+    "text": "Assistant: Removed large memory injection at Pi session start, now only shows compact status banner.",
+    "expectFlag": false
   }
 ]

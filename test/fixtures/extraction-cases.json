@@ -109,5 +109,30 @@
     "expectEmpty": false,
     "expectCount": 1,
     "expectScope": "project"
+  },
+  {
+    "name": "neg: audit obsolete auto-extract ownership summary",
+    "text": "Assistant: 云端LLM auto-extract已定为永久关闭(AUTO_EXTRACT=0)，不再是原ROADMAP第10项\"分阶段校准后决定\"的方案；本地Agent是记忆写入唯一执行者，本地Stop hook分类器预判定候选并蒸馏出text/type/scope，主Agent直接执行asaki_memory_add，无需重新审查6条标准。EXTRACT_SIGNAL_RE信号词门槛逻辑仍保留在stop-extract.sh里，仅当重新打开该开关时才生效。",
+    "expectEmpty": true
+  },
+  {
+    "name": "neg: audit one-off auto-inject toggle",
+    "text": "Assistant: 用户要求打开对话自动注入功能，已通过设置 ASAKI_MEMORY_AUTO_INJECT=1 实现",
+    "expectEmpty": true
+  },
+  {
+    "name": "neg: audit legacy extraction threshold changelog",
+    "text": "Assistant: 应主公要求（认为不合理），移除了记忆抽取的60字符长度门槛，保留敏感词检测，优化了内容信号识别逻辑。",
+    "expectEmpty": true
+  },
+  {
+    "name": "neg: audit vague review queue complaint",
+    "text": "Assistant: review 队列没有强制清空机制，容易堆积不处理",
+    "expectEmpty": true
+  },
+  {
+    "name": "neg: audit deprecated extraction optimization direction",
+    "text": "Assistant: 抽取LLM的跳过判断已通过EXTRACT_SIGNAL_RE正则实现，该正则作为免费前置门槛，后续优化重点在提升正则准度而非降低调用成本",
+    "expectEmpty": true
   }
 ]

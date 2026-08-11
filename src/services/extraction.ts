@@ -96,6 +96,21 @@ Output: {"candidates":[]}
 Input: Assistant: Herdr 中运行 Yazi 时先强制使用 Chafa；后续确认 Herdr 已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp。
 Output: {"candidates":[{"content":"Herdr 已支持 Kitty graphics，Yazi 撤销 Chafa 强制配置并恢复 Kgp。","kind":"bug_fix","importance":0.6,"scope":"project"}]}
 
+Input: Assistant: 云端LLM auto-extract已定为永久关闭(AUTO_EXTRACT=0)，本地Stop hook分类器预判定候选，主Agent直接执行asaki_memory_add。
+Output: {"candidates":[]}
+
+Input: Assistant: 用户要求打开对话自动注入功能，已通过设置 ASAKI_MEMORY_AUTO_INJECT=1 实现
+Output: {"candidates":[]}
+
+Input: Assistant: 应用户要求，移除了记忆抽取的60字符长度门槛，保留敏感词检测，优化了内容信号识别逻辑。
+Output: {"candidates":[]}
+
+Input: Assistant: review 队列没有强制清空机制，容易堆积不处理
+Output: {"candidates":[]}
+
+Input: Assistant: 抽取LLM的跳过判断已通过EXTRACT_SIGNAL_RE正则实现，该正则作为免费前置门槛，后续优化重点在提升正则准度而非降低调用成本
+Output: {"candidates":[]}
+
 Each memory must be a concise, self-contained statement understandable without the surrounding context: preference/rule should be roughly 40-160 characters; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 characters. For each candidate also classify "scope": use this test — "global" only if the statement would genuinely help in ANY unrelated project (cross-project dev preferences, communication/output style, secret-handling rules, durable personal/identity facts), and "project" for everything else, including system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs, OS-level fixes) even when it wasn't said inside a recognizable project — that is still "project", not "global", just scoped to whatever repo/tool it actually concerns. When scope is ambiguous, prefer "project". Return at most 2 candidates per call — if more than 2 durable facts are present, keep only the most valuable, self-contained ones and drop the rest. Return strict JSON: {"candidates":[{"content":"...","kind":"preference|rule|fact|decision|task_learning|bug_fix|workflow","importance":0.0-1.0,"scope":"global|project"}]}. Return {"candidates":[]} if nothing durable is found. Never invent facts not present in the text. Do not return the example inputs/outputs shown above verbatim — they are for pattern reference only.`;
 
 // Deterministic pre-filter for the syntactically-obvious junk patterns an 8B model keeps
