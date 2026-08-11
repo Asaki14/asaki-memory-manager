@@ -1,6 +1,6 @@
 {
   "name": "asaki-memory-manager",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --local",
@@ -16,6 +16,8 @@
     "eval:extraction": "bash scripts/eval-extraction.sh",
     "eval:extraction-guardrails": "node --experimental-strip-types scripts/eval-extraction-guardrails.ts",
     "eval:classifier": "bash scripts/eval-classifier.sh",
+    "eval:project-context": "node scripts/eval-project-context.mjs",
+    "eval:prompt-sync": "node scripts/eval-prompt-sync.mjs",
     "eval:correction-signal": "bash scripts/eval-correction-signal.sh",
     "eval:sensitive-pattern": "bash scripts/eval-sensitive-pattern.sh",
     "eval:trace-sensitive": "bash scripts/eval-trace-sensitive.sh",

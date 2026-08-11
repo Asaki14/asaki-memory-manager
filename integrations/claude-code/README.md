@@ -128,6 +128,17 @@ environment (never hardcoded / never committed). Set them once in
   prose antecedents without it, at lower recall. The flag is per-machine and
   takes effect on the next Stop event.
 
+  **What the project context block sends off-machine.** Every classifier call is
+  now prefixed with a short, client-computed block naming the host repository,
+  the repositories currently in play, and the one the work is attributed to.
+  Those are **repository names only** — no paths, no branches, no contents — but
+  on an orchestrator host they include the names of repositories other than the
+  one this session is about. It is what lets a memory be filed under the repo the
+  work is about instead of the repo the session runs in; when nothing is uniquely
+  attributable the candidate is dropped before any request is made. Set
+  `ASAKI_MEMORY_PROJECT_ID` to pin one project explicitly, which both narrows the
+  block to that single name and overrides the classifier's answer.
+
   Correction evidence written into `memory_reviews.candidate_json` persists in
   D1 indefinitely, including after a review is resolved or ignored.
 
