@@ -87,6 +87,39 @@ export async function loadPiProjectContext() {
   return module;
 }
 
+// Returns the numeric env parsers (`// #region asaki-env-parse`) as a live module, so
+// `npm run eval:inject-env` runs the same table against the shipped Pi source and the two bash
+// copies in integrations/claude-code/.
+export async function loadPiEnvParsers() {
+  return loadRegionModule(extractPiRegions('asaki-env-parse'), [], [
+    'parsePositiveIntEnv',
+    'parseUnitScoreEnv',
+    'AUTO_INJECT_TOP_K_DEFAULT',
+    'AUTO_INJECT_TOP_K_CAP',
+    'PROJECT_DIGEST_MAX_CAP',
+    'PROJECT_DIGEST_MAX_CHARS_CAP',
+    'PROJECT_DIGEST_CONTENT_CHARS_CAP',
+  ]);
+}
+
+// Returns the pure status-banner field builder (`// #region asaki-banner`). Mirrors
+// asaki_banner_line() in integrations/claude-code/session-start.sh; `npm run eval:session-inject`
+// asserts the same field/omission matrix on both.
+export async function loadPiBanner() {
+  return loadRegionModule(extractPiRegions('asaki-banner'), [], ['bannerBlockField', 'buildSessionBannerLine']);
+}
+
+// Returns the auto-inject formatters (`// #region asaki-auto-inject`, two blocks: the output-budget
+// constants and the formatters). They call cleanMemoryText from the trace region, so both regions
+// are loaded together.
+export async function loadPiAutoInject() {
+  return loadRegionModule(
+    [...extractPiRegions('asaki-auto-inject'), ...extractPiTraceRegions()],
+    ['import { homedir } from "node:os";', 'import { isAbsolute, relative, resolve, sep } from "node:path";'],
+    ['MAX_TOOL_OUTPUT_CHARS', 'MEMORY_CONTEXT_CONTENT_CHARS', 'formatAutoMemoryLines', 'formatAutoMemoryContext', 'formatAutoMemoryDisplay'],
+  );
+}
+
 // Returns { module, dispose } — call dispose() to remove the temp dir.
 export async function loadPiTraceBuilder() {
   return loadRegionModule(

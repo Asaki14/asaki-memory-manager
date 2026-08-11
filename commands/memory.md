@@ -7,8 +7,9 @@ Arguments: `$ARGUMENTS`
 
 If the arguments are exactly `status` (ignore surrounding whitespace), do ONLY this:
 1. Report current config: `user_id` (default `asaki`), `project_id` (current git repo basename or `ASAKI_MEMORY_PROJECT_ID`), and whether `ASAKI_MEMORY_API_KEY` / `ASAKI_MEMORY_BASE_URL` look configured in the environment.
-2. Call the `asaki_memory_list` tool with `limit: 1` to confirm the backend is reachable.
-3. Report reachable/failed, including the error message on failure. Stop — do not run the audit below.
+2. Report the local capture/injection switches from the environment, mirroring the Pi extension's `/memory status`: `ASAKI_MEMORY_AUTO_EXTRACT` (default `0`; `1` means the DEPRECATED server-extraction path is active and should normally be turned off) and the resulting effective classifier state (`on model=${ASAKI_MEMORY_CLASSIFIER_MODEL:-claude-haiku-4-5-20251001}` when auto-extract is off, otherwise `off`). These two are no longer on the session banner, so this is where a misconfiguration surfaces. Also report the two injection blocks: `ASAKI_MEMORY_STANDING_RULES` / `ASAKI_MEMORY_PROJECT_DIGEST` (both default `1`) with their caps if set.
+3. Call the `asaki_memory_list` tool with `limit: 1` to confirm the backend is reachable.
+4. Report reachable/failed, including the error message on failure. Stop — do not run the audit below.
 
 If the arguments are exactly `report` (ignore surrounding whitespace) — this is the unattended/scheduled mode, no human is watching to approve writes — do ONLY this:
 1. Run Workflow steps 1-4 below (inspect pending reviews, list memories, analyze, propose changes).

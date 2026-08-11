@@ -37,12 +37,17 @@ environment (never hardcoded / never committed). Set them once in
 ## What's bundled
 
 - `session-start.sh` — SessionStart hook, fires on startup/resume/compact.
-  Injects a compact counts-only status banner (`memories=N | pendingReviews=N
-  | autoExtract=on|off`) — no memory content. Pi additionally shows its
-  local classifier state in the native extension banner. Mirrors the Pi extension's
-  `buildSessionBanner()`: the agent decides for itself when to actually
-  search/read memories instead of receiving a startup memory dump. The one
-  content-bearing exception is the standing-rule block (see below).
+  Emits, in this order: the standing-rule block, the project-memory digest,
+  then a counts-only status banner (`user=… | project=… | memories=N |
+  pendingReviews=N | classifier=on model=… | standingRules=N/M |
+  projectDigest=N/M`). Fields with no information — a disabled classifier, a
+  disabled/empty/unfetchable block — are omitted whole; `autoExtract` is not on
+  the line at all, since the deprecated server-extraction path is off by
+  default and `/memory status` reports it when it is not. Everything the two
+  blocks did not select stays retrieval-only: the agent decides for itself when
+  to search. Field set and order are KEEP IN SYNC with
+  `buildSessionBannerLine()` in `../pi/asaki-memory.ts`
+  (`npm run eval:session-inject`).
 - `standing-rules.jq` — selection and rendering for the standing-rule block
   `session-start.sh` emits ahead of the banner: ACTIVE `rule`/`preference`
   memories (global always, project only on match, session never), capped at
@@ -55,6 +60,20 @@ environment (never hardcoded / never committed). Set them once in
   KEEP IN SYNC with `src/services/standingRules.ts` (canonical) and its
   verbatim copy in `../pi/asaki-memory.ts`; `npm run eval:standing-rules`
   enforces it.
+- `project-digest.jq` — selection and rendering for the project-memory digest
+  `session-start.sh` emits between the standing rules and the banner: the ACTIVE
+  memories of every OTHER known kind (the dynamic complement of
+  `ASAKI_MEMORY_STANDING_RULES_KINDS`, so nothing appears in both blocks),
+  framed as CONTEXT rather than directives. Same scope discipline and ordering
+  as the standing block, capped at `ASAKI_MEMORY_PROJECT_DIGEST_MAX`
+  (default 10, clamped to 50), `ASAKI_MEMORY_PROJECT_DIGEST_MAX_CHARS`
+  (default 3000, clamped to 20000) and
+  `ASAKI_MEMORY_PROJECT_DIGEST_CONTENT_CHARS` (default 240, clamped to 2000),
+  with a truncation marker when more exist. It reuses the same list response, so
+  it costs no extra request, and it IS re-emitted on compact. On by default —
+  set `ASAKI_MEMORY_PROJECT_DIGEST=0` to disable. KEEP IN SYNC with
+  `src/services/projectDigest.ts` (canonical) and its verbatim copy in
+  `../pi/asaki-memory.ts`; `npm run eval:project-digest` enforces it.
 - `user-prompt.sh` — UserPromptSubmit hook. Unconditionally injects one fixed
   instruction every turn: the agent itself reads user intent and decides
   whether `asaki_memory_search` is needed, and if so picks its own
@@ -64,10 +83,16 @@ environment (never hardcoded / never committed). Set them once in
   `before_agent_start`/`autoInjectMemory()`: on turns whose prompt matches a
   memory-related keyword regex (or unconditionally with
   `ASAKI_MEMORY_AUTO_INJECT_ALWAYS=1`) and isn't flagged as containing
-  secrets, it runs one `/v1/memories/search` call (top_k=6), keeps only
-  results scoring at or above `ASAKI_MEMORY_AUTO_MIN_SCORE` (default 0.67),
-  and injects those into context before the agent starts — so memory recall
-  doesn't depend solely on the agent proactively calling the tool. Output is
+  secrets, it runs one `/v1/memories/search` call with
+  `top_k=ASAKI_MEMORY_AUTO_INJECT_TOP_K` (default 6, clamped to 20; the server
+  itself accepts up to 50) and `min_score=ASAKI_MEMORY_AUTO_MIN_SCORE`
+  (default 0.67, must be within `[0,1]`), keeps only results at or above that
+  score, and injects those into context before the agent starts — so memory
+  recall doesn't depend solely on the agent proactively calling the tool.
+  Sending `min_score` to the server as well keeps results the hook would have
+  dropped from having their `last_accessed_at` bumped, which lifecycle reads as
+  a retrieval signal. Invalid values for either variable fall back to the
+  default instead of breaking the call (`npm run eval:inject-env`). Output is
   capped at a fixed character budget regardless of result count.
 - `stop-extract.sh` — Stop hook, runs after every assistant turn. There are two
   modes:

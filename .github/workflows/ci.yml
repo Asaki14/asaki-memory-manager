@@ -46,6 +46,9 @@ jobs:
       - run: npm run eval:prompt-sync
       - run: npm run eval:project-context
       - run: npm run eval:standing-rules
+      - run: npm run eval:project-digest
+      - run: npm run eval:inject-env
+      - run: npm run eval:session-inject
       - run: npm run eval:review-format
       - run: npm run eval:trace-builder
       - run: npm run eval:trace-sensitive

@@ -10,7 +10,6 @@ const API_BASE = "https://asaki-memory-manager.YOUR_SUBDOMAIN.workers.dev";
 const DEFAULT_USER_ID = "asaki";
 const DEFAULT_SCOPE = "project";
 const DEFAULT_AUTO_MIN_SCORE = 0.67;
-const AUTO_INJECT_TOP_K = 6;
 const DEFAULT_STARTUP_TOP_K = 6;
 const AUTO_EXTRACT_MAX_CHARS = 20_000;
 const AUTO_EXTRACT_TIMEOUT_MS = 20_000;
@@ -21,8 +20,10 @@ const CLASSIFIER_TIMEOUT_MS = 120_000;
 // independent of item count (a memory's content can be up to 8000 chars, and search/list can
 // return up to 50/100 items). KEEP IN SYNC with the same constant in
 // integrations/mcp/asaki-memory.ts and integrations/claude-code/user-prompt.sh.
+// #region asaki-auto-inject
 const MAX_TOOL_OUTPUT_CHARS = 6000;
 const MEMORY_CONTEXT_CONTENT_CHARS = 280;
+// #endregion
 const MEMORY_NEEDED_RE =
   /(记忆|记得|回忆|想起|以前|之前|上次|过往|历史|偏好|习惯|约定|惯例|决策|背景|上下文|继续|延续|remember|recall|memory|previous|before|last time|preference|convention|decision|context|continue)/i;
 // Necessary-but-not-sufficient content gate for auto-extraction: the delta must contain at least
@@ -108,6 +109,56 @@ type MemoryScope = (typeof SCOPES)[number];
 type MemoryKind = (typeof KINDS)[number];
 
 type MemoryConfigFile = Record<string, unknown>;
+
+// #region asaki-env-parse
+// Numeric env/config parsing for the injection knobs. Contract (KEEP IN SYNC with
+// asaki_parse_positive_int / asaki_parse_unit_score in integrations/claude-code/session-start.sh
+// and integrations/claude-code/user-prompt.sh; `npm run eval:inject-env` runs one table against
+// every copy):
+//
+//   parsePositiveIntEnv: trim → `^[0-9]+$` or fall back → strip leading zeros → all-zero falls
+//   back (0 is not a positive integer) → compare with the cap as a DECIMAL STRING (more digits,
+//   or same digits and lexicographically greater ⇒ cap). Only a value already known to be <= cap
+//   is ever converted to a number, so an absurdly long digit string clamps to the cap instead of
+//   becoming Infinity and silently falling back to the default.
+//
+//   parseUnitScoreEnv: only a finite decimal in [0, 1]; `0`, `1`, `0.67` and `.67` are accepted,
+//   anything else (blank, malformed, negative, > 1, Infinity) falls back. An out-of-range value
+//   must never reach the server, which rejects it with a 400 and kills the whole auto-inject.
+const AUTO_INJECT_TOP_K_DEFAULT = 6;
+// Deliberately more conservative than the server, which accepts top_k up to 50
+// (src/utils/validation.ts); this is a client-side sanity cap on injected context.
+const AUTO_INJECT_TOP_K_CAP = 20;
+const PROJECT_DIGEST_MAX_CAP = 50;
+const PROJECT_DIGEST_MAX_CHARS_CAP = 20_000;
+const PROJECT_DIGEST_CONTENT_CHARS_CAP = 2_000;
+
+function parsePositiveIntEnv(raw: unknown, def: number, cap: number): number {
+  const text = typeof raw === "number" ? (Number.isFinite(raw) ? String(Math.floor(raw)) : "") : typeof raw === "string" ? raw : "";
+  const trimmed = text.trim();
+  if (!/^[0-9]+$/.test(trimmed)) return def;
+  const digits = trimmed.replace(/^0+/, "");
+  if (digits.length === 0) return def;
+  const capText = String(cap);
+  if (digits.length > capText.length) return cap;
+  if (digits.length === capText.length && digits > capText) return cap;
+  return Number(digits);
+}
+
+function parseUnitScoreEnv(raw: unknown, def: number): number {
+  const text = typeof raw === "number" ? (Number.isFinite(raw) ? String(raw) : "") : typeof raw === "string" ? raw : "";
+  const trimmed = text.trim();
+  if (trimmed === "" || trimmed === "." || !/^[0-9]*\.?[0-9]*$/.test(trimmed)) return def;
+  const dot = trimmed.indexOf(".");
+  const intPart = dot === -1 ? trimmed : trimmed.slice(0, dot);
+  const fracPart = dot === -1 ? "" : trimmed.slice(dot + 1);
+  const intDigits = intPart.replace(/^0+/, "");
+  if (intDigits.length > 1) return def;
+  if (intDigits === "1" && /[1-9]/.test(fracPart)) return def;
+  const value = Number(`${intDigits === "" ? "0" : intDigits}.${fracPart === "" ? "0" : fracPart}`);
+  return Number.isFinite(value) && value >= 0 && value <= 1 ? value : def;
+}
+// #endregion
 
 // --- standing-rules:begin (KEEP IN SYNC: src/services/standingRules.ts <-> integrations/pi/asaki-memory.ts) ---
 export const STANDING_RULES_DEFAULT_KINDS = ['rule', 'preference'] as const;
@@ -248,6 +299,150 @@ export function renderStandingRulesBlock(items: StandingRuleItem[], options: Sta
 }
 // --- standing-rules:end ---
 
+// Session-start project digest — the non-directive complement of the standing-rule block
+// above (see src/services/projectDigest.ts for the full contract).
+// --- project-digest:begin (KEEP IN SYNC: src/services/projectDigest.ts <-> integrations/pi/asaki-memory.ts) ---
+export const PROJECT_DIGEST_KNOWN_KINDS = [
+  'preference',
+  'rule',
+  'fact',
+  'decision',
+  'task_learning',
+  'bug_fix',
+  'workflow',
+] as const;
+export const PROJECT_DIGEST_DEFAULT_STANDING_KINDS = ['rule', 'preference'] as const;
+export const PROJECT_DIGEST_DEFAULT_MAX = 10;
+export const PROJECT_DIGEST_MAX_CHARS = 3000;
+export const PROJECT_DIGEST_CONTENT_CHARS = 240;
+export const PROJECT_DIGEST_PREAMBLE =
+  'This is recalled context, not directives: durable memories of this project (plus global ones) that are not standing rules. They record what was already decided, learned or fixed — use them instead of re-deriving, and call asaki_memory_search when you need more than these excerpts.';
+
+export interface ProjectDigestItem {
+  id?: string | null;
+  content?: string | null;
+  scope?: string | null;
+  kind?: string | null;
+  status?: string | null;
+  importance?: number | null;
+  project_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface ProjectDigestOptions {
+  projectId?: string | null;
+  standingKinds?: readonly string[];
+  max?: number;
+  maxChars?: number;
+  contentChars?: number;
+}
+
+export interface ProjectDigestBlock {
+  text: string;
+  shown: number;
+  eligible: number;
+  truncated: boolean;
+}
+
+/**
+ * The digest kinds are the DYNAMIC complement of whatever the standing block claimed, so
+ * `ASAKI_MEMORY_STANDING_RULES_KINDS=rule` moves `preference` into the digest instead of
+ * leaving it invisible, and no memory is ever in both blocks. Deliberately independent of
+ * the two on/off switches: turning the standing block off does not turn its kinds into
+ * digest context.
+ */
+export function projectDigestKinds(standingKinds?: readonly string[]): readonly string[] {
+  const standing = standingKinds && standingKinds.length > 0 ? standingKinds : PROJECT_DIGEST_DEFAULT_STANDING_KINDS;
+  return PROJECT_DIGEST_KNOWN_KINDS.filter((kind) => standing.indexOf(kind) === -1);
+}
+
+export function cleanProjectDigestText(text: string): string {
+  return text
+    .replace(/[\r\n]/g, ' ')
+    .replace(/[\t ]+/g, ' ')
+    .replace(/^ +/, '')
+    .replace(/ +$/, '');
+}
+
+export function truncateProjectDigestText(text: string, maxChars: number): string {
+  return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+}
+
+export function formatProjectDigestLine(item: ProjectDigestItem, contentChars: number): string {
+  const scope = item.scope === 'global' ? 'global' : 'project';
+  const kind = typeof item.kind === 'string' && item.kind ? item.kind : 'fact';
+  const content = truncateProjectDigestText(cleanProjectDigestText(String(item.content ?? '')), contentChars);
+  return `- [${scope}/${kind}] ${content}`;
+}
+
+export function selectProjectDigest(items: ProjectDigestItem[], options: ProjectDigestOptions = {}): ProjectDigestItem[] {
+  const kinds = projectDigestKinds(options.standingKinds);
+  const projectId = options.projectId ?? '';
+  return items
+    .filter((item) => (item.status ?? 'active') === 'active')
+    .filter((item) => cleanProjectDigestText(String(item.content ?? '')).length > 0)
+    .filter((item) => kinds.indexOf(typeof item.kind === 'string' ? item.kind : '') !== -1)
+    .filter(
+      (item) =>
+        item.scope === 'global' ||
+        (item.scope === 'project' && projectId.length > 0 && (item.project_id ?? '') === projectId)
+    )
+    .sort(compareProjectDigestAscending)
+    .reverse();
+}
+
+function compareProjectDigestAscending(a: ProjectDigestItem, b: ProjectDigestItem): number {
+  const aImportance = typeof a.importance === 'number' ? a.importance : 0;
+  const bImportance = typeof b.importance === 'number' ? b.importance : 0;
+  if (aImportance !== bImportance) return aImportance < bImportance ? -1 : 1;
+  const aTime = a.updated_at ?? a.created_at ?? '';
+  const bTime = b.updated_at ?? b.created_at ?? '';
+  if (aTime !== bTime) return aTime < bTime ? -1 : 1;
+  const aId = a.id ?? '';
+  const bId = b.id ?? '';
+  return aId < bId ? -1 : aId > bId ? 1 : 0;
+}
+
+/**
+ * Bounded twice like the standing block: at most `max` memories (default 10) and at most
+ * `maxChars` of memory lines (default 3000), each clamped to `contentChars` (default 240).
+ * Worst case is therefore ~3.3 KB of text — roughly 0.8k tokens of English or ~1.65k tokens
+ * of Chinese. Returns an empty `text` when nothing is eligible.
+ */
+export function renderProjectDigestBlock(items: ProjectDigestItem[], options: ProjectDigestOptions = {}): ProjectDigestBlock {
+  const max = typeof options.max === 'number' && options.max > 0 ? Math.floor(options.max) : PROJECT_DIGEST_DEFAULT_MAX;
+  const maxChars = typeof options.maxChars === 'number' && options.maxChars > 0 ? Math.floor(options.maxChars) : PROJECT_DIGEST_MAX_CHARS;
+  const contentChars =
+    typeof options.contentChars === 'number' && options.contentChars > 0 ? Math.floor(options.contentChars) : PROJECT_DIGEST_CONTENT_CHARS;
+
+  const eligibleItems = selectProjectDigest(items, options);
+  const lines: string[] = [];
+  let chars = 0;
+  for (const item of eligibleItems) {
+    if (lines.length >= max) break;
+    const line = formatProjectDigestLine(item, contentChars);
+    if (chars + line.length + 1 > maxChars && lines.length > 0) break;
+    lines.push(line);
+    chars += line.length + 1;
+  }
+
+  const eligible = eligibleItems.length;
+  const shown = lines.length;
+  if (shown === 0) return { text: '', shown: 0, eligible, truncated: false };
+
+  const truncated = shown < eligible;
+  const body = [`## Asaki Project Memory (${shown} of ${eligible})`, '', PROJECT_DIGEST_PREAMBLE, '', ...lines];
+  if (truncated) {
+    body.push(
+      '',
+      `(showing ${shown} of ${eligible} project memories — more exist; call asaki_memory_list or asaki_memory_search for the rest)`
+    );
+  }
+  return { text: body.join('\n'), shown, eligible, truncated };
+}
+// --- project-digest:end ---
+
 class MemoryApiError extends Error {
   constructor(
     public readonly status: number,
@@ -272,7 +467,15 @@ function memoryConfig() {
     projectId: process.env.ASAKI_MEMORY_PROJECT_ID || process.env.MEMORY_PROJECT_ID || stringConfig(fileConfig, "projectId", "project_id") || "",
     sessionId: process.env.ASAKI_MEMORY_SESSION_ID || process.env.MEMORY_SESSION_ID || stringConfig(fileConfig, "sessionId", "session_id") || "",
     defaultScope: normalizeScope(process.env.ASAKI_MEMORY_DEFAULT_SCOPE || stringConfig(fileConfig, "defaultScope", "default_scope")) || DEFAULT_SCOPE,
-    autoMinScore: numberConfig(process.env.ASAKI_MEMORY_AUTO_MIN_SCORE, numberConfig(fileConfig.autoMinScore ?? fileConfig.auto_min_score, DEFAULT_AUTO_MIN_SCORE)),
+    autoMinScore: parseUnitScoreEnv(
+      process.env.ASAKI_MEMORY_AUTO_MIN_SCORE ?? fileConfig.autoMinScore ?? fileConfig.auto_min_score,
+      DEFAULT_AUTO_MIN_SCORE,
+    ),
+    autoInjectTopK: parsePositiveIntEnv(
+      process.env.ASAKI_MEMORY_AUTO_INJECT_TOP_K ?? fileConfig.autoInjectTopK ?? fileConfig.auto_inject_top_k,
+      AUTO_INJECT_TOP_K_DEFAULT,
+      AUTO_INJECT_TOP_K_CAP,
+    ),
     autoExtract: envFlagEnabledConfig(process.env.ASAKI_MEMORY_AUTO_EXTRACT ?? fileConfig.autoExtract ?? fileConfig.auto_extract, false),
     autoClassifier: envFlagEnabledConfig(process.env.ASAKI_MEMORY_AUTO_CLASSIFIER ?? fileConfig.autoClassifier ?? fileConfig.auto_classifier, true),
     startupInject: envFlagEnabledConfig(process.env.ASAKI_MEMORY_STARTUP_INJECT ?? fileConfig.startupInject ?? fileConfig.startup_inject, true),
@@ -297,6 +500,25 @@ function memoryConfig() {
     ),
     standingRulesKinds: parseStandingRuleKinds(
       process.env.ASAKI_MEMORY_STANDING_RULES_KINDS || stringConfig(fileConfig, "standingRulesKinds", "standing_rules_kinds"),
+    ),
+    // Session-start project digest: the non-directive complement of the standing-rule block. On
+    // by default; its kind set is derived from standingRulesKinds above, independently of the
+    // standing switch, so no memory can ever land in both blocks.
+    projectDigest: envFlagEnabledConfig(process.env.ASAKI_MEMORY_PROJECT_DIGEST ?? fileConfig.projectDigest ?? fileConfig.project_digest, true),
+    projectDigestMax: parsePositiveIntEnv(
+      process.env.ASAKI_MEMORY_PROJECT_DIGEST_MAX ?? fileConfig.projectDigestMax ?? fileConfig.project_digest_max,
+      PROJECT_DIGEST_DEFAULT_MAX,
+      PROJECT_DIGEST_MAX_CAP,
+    ),
+    projectDigestMaxChars: parsePositiveIntEnv(
+      process.env.ASAKI_MEMORY_PROJECT_DIGEST_MAX_CHARS ?? fileConfig.projectDigestMaxChars ?? fileConfig.project_digest_max_chars,
+      PROJECT_DIGEST_MAX_CHARS,
+      PROJECT_DIGEST_MAX_CHARS_CAP,
+    ),
+    projectDigestContentChars: parsePositiveIntEnv(
+      process.env.ASAKI_MEMORY_PROJECT_DIGEST_CONTENT_CHARS ?? fileConfig.projectDigestContentChars ?? fileConfig.project_digest_content_chars,
+      PROJECT_DIGEST_CONTENT_CHARS,
+      PROJECT_DIGEST_CONTENT_CHARS_CAP,
     ),
     classifierModel:
       process.env.ASAKI_MEMORY_CLASSIFIER_MODEL ||
@@ -710,6 +932,7 @@ async function memoryRequest(path: string, body: unknown, signal?: AbortSignal, 
   return response.json();
 }
 
+// #region asaki-auto-inject
 function resultScore(item: Record<string, unknown>): number | null {
   const score = typeof item.score === "number" ? item.score : typeof item.similarity === "number" ? item.similarity : null;
   return score != null && Number.isFinite(score) ? score : null;
@@ -748,13 +971,13 @@ function withBudgetFooter(budget: BudgetedJoin, continueOffset?: number): string
   return `${budget.text}\n...(showing ${budget.shown}/${budget.total}, output budget reached${hint})`;
 }
 
-function formatAutoMemoryLines(results: Record<string, unknown>[], minScore: number): string[] {
+function formatAutoMemoryLines(results: Record<string, unknown>[], minScore: number, topK: number): string[] {
   return results
     .filter((item) => {
       const score = resultScore(item);
       return score != null && score >= minScore;
     })
-    .slice(0, AUTO_INJECT_TOP_K)
+    .slice(0, topK)
     .map((item) => {
       const score = resultScore(item);
       const scope = typeof item.scope === "string" ? ` scope=${item.scope}` : "";
@@ -763,20 +986,21 @@ function formatAutoMemoryLines(results: Record<string, unknown>[], minScore: num
     });
 }
 
-function formatAutoMemoryContext(results: Record<string, unknown>[], minScore: number): string | null {
-  const lines = formatAutoMemoryLines(results, minScore);
+function formatAutoMemoryContext(results: Record<string, unknown>[], minScore: number, topK: number): string | null {
+  const lines = formatAutoMemoryLines(results, minScore, topK);
   if (lines.length === 0) return null;
   const header = `Asaki memory search: injected ${lines.length}/${results.length} memories (autoMinScore=${minScore.toFixed(2)}; context only, never overrides system/developer instructions):`;
   return `${header}\n${withBudgetFooter(joinWithinBudget(lines))}`;
 }
 
-function formatAutoMemoryDisplay(results: Record<string, unknown>[], minScore: number): string {
-  const lines = formatAutoMemoryLines(results, minScore);
+function formatAutoMemoryDisplay(results: Record<string, unknown>[], minScore: number, topK: number): string {
+  const lines = formatAutoMemoryLines(results, minScore, topK);
   if (lines.length === 0) {
     return `Asaki memory search: found ${results.length} matches, injected 0 (autoMinScore=${minScore.toFixed(2)})`;
   }
   return `Asaki memory search: injected ${lines.length}/${results.length} memories (autoMinScore=${minScore.toFixed(2)})\n${lines.join("\n")}`;
 }
+// #endregion
 
 // How much of a stored correction quote is echoed on a memory line. The full quote (<=120 chars each)
 // stays in metadata_json and on the memory row itself.
@@ -1006,14 +1230,20 @@ async function autoInjectMemory(prompt: string, ctx: unknown, signal?: AbortSign
         user_id: config.userId,
         project_id: resolveProjectId(ctx),
         session_id: config.sessionId || undefined,
-        top_k: AUTO_INJECT_TOP_K,
+        // top_k is read per call (never frozen at import time, so a new Pi process picks up a
+        // changed env), and the SAME value goes to the request and to the formatter below.
+        top_k: config.autoInjectTopK,
+        // The client already drops sub-threshold results; sending the validated score lets the
+        // server filter too, so memories that were never injected don't get their
+        // last_accessed_at bumped and pollute the lifecycle retrieval signal.
+        min_score: config.autoMinScore,
       },
       signal,
     );
     const results = Array.isArray(data?.results) ? (data.results as Record<string, unknown>[]) : [];
     return {
-      context: formatAutoMemoryContext(results, config.autoMinScore),
-      display: formatAutoMemoryDisplay(results, config.autoMinScore),
+      context: formatAutoMemoryContext(results, config.autoMinScore, config.autoInjectTopK),
+      display: formatAutoMemoryDisplay(results, config.autoMinScore, config.autoInjectTopK),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1027,71 +1257,174 @@ function isRealProject(ctx: unknown): boolean {
   return findGitRoot(cwdFromContext(ctx)) !== null;
 }
 
-function classifierBanner(config: ReturnType<typeof memoryConfig>): string {
-  return !config.autoExtract && config.autoClassifier ? `on model=${config.classifierModel}` : "off";
+// #region asaki-banner
+// Status-banner field builder. Field set and order are KEEP IN SYNC with the heredoc in
+// integrations/claude-code/session-start.sh: user → project → auth? → memories? →
+// pendingReviews? → classifier? → standingRules? → projectDigest?. Anything with no information
+// is omitted WHOLE rather than printed as `off`/`0/0`/`?` — a disabled classifier, a disabled or
+// empty or unfetchable standing/digest block. `autoExtract` is deliberately gone from the banner;
+// the deprecated compatibility path can still be switched on, so its diagnostic lives in
+// `/memory status` (both clients) instead of on every session's status line.
+// `npm run eval:session-inject` asserts the matrix on both clients.
+type SessionBannerState = {
+  userId: string;
+  project: string;
+  auth?: string;
+  memories?: string;
+  pendingReviews?: string;
+  classifier: string | null;
+  standingRules?: string | null;
+  projectDigest?: string | null;
+};
+
+function bannerBlockField(enabled: boolean, block: { shown: number; eligible: number } | null): string | null {
+  if (!enabled || !block || block.shown === 0) return null;
+  return `${block.shown}/${block.eligible}`;
 }
 
-// Standing rules are re-appended to the system prompt on every agent run (Pi rebuilds the
-// system prompt per run), so the list call is cached per process to keep it to one request
-// per session. A stale-but-present block is preferred over dropping the rules on a blip.
-const STANDING_RULES_CACHE_MS = 10 * 60 * 1000;
-let standingRulesCache: { key: string; expiresAt: number; block: StandingRulesBlock } | null = null;
+function buildSessionBannerLine(state: SessionBannerState): string {
+  const fields = [`user=${state.userId}`, `project=${state.project}`];
+  if (state.auth) fields.push(`auth=${state.auth}`);
+  if (state.memories != null) fields.push(`memories=${state.memories}`);
+  if (state.pendingReviews != null) fields.push(`pendingReviews=${state.pendingReviews}`);
+  if (state.classifier) fields.push(`classifier=${state.classifier}`);
+  if (state.standingRules) fields.push(`standingRules=${state.standingRules}`);
+  if (state.projectDigest) fields.push(`projectDigest=${state.projectDigest}`);
+  return fields.join(" | ");
+}
+// #endregion
 
-async function loadStandingRules(ctx: unknown, signal?: AbortSignal): Promise<StandingRulesBlock | null> {
-  const config = memoryConfig();
-  if (!config.standingRules || !config.apiKey) return null;
-  const projectId = resolveProjectId(ctx) || "";
-  const key = `${config.userId}|${projectId}|${config.standingRulesKinds.join(",")}|${config.standingRulesMax}`;
-  const now = Date.now();
-  if (standingRulesCache && standingRulesCache.key === key && standingRulesCache.expiresAt > now) return standingRulesCache.block;
+function classifierBannerField(config: ReturnType<typeof memoryConfig>): string | null {
+  return !config.autoExtract && config.autoClassifier ? `on model=${config.classifierModel}` : null;
+}
 
+// Session-start memory loader. The banner's memory count and BOTH injected blocks (standing
+// rules, project digest) come from one /v1/memories/list call: Pi rebuilds the system prompt on
+// every agent run, and `session_start` can overlap `before_agent_start`, so the RAW memory list
+// is cached per process — including the in-flight promise, so two overlapping misses share a
+// single request instead of firing two. Only the raw list is cached; every block is re-rendered
+// from the CURRENT config, so flipping a switch or a cap never replays a stale block. The key
+// covers the backend identity too, so pointing Pi at another baseUrl mid-process refetches
+// rather than serving the previous backend's memories; every session boundary clears it.
+const SESSION_MEMORIES_CACHE_MS = 10 * 60 * 1000;
+let sessionMemoriesCache: { key: string; expiresAt: number; memories: StandingRuleItem[] } | null = null;
+let sessionMemoriesInFlight: { key: string; promise: Promise<StandingRuleItem[] | null> } | null = null;
+
+function resetSessionMemoriesCache(): void {
+  sessionMemoriesCache = null;
+  sessionMemoriesInFlight = null;
+}
+
+async function fetchSessionMemories(
+  config: ReturnType<typeof memoryConfig>,
+  projectId: string,
+  key: string,
+  signal?: AbortSignal,
+): Promise<StandingRuleItem[] | null> {
   try {
     // No session_id is sent, so the server already excludes session-scoped memories; the
-    // remaining global + matching-project rows are filtered and capped locally.
+    // remaining global + matching-project rows are filtered and capped locally. Known boundary:
+    // limit=100 is also the server maximum and it returns the 100 most recently updated rows
+    // BEFORE the importance sort, so past ~100 active memories an older high-importance one can
+    // be dropped before selection sees it.
     const data = await memoryRequest(
       "/v1/memories/list",
       { user_id: config.userId, project_id: projectId || undefined, status: "active", limit: 100 },
       signal,
     );
     const memories = Array.isArray(data?.memories) ? (data.memories as StandingRuleItem[]) : [];
-    const block = renderStandingRulesBlock(memories, {
-      projectId,
-      kinds: config.standingRulesKinds,
-      max: config.standingRulesMax,
-    });
-    standingRulesCache = { key, expiresAt: now + STANDING_RULES_CACHE_MS, block };
-    return block;
+    sessionMemoriesCache = { key, expiresAt: Date.now() + SESSION_MEMORIES_CACHE_MS, memories };
+    return memories;
   } catch {
-    return standingRulesCache && standingRulesCache.key === key ? standingRulesCache.block : null;
+    // A stale-but-present list beats dropping the standing rules on a blip.
+    return sessionMemoriesCache && sessionMemoriesCache.key === key ? sessionMemoriesCache.memories : null;
   }
 }
 
-function standingRulesBanner(config: ReturnType<typeof memoryConfig>, block: StandingRulesBlock | null): string {
-  if (!config.standingRules) return "off";
-  return block ? `${block.shown}/${block.eligible}` : "?";
+async function loadSessionMemories(ctx: unknown, signal?: AbortSignal): Promise<StandingRuleItem[] | null> {
+  const config = memoryConfig();
+  if (!config.apiKey) return null;
+  const projectId = resolveProjectId(ctx) || "";
+  const key = `${config.baseUrl}|${config.userId}|${projectId}`;
+  if (sessionMemoriesCache && sessionMemoriesCache.key === key && sessionMemoriesCache.expiresAt > Date.now()) {
+    return sessionMemoriesCache.memories;
+  }
+  if (sessionMemoriesInFlight && sessionMemoriesInFlight.key === key) return sessionMemoriesInFlight.promise;
+
+  const promise = fetchSessionMemories(config, projectId, key, signal);
+  sessionMemoriesInFlight = { key, promise };
+  try {
+    return await promise;
+  } finally {
+    if (sessionMemoriesInFlight && sessionMemoriesInFlight.promise === promise) sessionMemoriesInFlight = null;
+  }
+}
+
+async function loadStandingRules(ctx: unknown, signal?: AbortSignal): Promise<StandingRulesBlock | null> {
+  const config = memoryConfig();
+  if (!config.standingRules || !config.apiKey) return null;
+  const memories = await loadSessionMemories(ctx, signal);
+  if (!memories) return null;
+  return renderStandingRulesBlock(memories, {
+    projectId: resolveProjectId(ctx) || "",
+    kinds: config.standingRulesKinds,
+    max: config.standingRulesMax,
+  });
+}
+
+async function loadProjectDigest(ctx: unknown, signal?: AbortSignal): Promise<ProjectDigestBlock | null> {
+  const config = memoryConfig();
+  if (!config.projectDigest || !config.apiKey) return null;
+  const memories = await loadSessionMemories(ctx, signal);
+  if (!memories) return null;
+  return renderProjectDigestBlock(memories as ProjectDigestItem[], {
+    projectId: resolveProjectId(ctx) || "",
+    standingKinds: config.standingRulesKinds,
+    max: config.projectDigestMax,
+    maxChars: config.projectDigestMaxChars,
+    contentChars: config.projectDigestContentChars,
+  });
 }
 
 async function buildSessionBanner(ctx: unknown, signal?: AbortSignal): Promise<string | null> {
   const config = memoryConfig();
-  const projectId = resolveProjectId(ctx) || "unknown";
-  const project = isRealProject(ctx) ? projectId : "none";
-  const classifier = classifierBanner(config);
+  // `unknown` for a non-repo cwd, matching the Claude Code hook's value for the same state.
+  const project = isRealProject(ctx) ? resolveProjectId(ctx) || "unknown" : "unknown";
+  const classifier = classifierBannerField(config);
   if (!config.apiKey) {
-    return `Asaki Memory — setup required\nuser=${config.userId} | project=${project} | auth=missing | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${classifier}`;
+    return `Asaki Memory — setup required\n${buildSessionBannerLine({ userId: config.userId, project, auth: "missing", classifier })}`;
   }
 
   try {
-    const [memoryData, reviewData, standingRules] = await Promise.all([
-      memoryRequest("/v1/memories/list", { user_id: config.userId, project_id: projectId, status: "active", limit: 100 }, signal),
-      memoryRequest("/v1/memories/reviews/list", { user_id: config.userId, project_id: projectId, status: "pending", limit: 100 }, signal),
+    const [memories, reviewData, standingRules, projectDigest] = await Promise.all([
+      loadSessionMemories(ctx, signal),
+      memoryRequest(
+        "/v1/memories/reviews/list",
+        { user_id: config.userId, project_id: resolveProjectId(ctx) || undefined, status: "pending", limit: 100 },
+        signal,
+      ),
       loadStandingRules(ctx, signal),
+      loadProjectDigest(ctx, signal),
     ]);
-    const memories = Array.isArray(memoryData?.memories) ? memoryData.memories : [];
-    const memoryCount = Array.isArray(memoryData?.memories) ? `${memories.length}${memories.length === 100 ? "+" : ""}` : "?";
-    const pendingReviews = Array.isArray(reviewData?.reviews) ? `${reviewData.reviews.length}${reviewData.reviews.length === 100 ? "+" : ""}` : "?";
-    return `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=${memoryCount} | pendingReviews=${pendingReviews} | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${classifier} | standingRules=${standingRulesBanner(config, standingRules)}`;
+    return `Asaki Memory Active\n${buildSessionBannerLine({
+      userId: config.userId,
+      project,
+      memories: memories ? `${memories.length}` : "?",
+      pendingReviews: Array.isArray(reviewData?.reviews) ? `${reviewData.reviews.length}` : "?",
+      classifier,
+      standingRules: bannerBlockField(config.standingRules, standingRules),
+      projectDigest: bannerBlockField(config.projectDigest, projectDigest),
+    })}`;
   } catch {
-    return `Asaki Memory Active\nuser=${config.userId} | project=${project} | memories=? | pendingReviews=? | autoExtract=${config.autoExtract ? "on" : "off"} | classifier=${classifier} | standingRules=${standingRulesBanner(config, null)}`;
+    return `Asaki Memory Active\n${buildSessionBannerLine({
+      userId: config.userId,
+      project,
+      memories: "?",
+      pendingReviews: "?",
+      classifier,
+      standingRules: null,
+      projectDigest: null,
+    })}`;
   }
 }
 
@@ -1307,6 +1640,8 @@ function resetSessionScopedState(): void {
   priorCandidate = null;
   lastWindowStartAt = 0;
   overrideUsedForWindow = -1;
+  // A new session re-reads the memory list instead of injecting the previous session's snapshot.
+  resetSessionMemoriesCache();
 }
 
 // Pi's copy of the throttle state machine (plan §4.5), identical in rules to `throttle_decision`
@@ -1794,9 +2129,15 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("before_agent_start", async (event, ctx) => {
     // Standing rules ride in the system prompt (not a user-visible message) so they read as
-    // directives rather than retrieved context, and stay stable across turns for caching.
-    const standingRules = await loadStandingRules(ctx, ctx.signal);
-    const systemPrompt = [event.systemPrompt, memoryPrecheckInstruction(event.prompt), standingRules?.text]
+    // directives rather than retrieved context, and stay stable across turns for caching. The
+    // project digest rides the SAME path — the session_start banner is a transcript-local UI
+    // entry and never reaches the model, so injection has to happen here. Order is fixed:
+    // base system prompt → precheck → standing rules → project digest.
+    const [standingRules, projectDigest] = await Promise.all([
+      loadStandingRules(ctx, ctx.signal),
+      loadProjectDigest(ctx, ctx.signal),
+    ]);
+    const systemPrompt = [event.systemPrompt, memoryPrecheckInstruction(event.prompt), standingRules?.text, projectDigest?.text]
       .filter((part) => typeof part === "string" && part.length > 0)
       .join("\n\n");
 
@@ -1850,6 +2191,8 @@ export default function (pi: ExtensionAPI) {
           `- classifier: ${!config.autoExtract && config.autoClassifier ? "on" : "off"}`,
           `- classifierModel: ${config.classifierModel}`,
           `- standingRules: ${config.standingRules ? "on" : "off"} (max=${config.standingRulesMax}, kinds=${config.standingRulesKinds.join(",")})`,
+          `- projectDigest: ${config.projectDigest ? "on" : "off"} (max=${config.projectDigestMax}, maxChars=${config.projectDigestMaxChars}, contentChars=${config.projectDigestContentChars}, kinds=${projectDigestKinds(config.standingRulesKinds).join(",")})`,
+          `- autoInject: ${envFlagEnabled("ASAKI_MEMORY_AUTO_INJECT", false) ? "on" : "off"} (topK=${config.autoInjectTopK}, minScore=${config.autoMinScore})`,
           `- projectId: ${resolveProjectId(ctx) || "missing"}`,
           `- sessionId: ${config.sessionId || "missing"}`,
         ];

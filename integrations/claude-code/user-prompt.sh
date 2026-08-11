@@ -13,11 +13,94 @@
 #    wrapped with its own watchdog below so a hang there can't also swallow
 #    the always-on PRECHECK instruction past the hook's own timeout.
 #
-# KEEP IN SYNC with AUTO_INJECT_TOP_K, DEFAULT_AUTO_MIN_SCORE, MEMORY_NEEDED_RE,
+# KEEP IN SYNC with AUTO_INJECT_TOP_K_DEFAULT/_CAP, DEFAULT_AUTO_MIN_SCORE, MEMORY_NEEDED_RE,
 # and SENSITIVE_RE_LIST in integrations/pi/asaki-memory.ts, and
 # MAX_TOOL_OUTPUT_CHARS in integrations/pi/asaki-memory.ts /
 # integrations/mcp/asaki-memory.ts.
 set -uo pipefail
+
+# ---------------------------------------------------------------------------------------------
+# Library region: the numeric env parsers, defined before this script reads stdin so
+# scripts/eval-inject-env.sh can source it and exercise them without running a hook. Everything
+# below the ASAKI_MEMORY_USER_PROMPT_LIB guard is hook behaviour.
+# ---------------------------------------------------------------------------------------------
+
+# Positive-integer env parser, in DECIMAL STRING space so an absurdly long digit run clamps to
+# the cap instead of blowing up bash's integer comparison (`[ 10^42 -gt 20 ]` exits 2). Contract:
+# trim → digits only or fall back → strip leading zeros → all-zero falls back (0 is not positive)
+# → compare with the cap by digit count, then lexicographically at equal length. Only a value
+# already known to be <= cap ever reaches jq's --argjson.
+# KEEP IN SYNC with parsePositiveIntEnv() in integrations/pi/asaki-memory.ts and the copy in
+# integrations/claude-code/session-start.sh; `npm run eval:inject-env` runs one table over all.
+asaki_parse_positive_int() {
+  local raw="${1-}" def="$2" cap="$3" value
+  local LC_ALL=C
+  value="${raw#"${raw%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  case "$value" in
+    '' | *[!0-9]*)
+      printf '%s' "$def"
+      return 0
+      ;;
+  esac
+  value="${value#"${value%%[!0]*}"}"
+  if [ -z "$value" ]; then
+    printf '%s' "$def"
+    return 0
+  fi
+  if [ "${#value}" -gt "${#cap}" ] || { [ "${#value}" -eq "${#cap}" ] && [[ "$value" > "$cap" ]]; }; then
+    printf '%s' "$cap"
+    return 0
+  fi
+  printf '%s' "$value"
+}
+
+# Unit-score env parser: accepts only a finite decimal in [0, 1] (`0`, `1`, `0.67`, `.67`) and
+# normalizes it to valid JSON (`.67` → `0.67`), so a malformed or out-of-range value can neither
+# break `jq --argjson` nor reach the server, which 400s on min_score outside [0, 1] and would
+# take the whole auto-inject down with it.
+# KEEP IN SYNC with parseUnitScoreEnv() in integrations/pi/asaki-memory.ts.
+asaki_parse_unit_score() {
+  local raw="${1-}" def="$2" value int frac
+  value="${raw#"${raw%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  case "$value" in
+    '' | '.' | *[!0-9.]* | *.*.*)
+      printf '%s' "$def"
+      return 0
+      ;;
+  esac
+  case "$value" in
+    *.*)
+      int="${value%%.*}"
+      frac="${value#*.}"
+      ;;
+    *)
+      int="$value"
+      frac=""
+      ;;
+  esac
+  int="${int#"${int%%[!0]*}"}"
+  case "$int" in
+    '') int="0" ;;
+    0 | 1) ;;
+    *)
+      printf '%s' "$def"
+      return 0
+      ;;
+  esac
+  if [ "$int" = "1" ] && [ -n "${frac//0/}" ]; then
+    printf '%s' "$def"
+    return 0
+  fi
+  case "$value" in
+    *.*) printf '%s.%s' "$int" "${frac:-0}" ;;
+    *) printf '%s' "$int" ;;
+  esac
+}
+
+# Sourced as a library (eval harness): stop here, before any hook side effects.
+[ -n "${ASAKI_MEMORY_USER_PROMPT_LIB:-}" ] && return 0 2>/dev/null || true
 
 INPUT=$(cat)
 PROMPT=$(echo "$INPUT" | jq -r '.prompt // ""' 2>/dev/null || echo "")
@@ -26,7 +109,8 @@ SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // ""' 2>/dev/null || echo "")
 
 PRECHECK="Asaki memory precheck: analyze the user's intent for this turn and decide for yourself whether durable memory is relevant. Skip asaki_memory_search for simple, standalone, self-contained tasks. Call it when the answer or next action depends on remembered preferences, prior decisions, conventions, task learnings, or explicitly requested past context — choosing your own query wording, scope, and top_k. If the user asks you to remember/store something, or you just completed meaningful work worth keeping, decide for yourself whether to call asaki_memory_add."
 
-AUTO_INJECT_TOP_K=6
+# top_k is env-tunable, clamped to a conservative client-side cap (the server accepts up to 50).
+AUTO_INJECT_TOP_K=$(asaki_parse_positive_int "${ASAKI_MEMORY_AUTO_INJECT_TOP_K:-}" 6 20)
 MAX_INJECT_CHARS=6000
 DEFAULT_AUTO_MIN_SCORE=0.67
 MEMORY_NEEDED_RE='记忆|记得|回忆|想起|以前|之前|上次|过往|历史|偏好|习惯|约定|惯例|决策|背景|上下文|继续|延续|remember|recall|memory|previous|before|last time|preference|convention|decision|context|continue'
@@ -62,10 +146,7 @@ if [ "${ASAKI_MEMORY_AUTO_INJECT:-0}" = "1" ] \
       ASAKI_BASE="${ASAKI_MEMORY_BASE_URL:-${ASAKI_MEMORY_API_URL:-https://asaki-memory-manager.YOUR_SUBDOMAIN.workers.dev}}"
       ASAKI_USER="${ASAKI_MEMORY_USER_ID:-asaki}"
       ASAKI_SESSION="${ASAKI_MEMORY_SESSION_ID:-$SESSION_ID}"
-      MIN_SCORE="${ASAKI_MEMORY_AUTO_MIN_SCORE:-$DEFAULT_AUTO_MIN_SCORE}"
-      case "$MIN_SCORE" in
-        ''|*[!0-9.]*) MIN_SCORE="$DEFAULT_AUTO_MIN_SCORE" ;;
-      esac
+      MIN_SCORE=$(asaki_parse_unit_score "${ASAKI_MEMORY_AUTO_MIN_SCORE:-}" "$DEFAULT_AUTO_MIN_SCORE")
 
       if [ -n "${ASAKI_MEMORY_PROJECT_ID:-}" ]; then
         ASAKI_PROJECT="$ASAKI_MEMORY_PROJECT_ID"
@@ -77,8 +158,12 @@ if [ "${ASAKI_MEMORY_AUTO_INJECT:-0}" = "1" ] \
         ASAKI_PROJECT=""
       fi
 
-      SEARCH_BODY=$(jq -cn --arg q "$PROMPT" --arg u "$ASAKI_USER" --arg p "$ASAKI_PROJECT" --arg s "$ASAKI_SESSION" --argjson k "$AUTO_INJECT_TOP_K" \
-        '{query: $q, user_id: $u, top_k: $k} + (if $p == "" then {} else {project_id: $p} end) + (if $s == "" then {} else {session_id: $s} end)')
+      # min_score goes to the server too, not just the local filter below: results the hook would
+      # have dropped anyway must not get their last_accessed_at bumped, which lifecycle reads as a
+      # retrieval signal for standing rules.
+      SEARCH_BODY=$(jq -cn --arg q "$PROMPT" --arg u "$ASAKI_USER" --arg p "$ASAKI_PROJECT" --arg s "$ASAKI_SESSION" \
+        --argjson k "$AUTO_INJECT_TOP_K" --argjson minScore "$MIN_SCORE" \
+        '{query: $q, user_id: $u, top_k: $k, min_score: $minScore} + (if $p == "" then {} else {project_id: $p} end) + (if $s == "" then {} else {session_id: $s} end)')
 
       SEARCH_RESP=$(curl -sf --max-time 4 -X POST "${ASAKI_BASE}/v1/memories/search" \
         -H "Authorization: Bearer ${ASAKI_MEMORY_API_KEY}" \
