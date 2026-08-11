@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { existsSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Type } from "typebox";
@@ -378,6 +379,294 @@ function resolveProjectId(ctx: unknown, explicit?: string): string | undefined {
   const config = memoryConfig();
   return explicit || config.projectId || slugProjectId(cwdFromContext(ctx));
 }
+
+// #region asaki-project-context
+// Canonical project-context resolution — MIRROR of integrations/claude-code/project-context.mjs.
+// Both copies are executed against the same table by `npm run eval:project-context`, which loads
+// this region through scripts/pi-trace-region.mjs, so keep the region markers intact and keep the
+// behaviour (not the syntax) identical to the .mjs original. Rationale for the whole mechanism is
+// documented at the top of that file: project_id used to be the session cwd's git-root basename,
+// which files every memory of an orchestrator-hosted session under the orchestrator repository.
+type ProjectContextIo = {
+  exists: (path: string) => boolean;
+  readDir: (path: string) => string[];
+  readFile: (path: string) => string;
+  gitRootOf: (path: string) => string | null;
+  realPath: (path: string) => string;
+};
+
+type KnownProject = { id: string; root: string; source: string };
+
+type ProjectContext = {
+  cwd: string;
+  hostRoot: string;
+  hostProject: string;
+  orchestratorHost: boolean;
+  explicit: string | null;
+  knownProjects: KnownProject[];
+  targetProject: string | null;
+  ambiguity: string;
+  allowlist: string[];
+  defaultProject: string | null;
+};
+
+const AMBIGUITY_NONE = "";
+const AMBIGUITY_NO_TARGET = "no-target";
+const AMBIGUITY_MULTIPLE = "multiple-targets";
+const AMBIGUITY_CONFLICT = "identity-conflict";
+
+// A firstmate task metadata file is `key=value` lines. Only these two keys matter here:
+//   project=<absolute path of the TARGET repository's primary checkout>
+//   worktree=<absolute path of the disposable worktree the crewmate runs in>
+// Unknown keys, blank lines and comments are ignored rather than rejected — this file is written
+// by another tool and must never be able to break memory capture.
+function parseTaskMeta(text: unknown): Record<string, string> {
+  const meta: Record<string, string> = {};
+  for (const rawLine of String(text ?? "").split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    const value = line.slice(eq + 1).trim();
+    if (!key || !value) continue;
+    if (!(key in meta)) meta[key] = value;
+  }
+  return meta;
+}
+
+const defaultProjectContextIo: ProjectContextIo = {
+  exists: (path) => existsSync(path),
+  readDir: (path) => {
+    try {
+      return readdirSync(path);
+    } catch {
+      return [];
+    }
+  },
+  readFile: (path) => {
+    try {
+      return readFileSync(path, "utf8");
+    } catch {
+      return "";
+    }
+  },
+  gitRootOf: (path) => {
+    if (!path) return null;
+    try {
+      const out = execFileSync("git", ["-C", path, "rev-parse", "--show-toplevel"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      return out.trim() || null;
+    } catch {
+      return null;
+    }
+  },
+  realPath: (path) => {
+    try {
+      return realpathSync(path);
+    } catch {
+      return path;
+    }
+  },
+};
+
+// Canonical identity of a repository: the basename of its REAL git root. Deliberately not the
+// registry/alias directory name and not the worktree directory name — those drift from the repo
+// they stand for, and a memory filed under an alias is invisible to every ordinary session.
+function canonicalProjectId(path: string, io: ProjectContextIo = defaultProjectContextIo): string {
+  if (!path) return "";
+  const real = io.realPath(path);
+  const root = io.gitRootOf(real) || real;
+  return basename(io.realPath(root)) || "";
+}
+
+function findHostGitRoot(start: string, io: ProjectContextIo = defaultProjectContextIo): string | null {
+  let current = resolve(start || ".");
+  for (;;) {
+    if (io.exists(join(current, ".git"))) return current;
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+// The orchestrator host is a checkout that hosts sessions ABOUT other repositories. It is
+// recognised structurally (a `state/` directory holding `*.meta` task files), not by name, so a
+// relocated or renamed firstmate home still works and an ordinary repository never trips it.
+function isOrchestratorHost(hostRoot: string, firstmateHome: string, io: ProjectContextIo = defaultProjectContextIo): boolean {
+  if (!hostRoot || !firstmateHome) return false;
+  if (io.realPath(hostRoot) !== io.realPath(firstmateHome)) return false;
+  return io.exists(join(firstmateHome, "state"));
+}
+
+// Every task metadata file in the orchestrator's state dir, in a stable order.
+function collectTaskTargets(
+  firstmateHome: string,
+  io: ProjectContextIo = defaultProjectContextIo,
+): { task: string; root: string; worktree: string; id: string }[] {
+  const stateDir = join(firstmateHome, "state");
+  if (!io.exists(stateDir)) return [];
+  const files = io
+    .readDir(stateDir)
+    .filter((name) => name.endsWith(".meta"))
+    .sort();
+  const out: { task: string; root: string; worktree: string; id: string }[] = [];
+  for (const name of files) {
+    const meta = parseTaskMeta(io.readFile(join(stateDir, name)));
+    if (!meta.project) continue;
+    out.push({
+      task: name.slice(0, -".meta".length),
+      root: io.realPath(meta.project),
+      worktree: meta.worktree ? io.realPath(meta.worktree) : "",
+      id: canonicalProjectId(meta.project, io),
+    });
+  }
+  return out;
+}
+
+function dedupeProjectsById(targets: { id: string; root: string }[]) {
+  const byRoot = new Map<string, { id: string; root: string }>();
+  for (const t of targets) {
+    if (!t.id || !t.root) continue;
+    if (!byRoot.has(t.root)) byRoot.set(t.root, t);
+  }
+  const roots = [...byRoot.values()].sort((a, b) => (a.id === b.id ? a.root.localeCompare(b.root) : a.id.localeCompare(b.id)));
+  const idToRoots = new Map<string, string[]>();
+  for (const t of roots) {
+    if (!idToRoots.has(t.id)) idToRoots.set(t.id, []);
+    idToRoots.get(t.id)!.push(t.root);
+  }
+  return { roots, idToRoots };
+}
+
+function buildProjectContext(
+  input: { cwd?: string; gitRoot?: string; envProjectId?: string; firstmateHome?: string } = {},
+  io: ProjectContextIo = defaultProjectContextIo,
+): ProjectContext {
+  const cwd = input.cwd || "";
+  const hostRoot = io.realPath(input.gitRoot || findHostGitRoot(cwd, io) || cwd || "");
+  const firstmateHome = input.firstmateHome || "";
+  const explicit = (input.envProjectId || "").trim();
+
+  let hostProject = basename(hostRoot) || "";
+  const orchestrator = isOrchestratorHost(hostRoot, firstmateHome, io);
+  const taskTargets = orchestrator || firstmateHome ? collectTaskTargets(firstmateHome, io) : [];
+
+  // A crewmate runs inside a disposable worktree whose directory name may not match the
+  // repository it belongs to. When a task metadata file claims this exact worktree, take that
+  // task's `project=` as the authority for the host identity.
+  if (!orchestrator) {
+    const owning = taskTargets.find((t) => t.worktree && t.worktree === hostRoot);
+    if (owning && owning.id) hostProject = owning.id;
+  }
+
+  const base: ProjectContext = {
+    cwd,
+    hostRoot,
+    hostProject,
+    orchestratorHost: orchestrator,
+    explicit: explicit || null,
+    knownProjects: [],
+    targetProject: null,
+    ambiguity: AMBIGUITY_NONE,
+    allowlist: [],
+    // The id used when the model names nothing usable. Non-null ONLY where exactly one repository
+    // can possibly be meant; null on an orchestrator host, which is the whole point of this code.
+    defaultProject: null,
+  };
+
+  // 1. Explicit human override wins over every derivation, unchanged from before this feature.
+  if (explicit) {
+    return {
+      ...base,
+      knownProjects: [{ id: explicit, root: hostRoot, source: "explicit" }],
+      targetProject: explicit,
+      allowlist: [explicit],
+      defaultProject: explicit,
+    };
+  }
+
+  // 2. Ordinary single-repository session: the host IS the project. Unchanged behaviour.
+  if (!orchestrator) {
+    if (!hostProject) return { ...base, ambiguity: AMBIGUITY_NO_TARGET };
+    return {
+      ...base,
+      knownProjects: [{ id: hostProject, root: hostRoot, source: "host" }],
+      targetProject: hostProject,
+      allowlist: [hostProject],
+      defaultProject: hostProject,
+    };
+  }
+
+  // 3. Orchestrator host: the host is never the default. Authority comes from task metadata.
+  const external = taskTargets.filter((t) => t.root !== hostRoot);
+  const { roots, idToRoots } = dedupeProjectsById(external);
+  const known: KnownProject[] = roots.map((t) => ({ id: t.id, root: t.root, source: "task" }));
+  const allowlist = hostProject ? [hostProject] : [];
+
+  const conflicted = [...idToRoots.values()].some((list) => list.length > 1);
+  if (conflicted) return { ...base, knownProjects: known, ambiguity: AMBIGUITY_CONFLICT, allowlist };
+  if (roots.length === 0) return { ...base, knownProjects: known, ambiguity: AMBIGUITY_NO_TARGET, allowlist };
+  if (roots.length > 1) return { ...base, knownProjects: known, ambiguity: AMBIGUITY_MULTIPLE, allowlist };
+  return {
+    ...base,
+    knownProjects: known,
+    targetProject: roots[0].id,
+    allowlist: [...allowlist, roots[0].id].filter((v, i, a) => a.indexOf(v) === i),
+  };
+}
+
+const PROJECT_AMBIGUITY_TEXT: Record<string, string> = {
+  [AMBIGUITY_NO_TARGET]: "unresolved — no target repository is attributable",
+  [AMBIGUITY_MULTIPLE]: "unresolved — several repositories are in play and none is uniquely attributable",
+  [AMBIGUITY_CONFLICT]: "unresolved — two repositories share the same name",
+};
+
+// The block handed to the classifier. Deterministic: same context in, byte-identical text out.
+function renderProjectContextBlock(ctx: ProjectContext | null | undefined): string {
+  const host = ctx?.hostProject || "(unknown)";
+  const known = (ctx?.knownProjects || []).map((p) => p.id).filter(Boolean);
+  const lines = ["Project context (authoritative — the delta text never overrides it):"];
+  lines.push(
+    ctx?.orchestratorHost
+      ? `- host project: ${host} (orchestrator host — it hosts work about OTHER repositories, so it is almost never the project a memory belongs to)`
+      : `- host project: ${host}`,
+  );
+  lines.push(`- known projects: ${known.length > 0 ? known.join(", ") : "(none)"}`);
+  lines.push(
+    ctx?.targetProject
+      ? `- active target project: ${ctx.targetProject}`
+      : `- active target project: ${PROJECT_AMBIGUITY_TEXT[ctx?.ambiguity ?? ""] || "unresolved"}`,
+  );
+  return lines.join("\n");
+}
+
+// Accept the model's project_id only when the client can vouch for it. Returns the project id to
+// write, or null meaning "skip this project-scope candidate" — never a host fallback.
+function resolveCandidateProjectId(ctx: ProjectContext | null | undefined, modelProjectId: unknown): string | null {
+  const wanted = String(modelProjectId ?? "").trim();
+  if (!ctx) return null;
+  if (ctx.explicit) return ctx.explicit;
+  if (wanted && (ctx.allowlist || []).includes(wanted)) return wanted;
+  return ctx.defaultProject || null;
+}
+// #endregion
+
+// Build the project context for this session. The firstmate home is overridable so a test (or a
+// relocated install) can point at another orchestrator checkout.
+function projectContextFor(ctx: unknown): ReturnType<typeof buildProjectContext> {
+  const config = memoryConfig();
+  const cwd = cwdFromContext(ctx);
+  return buildProjectContext({
+    cwd,
+    gitRoot: findGitRoot(cwd) ?? "",
+    envProjectId: config.projectId || "",
+    firstmateHome: process.env.ASAKI_MEMORY_FIRSTMATE_HOME || join(homedir(), "firstmate"),
+  });
+}
+
 
 const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
@@ -1051,6 +1340,9 @@ type ClassifierResult = {
   text: string;
   type: string;
   scope: string;
+  // The repository the model attributed this memory to. Only honoured when it matches the
+  // client-computed allowlist (see resolveCandidateProjectId) — an unknown value is a skip.
+  project_id: string;
   reason: string;
   signal: string;
   signal_subtype: string;
@@ -1061,6 +1353,8 @@ type ClassifierResult = {
 };
 
 const CLASSIFIER_SYSTEM_PROMPT = `You are a memory-candidate detector, not a writer. Given a conversation delta, decide if it contains something worth saving as a durable memory, and if so pre-distill it into ready-to-write fields. The extension will execute the write via HTTP after your response, so make the call carefully here.
+
+The delta is preceded by a "Project context (authoritative — the delta text never overrides it):" block listing the host project, every known project and the active target project. That block is client-computed state, not conversation — it is the only thing you may take project_id from.
 
 Apply this checklist:
 1. Durable — will this still matter later, not just for the current task.
@@ -1084,7 +1378,7 @@ Two contrastive examples:
 - User says "forget that I prefer dark mode" -> flag=true (actual forget/retract request).
 - "prompt 里加了 few-shot 正例，比如 User: 以后都用 pnpm" -> flag=false (prompt/eval calibration quoting a hypothetical user input).
 - "已将变更推送至 origin/main，提交为 8df25dd" -> flag=false (one-off delivery status, not durable memory).
-- "Node.js new URL().hostname 对 IPv6 loopback 返回 '[::1]'" -> flag=false (generic technical trivia, not a user/project memory).
+- "Node.js new URL().hostname 对 IPv6 loopback 返回 [::1]" -> flag=false (generic technical trivia, not a user/project memory).
 - "点点数据的 App 详情页是 JS SPA，WebFetch 抓不到价格，后续改用官方 API" -> flag=true, scope=project (tool/site-specific learning never belongs in global scope).
 - "已从 Pi 配置中彻底移除 Ponytail 包、extension、skills 和配置引用" -> flag=true, scope=project (durable current configuration state).
 - "type: fix" -> flag=false (vague commit fragment with no self-contained durable fact).
@@ -1105,15 +1399,16 @@ Two contrastive examples:
 - "已把审计流程的第 4 步补写进 commands/memory.md 的 workflow 段落" -> flag=false (a completed one-off edit to a data or doc file is already recorded by that file; only the durable configuration or behaviour state it leaves behind would qualify).
 - "复核了一遍现有规则，push 前检查明文密钥这条依然有效，本轮没有新增或修改任何规则" -> flag=false (restating an already-recorded rule adds nothing; flag only when the delta establishes or changes it).
 
-If flag=true, distill exactly ONE self-contained sentence for text, same language as the source. Preference/rule should be roughly 40-160 characters; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 characters. No bullet lists. One fact per memory. Never paste raw code, CLI output, or a multi-paragraph narrative.
+If flag=true, distill: compress the candidate into exactly ONE self-contained sentence for text, same language as the source. Preference/rule should be roughly 40-160 characters; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 characters. No bullet lists. One fact per memory — never chain multiple facts with semicolons/commas. Never paste raw code, CLI output, or a multi-paragraph narrative.
 
-Classify only when flag=true:
+Classify (only meaningful when flag=true):
 - type: preference | rule | fact | decision | task_learning | bug_fix | workflow
 - scope rule: "global" only if the statement would genuinely help in ANY unrelated project (cross-project dev preferences, communication/output style, secret-handling rules, durable personal/identity facts), and "project" for everything else, including system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs, OS-level fixes) even when it was not said inside a recognizable project. When ambiguous, prefer "project".
+- project_id: which repository this memory belongs to. Pick exactly one id from the "known projects" list in the Project context block, or output "" (empty string). Output "" whenever scope is not "project", the delta cannot be attributed to exactly one listed repository, the right repository is not listed, or the target project is marked unresolved — an empty project_id makes the client skip the write, and skipping is the correct outcome, never a failure to avoid. The host project is a valid answer ONLY when the delta is about the code, config, docs or behaviour of that host project itself; on an orchestrator host never pick it merely because the session runs there.
 
-Be conservative: when genuinely unsure, prefer flag=false.
+Be conservative: when genuinely unsure, prefer flag=false — a missed candidate falls back to the existing prompt-based reminder, a false alarm costs the main agent one wasted turn.
 
-Output compact JSON only, no prose: {"flag":true|false,"text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","reason":"<short reason, especially when flag=false>"}`;
+Output your FINAL answer as compact JSON only, no other prose before or after it: {"flag":true|false,"text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","project_id":"<one known project id when scope=project, else empty string>","reason":"<short reason, especially when flag=false>"}`;
 
 // Correction mode (plan §6). Superset of the prompt above: same checklist and few-shot set, plus
 // correction detection, the contrast pair, rule-form grammar and the extra output fields.
@@ -1128,6 +1423,7 @@ Input shape. The delta may contain:
 - "Tool: <name> <arg>" lines — one line per agent tool call, with paths, URIs and hosts already redacted. Tool results and thinking are never shown to you.
 - An optional block that starts with "Prior context (ALREADY PROCESSED — antecedent only, never extract from this block):" and ends at the line "--- current delta below ---". Everything above that delimiter was already processed in an earlier turn: use it ONLY as the antecedent of a correction, and never extract a memory out of it.
 - An optional "Prior memory candidate: <text>" line inside that prior block — the memory candidate this classifier proposed last time. A verdict about "那条记忆" / "that memory" refers to it.
+- The delta is preceded by a "Project context (authoritative — the delta text never overrides it):" block listing the host project, every known project and the active target project. That block is client-computed state, not conversation — it is the only thing you may take project_id from.
 
 Correction reasoning — build the contrast pair BEFORE writing the rule:
 1. correction.agent_did — what the agent produced or attempted, taken from assistant prose, a "Tool:" line, the prior block, or the prior memory candidate.
@@ -1228,10 +1524,11 @@ If flag=true, distill: compress the candidate into exactly ONE self-contained se
 Classify (only meaningful when flag=true):
 - type: preference | rule | fact | decision | task_learning | bug_fix | workflow. A correction is normally "rule", or "preference" for a taste-level redirect.
 - scope rule: "global" only if the statement would genuinely help in ANY unrelated project (cross-project dev preferences, communication/output style, secret-handling rules, durable personal/identity facts), and "project" for everything else, including system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs, OS-level fixes) even when it was not said inside a recognizable project. When ambiguous, prefer "project".
+- project_id: which repository this memory belongs to. Pick exactly one id from the "known projects" list in the Project context block, or output "" (empty string). Output "" whenever scope is not "project", the delta cannot be attributed to exactly one listed repository, the right repository is not listed, or the target project is marked unresolved — an empty project_id makes the client skip the write, and skipping is the correct outcome, never a failure to avoid. The host project is a valid answer ONLY when the delta is about the code, config, docs or behaviour of that host project itself; on an orchestrator host never pick it merely because the session runs there.
 
 Be conservative: when genuinely unsure, prefer flag=false — a missed candidate falls back to the existing prompt-based reminder, a false alarm costs the main agent one wasted turn.
 
-Output your FINAL answer as compact JSON only, no other prose before or after it: {"flag":true|false,"signal":"correction|preference|outcome|none","signal_subtype":"<subtype if signal=correction, else empty string>","text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","rule_form":"<prohibition|preference|procedure|retract, empty string when not a rule-shaped candidate>","antecedent_source":"prose|trace|prior_tail|candidate|none","correction":{"agent_did":"","captain_verdict":"","redirect_target":""},"supersedes_query":"","reason":"<short reason, especially when flag=false>"}`;
+Output your FINAL answer as compact JSON only, no other prose before or after it: {"flag":true|false,"signal":"correction|preference|outcome|none","signal_subtype":"<subtype if signal=correction, else empty string>","text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","project_id":"<one known project id when scope=project, else empty string>","rule_form":"<prohibition|preference|procedure|retract, empty string when not a rule-shaped candidate>","antecedent_source":"prose|trace|prior_tail|candidate|none","correction":{"agent_did":"","captain_verdict":"","redirect_target":""},"supersedes_query":"","reason":"<short reason, especially when flag=false>"}`;
 
 function trimmedString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -1248,6 +1545,7 @@ function parseClassifierResult(output: string): ClassifierResult | null {
       text: trimmedString(parsed.text),
       type: trimmedString(parsed.type),
       scope: trimmedString(parsed.scope),
+      project_id: trimmedString(parsed.project_id),
       reason: trimmedString(parsed.reason),
       // Absent on the legacy (correction mode off) schema — every one of these degrades to the
       // inert member, and the server coerces unknown values the same way (plan §4.4).
@@ -1293,7 +1591,12 @@ function summarizeCandidateDecision(data: any, fallbackText: string): string | n
 
 async function classifyMemoryCandidate(text: string, ctx: unknown, pi: ExtensionAPI, correctionHint = ""): Promise<ClassifierResult | null> {
   const config = memoryConfig();
-  const prompt = `${correctionHint}Delta:
+  // The project context block is deterministic client-computed state, not conversation content:
+  // it goes ABOVE the delta so the model can attribute the memory to a repository instead of the
+  // client silently filing it under whatever directory the session happens to run in.
+  const prompt = `${correctionHint}${renderProjectContextBlock(projectContextFor(ctx))}
+
+Delta:
 ${text}`;
   const result = await pi
     .exec(
@@ -1326,13 +1629,19 @@ ${text}`;
 async function writeClassifiedMemory(candidate: ClassifierResult, ctx: unknown): Promise<string | null> {
   const config = memoryConfig();
   const scope = normalizeScope(candidate.scope) || "project";
-  const projectId = resolveProjectId(ctx);
+  // The model's attribution, accepted only when the client can vouch for it. null means nothing
+  // is uniquely attributable — a project-scope candidate is then dropped BEFORE any HTTP request
+  // rather than filed under the host repository (which is the bug this replaces).
+  const projectId = resolveCandidateProjectId(projectContextFor(ctx), candidate.project_id) ?? undefined;
+  if (scope === "project" && !projectId) return "skip — project unresolved (no write)";
   // project_context goes out for EVERY scope, unlike project_id — it is a scope-neutral hint the
   // server persists but never uses for scope validation, visibility, or the review row's
   // project_id column. Without it a global correction cannot be matched against the project
   // memories it retires (plan §5.3c).
   const evidence = config.correctionMode
     ? {
+        // Scope-neutral hint: a GLOBAL correction still carries the repository it came out of, but
+        // only when that repository is actually known — never a guessed host fallback.
         project_context: projectId ?? null,
         signal: candidate.signal,
         signal_subtype: candidate.signal_subtype,
@@ -1571,7 +1880,7 @@ Global scope discipline (the recurring failure mode this exists to catch): globa
 
 Workflow:
 1. Use asaki_memory_review_list with include_suggestions: true to inspect pending reviews, and handle corrections FIRST: call it once with signal: "correction", work through those rows, then call it again without the filter for everything else. A correction is the user telling the agent it got something wrong, so it is the highest-value row in the queue and the only kind that can retire an active memory. For any review with created_at older than 14 days, flag it explicitly in your output as "stale — pending review needs a decision" rather than treating it identically to a fresh review.
-2. Use asaki_memory_list to list global memories and current project memories. Then call asaki_memory_lifecycle once for the system-health view: standing-rule repeat rate, per-rule recurrence counts ("count=" means the agent had to be corrected on that rule again), and the "Possibly stale" bucket (standing rules with no reinforcement and no retrieval hit in the idle window, default 30 days).
+2. Use asaki_memory_list to list global memories and current project memories. Then call asaki_memory_lifecycle once for the system-health view: standing-rule repeat rate, per-rule recurrence counts ("count=" means the agent had to be corrected on that rule again), and the "Possibly stale" bucket (standing rules with no reinforcement and no retrieval hit in the idle window, default 30 days). Background classifier candidates are attributed to a repository by the classifier and re-checked client-side against the repositories actually in play, so a session hosted by an orchestrator repo files its memories under the repo the work is about, and anything not uniquely attributable is skipped instead of landing on the host — a missing project memory can therefore be a correct refusal, and an older memory carrying the host repo by mistake should be proposed for RESCOPE.
 3. Analyze duplicates, stale items, noisy items, overlong items (>300 Chinese chars or ~600 ASCII chars; propose compression/splitting/doc-linking), wrong scope/kind (see Global scope discipline above), low-value items, pending reviews, and missing durable memories. For every "Possibly stale" rule the lifecycle report lists, form an explicit keep/retire recommendation for the user — that bucket exists for human judgment and is never an auto-delete list. A high "count=" rule is the opposite signal (the agent keeps violating it): consider sharpening its wording, not retiring it.
 4. Propose REVIEW_RESOLVE/DELETE/UPDATE(rescope)/MERGE/ADD/KEEP changes with reasons and affected ids. When a correction review prints "⤷ supersedes:" lines, prefer resolving it against that target — asaki_memory_review_resolve {action:"update", memory_id:<the id on that line>} to rewrite the old memory, {action:"delete", memory_id:…} when the suggestion says "suggest: delete" (the correction was a retraction) — over {action:"add"}, which leaves the contradicted memory active and retrievable. {action:"ignore"} rejects the inferred rule. Resolution never changes the target's scope: the suggestion line prints the target's current scope/kind/confidence, so if the scope is wrong, rescope it separately with asaki_memory_update. A "⤷ contradicts pending review <id>" line means two queued rows disagree — decide both, not one. A "⤷ promote:" line means the same rule already exists in ANOTHER project, so offer PROMOTE: asaki_memory_review_resolve {action:"add", promote_to_global:true} activates it as global in one call (valid only with action:"add"). Promotion is never automatic — if the cross-project match reads coincidental, resolve it project-scoped as usual.
 5. Use questionnaire before any write. Offer options like apply all high-confidence changes, resolve selected reviews, only deletes, only updates/additions, or skip.

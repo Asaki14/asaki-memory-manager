@@ -515,5 +515,237 @@
     "name": "neg: restating a rule the same delta says is already recorded",
     "text": "Assistant: 复核了一遍现有规则，push 前检查明文密钥这条依然有效，本轮没有新增或修改任何规则。",
     "expectFlag": false
+  },
+  {
+    "name": "proj: orchestrator-hosted business memory lands in the business repo",
+    "text": "Assistant: logseq-d2 的 D2 图渲染超时问题已定位并修复，根因是渲染进程没有复用连接池。\nUser: 好，就这样",
+    "expectFlag": true,
+    "expectScope": "project",
+    "projectContext": {
+      "hostProject": "firstmate",
+      "orchestratorHost": true,
+      "knownProjects": [
+        {
+          "id": "logseq-d2",
+          "root": "/repos/logseq-d2",
+          "source": "task"
+        }
+      ],
+      "targetProject": "logseq-d2",
+      "ambiguity": "",
+      "allowlist": [
+        "firstmate",
+        "logseq-d2"
+      ],
+      "defaultProject": null,
+      "explicit": null
+    },
+    "expectProjectId": "logseq-d2"
+  },
+  {
+    "name": "proj: a genuinely host-owned change may resolve to the host",
+    "text": "Assistant: firstmate 的 crew-dispatch 配置已改为每条任务只允许一个 worktree，已验证生效。",
+    "expectFlag": true,
+    "expectScope": "project",
+    "projectContext": {
+      "hostProject": "firstmate",
+      "orchestratorHost": true,
+      "knownProjects": [
+        {
+          "id": "logseq-d2",
+          "root": "/repos/logseq-d2",
+          "source": "task"
+        }
+      ],
+      "targetProject": "logseq-d2",
+      "ambiguity": "",
+      "allowlist": [
+        "firstmate",
+        "logseq-d2"
+      ],
+      "defaultProject": null,
+      "explicit": null
+    },
+    "expectProjectId": "firstmate"
+  },
+  {
+    "name": "proj: ambiguous multi-repository delta writes nothing",
+    "text": "Assistant: sport-live 与 logseq-d2 两个仓库的构建缓存都已统一打开，已验证生效。",
+    "projectContext": {
+      "hostProject": "firstmate",
+      "orchestratorHost": true,
+      "knownProjects": [
+        {
+          "id": "logseq-d2",
+          "root": "/repos/logseq-d2",
+          "source": "task"
+        },
+        {
+          "id": "sport-live",
+          "root": "/repos/sport-live",
+          "source": "task"
+        }
+      ],
+      "targetProject": null,
+      "ambiguity": "multiple-targets",
+      "allowlist": [
+        "firstmate"
+      ],
+      "defaultProject": null,
+      "explicit": null
+    },
+    "expectProjectId": "",
+    "expectFlag": true
+  },
+  {
+    "name": "proj: no attributable target writes nothing",
+    "text": "Assistant: sport-live 的构建脚本已改成先跑 typecheck 再打包，已验证生效。",
+    "projectContext": {
+      "hostProject": "firstmate",
+      "orchestratorHost": true,
+      "knownProjects": [],
+      "targetProject": null,
+      "ambiguity": "no-target",
+      "allowlist": [
+        "firstmate"
+      ],
+      "defaultProject": null,
+      "explicit": null
+    },
+    "expectProjectId": "",
+    "expectFlag": true
+  },
+  {
+    "name": "proj: two repositories sharing a basename write nothing",
+    "text": "Assistant: logseq-d2 的导出格式已固定为 SVG，已验证生效。",
+    "projectContext": {
+      "hostProject": "firstmate",
+      "orchestratorHost": true,
+      "knownProjects": [
+        {
+          "id": "logseq-d2",
+          "root": "/repos/a/logseq-d2",
+          "source": "task"
+        },
+        {
+          "id": "logseq-d2",
+          "root": "/repos/b/logseq-d2",
+          "source": "task"
+        }
+      ],
+      "targetProject": null,
+      "ambiguity": "identity-conflict",
+      "allowlist": [
+        "firstmate"
+      ],
+      "defaultProject": null,
+      "explicit": null
+    },
+    "expectProjectId": "",
+    "expectFlag": true
+  },
+  {
+    "name": "proj: a repository outside the known list is refused",
+    "text": "Assistant: thesis-partner 的引用解析已改用官方 API，已验证生效。",
+    "projectContext": {
+      "hostProject": "firstmate",
+      "orchestratorHost": true,
+      "knownProjects": [
+        {
+          "id": "logseq-d2",
+          "root": "/repos/logseq-d2",
+          "source": "task"
+        }
+      ],
+      "targetProject": "logseq-d2",
+      "ambiguity": "",
+      "allowlist": [
+        "firstmate",
+        "logseq-d2"
+      ],
+      "defaultProject": null,
+      "explicit": null
+    },
+    "expectProjectId": "",
+    "expectFlag": true
+  },
+  {
+    "name": "proj: correction carries the target repository, not the host",
+    "text": "Assistant: 我把 logseq-d2 的导出目录改成了 build/。\nUser: 别改，改回 dist/，以后都别动这个目录",
+    "expectFlag": true,
+    "correction": true,
+    "expectSignal": "correction",
+    "expectScope": "project",
+    "projectContext": {
+      "hostProject": "firstmate",
+      "orchestratorHost": true,
+      "knownProjects": [
+        {
+          "id": "logseq-d2",
+          "root": "/repos/logseq-d2",
+          "source": "task"
+        }
+      ],
+      "targetProject": "logseq-d2",
+      "ambiguity": "",
+      "allowlist": [
+        "firstmate",
+        "logseq-d2"
+      ],
+      "defaultProject": null,
+      "explicit": null
+    },
+    "expectProjectId": "logseq-d2"
+  },
+  {
+    "name": "proj: ordinary single-repository session is unchanged (proven path)",
+    "text": "Assistant: sport-live 的比分轮询间隔已统一改成 15 秒，已验证生效。",
+    "expectFlag": true,
+    "expectScope": "project",
+    "projectContext": {
+      "hostProject": "sport-live",
+      "orchestratorHost": false,
+      "knownProjects": [
+        {
+          "id": "sport-live",
+          "root": "/repos/sport-live",
+          "source": "host"
+        }
+      ],
+      "targetProject": "sport-live",
+      "ambiguity": "",
+      "allowlist": [
+        "sport-live"
+      ],
+      "defaultProject": "sport-live",
+      "explicit": null
+    },
+    "expectProjectId": "sport-live"
+  },
+  {
+    "name": "proj: a global memory carries no project_id",
+    "text": "User: 以后所有项目的一次性汇报都放 scratchpad，不要写进项目仓库",
+    "expectFlag": true,
+    "expectScope": "global",
+    "projectContext": {
+      "hostProject": "firstmate",
+      "orchestratorHost": true,
+      "knownProjects": [
+        {
+          "id": "logseq-d2",
+          "root": "/repos/logseq-d2",
+          "source": "task"
+        }
+      ],
+      "targetProject": "logseq-d2",
+      "ambiguity": "",
+      "allowlist": [
+        "firstmate",
+        "logseq-d2"
+      ],
+      "defaultProject": null,
+      "explicit": null
+    },
+    "expectProjectId": ""
   }
 ]

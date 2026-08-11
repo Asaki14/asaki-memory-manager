@@ -31,6 +31,32 @@ jobs:
       - name: Ensure dist/mcp-server.mjs matches source (rebuild it if this fails)
         run: git diff --exit-code dist/mcp-server.mjs
 
+  offline-evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck:pi
+      # Drift guards: the prompt copies and the two project-context implementations are only
+      # "in sync" if something fails when they are not.
+      - run: npm run eval:prompt-sync
+      - run: npm run eval:project-context
+      - run: npm run eval:standing-rules
+      - run: npm run eval:review-format
+      - run: npm run eval:trace-builder
+      - run: npm run eval:trace-sensitive
+      - run: npm run eval:sensitive-pattern
+      - run: npm run eval:correction-signal
+      - run: npm run eval:throttle-state
+      - run: npm run eval:candidate-fields
+      - run: npm run eval:lifecycle
+      - run: npm run eval:purge-scrub
+      - run: npm run eval:review-park
+
   hygiene:
     runs-on: ubuntu-latest
     steps:
