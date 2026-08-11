@@ -63,6 +63,30 @@ export async function loadPiReviewFormatter() {
   return loadRegionModule(extractPiRegions('asaki-review-format'), [], ['formatReviewLine', 'correctionBlockLines', 'formatLifecycleReport']);
 }
 
+// Returns the project-context region as a live module. Mirrors
+// integrations/claude-code/project-context.mjs; `npm run eval:project-context` runs one table
+// against both so the two cannot drift apart semantically.
+export async function loadPiProjectContext() {
+  const { module } = await loadRegionModule(
+    extractPiRegions('asaki-project-context'),
+    [
+      'import { execFileSync } from "node:child_process";',
+      'import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";',
+      'import { basename, dirname, join, resolve } from "node:path";',
+    ],
+    [
+      'parseTaskMeta',
+      'canonicalProjectId',
+      'isOrchestratorHost',
+      'collectTaskTargets',
+      'buildProjectContext',
+      'renderProjectContextBlock',
+      'resolveCandidateProjectId',
+    ],
+  );
+  return module;
+}
+
 // Returns { module, dispose } — call dispose() to remove the temp dir.
 export async function loadPiTraceBuilder() {
   return loadRegionModule(

@@ -165,6 +165,18 @@ outcome_for_status() {
   echo "hold"
 }
 
+# Project attribution (plan: project-aware classifier). Thin wrapper over the canonical logic in
+# integrations/claude-code/project-context.mjs so there is exactly ONE implementation of the
+# allowlist rule: the classifier names a repository, and this accepts that name only when the
+# client independently computed it. Echoes the project id to write, or an EMPTY string meaning
+# "nothing is uniquely attributable" — the caller must then skip the candidate before any HTTP
+# request rather than fall back to the host repository.
+# Args: MODEL_PROJECT_ID. Uses $HOOK_DIR, $CWD, $GIT_ROOT.
+resolve_candidate_project() {
+  ASAKI_PROJECT_CONTEXT_CWD="${CWD:-}" ASAKI_PROJECT_CONTEXT_GIT_ROOT="${GIT_ROOT:-}" \
+    node "${HOOK_DIR:-.}/project-context.mjs" resolve "${1:-}" 2>/dev/null
+}
+
 # Sourced as a library (eval harness): stop here, before any hook side effects.
 [ -n "${ASAKI_MEMORY_STOP_EXTRACT_LIB:-}" ] && return 0 2>/dev/null || true
 
@@ -453,12 +465,17 @@ else
   [ "${#TEXT}" -gt 20000 ] && TEXT="${TEXT:$((${#TEXT} - 20000))}"
 
   CLASSIFIER_MODEL="${ASAKI_MEMORY_CLASSIFIER_MODEL:-claude-haiku-4-5-20251001}"
+  # Deterministic, client-computed statement of which repositories are in play. It is what lets
+  # the classifier attribute a memory to the repository the work is ABOUT rather than the one the
+  # session happens to run in. Rendered by the same module that later validates the answer.
+  PROJECT_CONTEXT_BLOCK=$(ASAKI_PROJECT_CONTEXT_CWD="$CWD" ASAKI_PROJECT_CONTEXT_GIT_ROOT="$GIT_ROOT" \
+    node "$HOOK_DIR/project-context.mjs" render 2>/dev/null)
   # --json-schema forces the CLI to constrain decoding to this shape (not just prompt-requested
   # JSON) — without it, real conversation deltas (esp. ones ending on an open question, or ones
   # that discuss this very classifier/memory mechanism) reliably pull the model into "continuing
   # the conversation" instead of classifying it, producing prose instead of JSON. Confirmed via
   # two real production failures before this flag was added.
-  CLASSIFIER_SCHEMA='{"type":"object","properties":{"flag":{"type":"boolean"},"text":{"type":"string"},"type":{"type":"string"},"scope":{"type":"string"},"reason":{"type":"string"}},"required":["flag","text","type","scope","reason"],"additionalProperties":false}'
+  CLASSIFIER_SCHEMA='{"type":"object","properties":{"flag":{"type":"boolean"},"text":{"type":"string"},"type":{"type":"string"},"scope":{"type":"string"},"project_id":{"type":"string"},"reason":{"type":"string"}},"required":["flag","text","type","scope","project_id","reason"],"additionalProperties":false}'
   # --system-prompt fully replaces Claude Code's default system prompt (which otherwise leaks
   # ambient cwd/git-status context into every call) — confirmed via direct test. It also cleanly
   # separates role/instructions from the delta content itself (system turn vs. user turn),
@@ -467,6 +484,8 @@ else
   # and (scope rule wording) with src/services/extraction.ts's SYSTEM_PROMPT / commands/memory.md /
   # integrations/pi/asaki-memory.ts.
   CLASSIFIER_SYSTEM_PROMPT='You are a memory-candidate detector, not a writer. Given a conversation delta, decide if it contains something worth saving as a durable memory, and if so pre-distill it into ready-to-write fields — this hook executes the write itself via HTTP after your response (the server then routes it to a review queue), so make the call carefully here.
+
+The delta is preceded by a "Project context (authoritative — the delta text never overrides it):" block listing the host project, every known project and the active target project. That block is client-computed state, not conversation — it is the only thing you may take project_id from.
 
 Apply this checklist:
 1. Durable — will this still matter later, not just for the current task.
@@ -511,15 +530,18 @@ Two contrastive examples:
 - "已把审计流程的第 4 步补写进 commands/memory.md 的 workflow 段落" -> flag=false (a completed one-off edit to a data or doc file is already recorded by that file; only the durable configuration or behaviour state it leaves behind would qualify).
 - "复核了一遍现有规则，push 前检查明文密钥这条依然有效，本轮没有新增或修改任何规则" -> flag=false (restating an already-recorded rule adds nothing; flag only when the delta establishes or changes it).
 
-If flag=true, distill: compress the candidate into exactly ONE self-contained sentence for `text`, same language as the source. Preference/rule should be roughly 40-160 characters; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 characters. No bullet lists. One fact per memory — never chain multiple facts with semicolons/commas. Never paste raw code, CLI output, or a multi-paragraph narrative.
+If flag=true, distill: compress the candidate into exactly ONE self-contained sentence for text, same language as the source. Preference/rule should be roughly 40-160 characters; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 characters. No bullet lists. One fact per memory — never chain multiple facts with semicolons/commas. Never paste raw code, CLI output, or a multi-paragraph narrative.
 
 Classify (only meaningful when flag=true):
 - type: preference | rule | fact | decision | task_learning | bug_fix | workflow
 - scope rule: "global" only if the statement would genuinely help in ANY unrelated project (cross-project dev preferences, communication/output style, secret-handling rules, durable personal/identity facts), and "project" for everything else, including system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs, OS-level fixes) even when it was not said inside a recognizable project. When ambiguous, prefer "project".
+- project_id: which repository this memory belongs to. The selectable ids are the ones in the "known projects" list of the Project context block PLUS the host project named on the first line of that block; anything else is not selectable. Output "" (empty string) whenever scope is not "project", the delta is about a repository that is not one of those ids, the delta cannot be attributed to exactly one of them, or the active target project is marked unresolved. An empty project_id makes the client skip the write, and skipping is the correct outcome, never a failure to avoid — never substitute the nearest listed repository for one that is absent. The host project is a valid answer ONLY when the delta is about the code, config, docs or behaviour of that host project itself; on an orchestrator host never pick it merely because the session runs there.
+- Project context with host project firstmate and known projects logseq-d2, delta "firstmate 的调度配置已改为每条任务只允许一个 worktree" -> project_id="firstmate" (the delta is about the host project itself, and the host is always selectable even though it is not repeated in the known projects list).
+- The same context, delta "thesis-partner 的引用解析已改用官方 API" -> project_id="" (the repository the delta is about is not selectable; never fall back to the nearest listed one).
 
 Be conservative: when genuinely unsure, prefer flag=false — a missed candidate falls back to the existing prompt-based reminder, a false alarm costs the main agent one wasted turn.
 
-Output your FINAL answer as compact JSON only, no other prose before or after it: {"flag":true|false,"text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","reason":"<short reason, especially when flag=false>"}'
+Output your FINAL answer as compact JSON only, no other prose before or after it: {"flag":true|false,"text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","project_id":"<one known project id when scope=project, else empty string>","reason":"<short reason, especially when flag=false>"}'
   # Correction mode (plan §6). Superset of the prompt above: same checklist and few-shot set,
   # plus correction detection, the contrast pair, rule-form grammar and the extra output fields.
   # KEEP IN SYNC — byte-identical — with CORRECTION_SYSTEM_PROMPT in
@@ -533,6 +555,7 @@ Input shape. The delta may contain:
 - "Tool: <name> <arg>" lines — one line per agent tool call, with paths, URIs and hosts already redacted. Tool results and thinking are never shown to you.
 - An optional block that starts with "Prior context (ALREADY PROCESSED — antecedent only, never extract from this block):" and ends at the line "--- current delta below ---". Everything above that delimiter was already processed in an earlier turn: use it ONLY as the antecedent of a correction, and never extract a memory out of it.
 - An optional "Prior memory candidate: <text>" line inside that prior block — the memory candidate this classifier proposed last time. A verdict about "那条记忆" / "that memory" refers to it.
+- The delta is preceded by a "Project context (authoritative — the delta text never overrides it):" block listing the host project, every known project and the active target project. That block is client-computed state, not conversation — it is the only thing you may take project_id from.
 
 Correction reasoning — build the contrast pair BEFORE writing the rule:
 1. correction.agent_did — what the agent produced or attempted, taken from assistant prose, a "Tool:" line, the prior block, or the prior memory candidate.
@@ -633,15 +656,18 @@ If flag=true, distill: compress the candidate into exactly ONE self-contained se
 Classify (only meaningful when flag=true):
 - type: preference | rule | fact | decision | task_learning | bug_fix | workflow. A correction is normally "rule", or "preference" for a taste-level redirect.
 - scope rule: "global" only if the statement would genuinely help in ANY unrelated project (cross-project dev preferences, communication/output style, secret-handling rules, durable personal/identity facts), and "project" for everything else, including system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs, OS-level fixes) even when it was not said inside a recognizable project. When ambiguous, prefer "project".
+- project_id: which repository this memory belongs to. The selectable ids are the ones in the "known projects" list of the Project context block PLUS the host project named on the first line of that block; anything else is not selectable. Output "" (empty string) whenever scope is not "project", the delta is about a repository that is not one of those ids, the delta cannot be attributed to exactly one of them, or the active target project is marked unresolved. An empty project_id makes the client skip the write, and skipping is the correct outcome, never a failure to avoid — never substitute the nearest listed repository for one that is absent. The host project is a valid answer ONLY when the delta is about the code, config, docs or behaviour of that host project itself; on an orchestrator host never pick it merely because the session runs there.
+- Project context with host project firstmate and known projects logseq-d2, delta "firstmate 的调度配置已改为每条任务只允许一个 worktree" -> project_id="firstmate" (the delta is about the host project itself, and the host is always selectable even though it is not repeated in the known projects list).
+- The same context, delta "thesis-partner 的引用解析已改用官方 API" -> project_id="" (the repository the delta is about is not selectable; never fall back to the nearest listed one).
 
 Be conservative: when genuinely unsure, prefer flag=false — a missed candidate falls back to the existing prompt-based reminder, a false alarm costs the main agent one wasted turn.
 
-Output your FINAL answer as compact JSON only, no other prose before or after it: {"flag":true|false,"signal":"correction|preference|outcome|none","signal_subtype":"<subtype if signal=correction, else empty string>","text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","rule_form":"<prohibition|preference|procedure|retract, empty string when not a rule-shaped candidate>","antecedent_source":"prose|trace|prior_tail|candidate|none","correction":{"agent_did":"","captain_verdict":"","redirect_target":""},"supersedes_query":"","reason":"<short reason, especially when flag=false>"}'
+Output your FINAL answer as compact JSON only, no other prose before or after it: {"flag":true|false,"signal":"correction|preference|outcome|none","signal_subtype":"<subtype if signal=correction, else empty string>","text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","project_id":"<one known project id when scope=project, else empty string>","rule_form":"<prohibition|preference|procedure|retract, empty string when not a rule-shaped candidate>","antecedent_source":"prose|trace|prior_tail|candidate|none","correction":{"agent_did":"","captain_verdict":"","redirect_target":""},"supersedes_query":"","reason":"<short reason, especially when flag=false>"}'
   # additionalProperties:false forces every field to be emitted; importance/confidence are
   # deliberately absent — the server derives both (plan §6.1/§9.1).
   # KEEP IN SYNC with CORRECTION_SCHEMA in scripts/eval-classifier.sh and the ClassifierResult
   # parse in integrations/pi/asaki-memory.ts.
-  CORRECTION_SCHEMA='{"type":"object","properties":{"flag":{"type":"boolean"},"signal":{"type":"string"},"signal_subtype":{"type":"string"},"text":{"type":"string"},"type":{"type":"string"},"scope":{"type":"string"},"rule_form":{"type":"string"},"antecedent_source":{"type":"string"},"correction":{"type":"object","properties":{"agent_did":{"type":"string"},"captain_verdict":{"type":"string"},"redirect_target":{"type":"string"}},"required":["agent_did","captain_verdict","redirect_target"],"additionalProperties":false},"supersedes_query":{"type":"string"},"reason":{"type":"string"}},"required":["flag","signal","signal_subtype","text","type","scope","rule_form","antecedent_source","correction","supersedes_query","reason"],"additionalProperties":false}'
+  CORRECTION_SCHEMA='{"type":"object","properties":{"flag":{"type":"boolean"},"signal":{"type":"string"},"signal_subtype":{"type":"string"},"text":{"type":"string"},"type":{"type":"string"},"scope":{"type":"string"},"project_id":{"type":"string"},"rule_form":{"type":"string"},"antecedent_source":{"type":"string"},"correction":{"type":"object","properties":{"agent_did":{"type":"string"},"captain_verdict":{"type":"string"},"redirect_target":{"type":"string"}},"required":["agent_did","captain_verdict","redirect_target"],"additionalProperties":false},"supersedes_query":{"type":"string"},"reason":{"type":"string"}},"required":["flag","signal","signal_subtype","text","type","scope","project_id","rule_form","antecedent_source","correction","supersedes_query","reason"],"additionalProperties":false}'
 
   if is_flag_enabled "$CORRECTION_MODE"; then
     ACTIVE_SYSTEM_PROMPT="$CORRECTION_SYSTEM_PROMPT"
@@ -682,7 +708,7 @@ ${CORRECTION_SIGNAL_LINES}
     fi
     # Hint first, then the labelled prior block, then the delta — so nothing sits between the
     # `--- current delta below ---` delimiter and the current delta it introduces.
-    CLASSIFIER_PROMPT=$(printf '%s%sDelta:\n%s' "$CORRECTION_HINT" "${PRIOR_BLOCK:+$PRIOR_BLOCK$'\n'}" "$TEXT")
+    CLASSIFIER_PROMPT=$(printf '%s%s\n\n%sDelta:\n%s' "$CORRECTION_HINT" "$PROJECT_CONTEXT_BLOCK" "${PRIOR_BLOCK:+$PRIOR_BLOCK$'\n'}" "$TEXT")
     # Carried into the NEXT prompt, but only once this delta is actually processed (written
     # below). Transcript order is preserved and nothing is deduplicated: the trace line format
     # carries no timestamp, so order is the only temporal signal the model gets.
@@ -692,7 +718,7 @@ ${CORRECTION_SIGNAL_LINES}
   else
     ACTIVE_SYSTEM_PROMPT="$CLASSIFIER_SYSTEM_PROMPT"
     ACTIVE_SCHEMA="$CLASSIFIER_SCHEMA"
-    CLASSIFIER_PROMPT=$(printf 'Delta:\n%s' "$TEXT")
+    CLASSIFIER_PROMPT=$(printf '%s\n\nDelta:\n%s' "$PROJECT_CONTEXT_BLOCK" "$TEXT")
     TAIL_LINES=""
   fi
 
@@ -723,6 +749,18 @@ ${CORRECTION_SIGNAL_LINES}
       TEXT_FIELD=$(echo "$RESP_SINGLE_LINE" | jq -r '.text // ""')
       TYPE_FIELD=$(echo "$RESP_SINGLE_LINE" | jq -r '.type // "fact"')
       SCOPE_FIELD=$(echo "$RESP_SINGLE_LINE" | jq -r '.scope // "project"')
+      MODEL_PROJECT_FIELD=$(echo "$RESP_SINGLE_LINE" | jq -r '.project_id // ""')
+      # The model's attribution, accepted only when this client independently computed the same
+      # id. Empty means nothing is uniquely attributable: a project-scope candidate is dropped
+      # here, BEFORE the POST below, instead of being filed under the host repository.
+      RESOLVED_PROJECT_ID=$(resolve_candidate_project "$MODEL_PROJECT_FIELD")
+      if [ "$SCOPE_FIELD" = "project" ] && [ -z "$RESOLVED_PROJECT_ID" ]; then
+        echo "$TOTAL" >"$STATE_FILE"
+        [ -n "$TAIL_LINES" ] && printf '%s' "$TAIL_LINES" >"$TAIL_FILE"
+        FINAL_JSON=$(jq -cn --arg memory "$TEXT_FIELD" '{action: "skipped", memory: $memory, reason: "project-unresolved"}')
+        echo "$(date -u +%FT%TZ) ${FINAL_JSON}" >>"$CLASSIFIER_LOG_FILE"
+        exit 0
+      fi
       # Execute the write ourselves via plain HTTP — the same server endpoint the
       # asaki_memory_add MCP tool calls under the hood (integrations/mcp/asaki-memory.ts), so it
       # gets the identical server-side dedup/merge pipeline (src/services/candidates.ts). No
@@ -734,7 +772,7 @@ ${CORRECTION_SIGNAL_LINES}
         # project_id column. Without it a global correction cannot be matched against the
         # project memories it retires (plan §5.3c).
         CANDIDATE_BODY=$(jq -cn --arg content "$TEXT_FIELD" --arg kind "$TYPE_FIELD" --arg scope "$SCOPE_FIELD" \
-          --arg user "$ASAKI_USER" --arg project "$ASAKI_PROJECT" \
+          --arg user "$ASAKI_USER" --arg project "$RESOLVED_PROJECT_ID" \
           --arg signal "$(echo "$RESP_SINGLE_LINE" | jq -r '.signal // ""')" \
           --arg signal_subtype "$(echo "$RESP_SINGLE_LINE" | jq -r '.signal_subtype // ""')" \
           --arg rule_form "$(echo "$RESP_SINGLE_LINE" | jq -r '.rule_form // ""')" \
@@ -744,7 +782,8 @@ ${CORRECTION_SIGNAL_LINES}
           --arg redirect_target "$(echo "$RESP_SINGLE_LINE" | jq -r '.correction.redirect_target // ""')" \
           --arg supersedes_query "$(echo "$RESP_SINGLE_LINE" | jq -r '.supersedes_query // ""')" '
           {user_id: $user, source: "claude-code:stop-classifier",
-           candidates: [{content: $content, kind: $kind, scope: $scope, project_context: $project,
+           candidates: [{content: $content, kind: $kind, scope: $scope,
+                         project_context: (if $project == "" then null else $project end),
                          signal: $signal, signal_subtype: $signal_subtype, rule_form: $rule_form,
                          antecedent_source: $antecedent_source,
                          correction: {agent_did: $agent_did, captain_verdict: $captain_verdict, redirect_target: $redirect_target},
@@ -752,7 +791,7 @@ ${CORRECTION_SIGNAL_LINES}
                         + (if $scope == "project" then {project_id: $project} else {} end)]}')
       else
         CANDIDATE_BODY=$(jq -cn --arg content "$TEXT_FIELD" --arg kind "$TYPE_FIELD" --arg scope "$SCOPE_FIELD" \
-          --arg user "$ASAKI_USER" --arg project "$ASAKI_PROJECT" '
+          --arg user "$ASAKI_USER" --arg project "$RESOLVED_PROJECT_ID" '
           {user_id: $user, source: "claude-code:stop-classifier",
            candidates: [{content: $content, kind: $kind, scope: $scope} + (if $scope == "project" then {project_id: $project} else {} end)]}')
       fi
