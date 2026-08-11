@@ -23,7 +23,9 @@ if ! command -v claude >/dev/null 2>&1; then
 fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FIXTURES="$ROOT/test/fixtures/classifier-cases.json"
+# Defaults to the full fixture set. Point ASAKI_CLASSIFIER_FIXTURES at a subset file to run one
+# targeted group (each case is a real LLM call, so a full pass is minutes per case).
+FIXTURES="${ASAKI_CLASSIFIER_FIXTURES:-$ROOT/test/fixtures/classifier-cases.json}"
 CLASSIFIER_MODEL="${ASAKI_MEMORY_CLASSIFIER_MODEL:-claude-haiku-4-5-20251001}"
 CORRECTION_MODE="${ASAKI_MEMORY_CORRECTION_MODE:-1}"
 
