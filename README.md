@@ -112,7 +112,7 @@ Set your credentials once in `~/.claude/settings.json`:
 }
 ```
 
-The plugin injects a real project-history digest at session start, a per-turn memory precheck so the agent decides for itself whether to search, a visible `🧠 Asaki memory …` line whenever a memory tool runs, and a `/memory` slash command (`/memory status` checks connectivity; any other args run a full audit). A background Stop hook also runs a local classifier: with cloud auto-extract off (the default), it judges each conversation delta against a 6-criteria checklist and writes qualifying candidates itself over plain HTTP — no forced extra turn. Full details: [`integrations/claude-code/README.md`](integrations/claude-code/README.md).
+The plugin injects the standing-rule block and the project-memory digest at session start, a per-turn memory precheck so the agent decides for itself whether to search, a visible `🧠 Asaki memory …` line whenever a memory tool runs, and a `/memory` slash command (`/memory status` checks connectivity; any other args run a full audit). A background Stop hook also runs a local classifier: with cloud auto-extract off (the default), it judges each conversation delta against a 6-criteria checklist and writes qualifying candidates itself over plain HTTP — no forced extra turn. Full details: [`integrations/claude-code/README.md`](integrations/claude-code/README.md).
 
 ### Standing rules (both clients)
 
@@ -141,6 +141,49 @@ conflict, the system instructions win.
 
 Selection and rendering are one canonical implementation in [`src/services/standingRules.ts`](src/services/standingRules.ts), copied verbatim into the Pi extension and re-implemented in [`integrations/claude-code/standing-rules.jq`](integrations/claude-code/standing-rules.jq); `npm run eval:standing-rules` fails if any copy drifts.
 
+### Project memory digest (both clients)
+
+Standing rules cover the memories that are *directives*. Everything else — decisions, facts, bug fixes, task learnings, workflows — used to be retrieval-only, so a session opened with no idea what had already been settled in this project. A second bounded block therefore follows the standing rules, framed as context rather than instructions:
+
+```
+## Asaki Project Memory (10 of 65)
+
+This is recalled context, not directives: durable memories of this project (plus global
+ones) that are not standing rules. They record what was already decided, learned or fixed
+— use them instead of re-deriving, and call asaki_memory_search when you need more than
+these excerpts.
+
+- [project/decision] 记忆抽取的 scope 判断标准前移至抽取阶段…
+- [project/bug_fix] Vectorize upsert 失败时保留 D1 写入并标记 index_status…
+```
+
+- **Kinds**: the DYNAMIC complement of the standing kinds — `KNOWN_MEMORY_KINDS − ASAKI_MEMORY_STANDING_RULES_KINDS`. With the defaults that is `fact`, `decision`, `task_learning`, `bug_fix`, `workflow`; set `ASAKI_MEMORY_STANDING_RULES_KINDS=rule` and `preference` moves into this block instead of vanishing. No memory is ever in both blocks, and the boundary does not depend on either block's on/off switch.
+- **Scope and order**: identical to standing rules — global always, project on match, session never; importance desc → recency desc → id desc.
+- **Cap**: at most 10 memories and 3000 characters of memory lines, each clamped to 240 characters, with the same `(showing N of M project memories — more exist…)` marker. Worst case is ~3.3 KB (~0.8k English / ~1.65k Chinese tokens) on top of the standing-rule block.
+- **Delivery**: Claude Code emits it from the SessionStart hook right after the standing rules (re-emitted on compact); Pi appends it to the `before_agent_start` system prompt after the standing rules — that is the only Pi path that reaches the model, since its `[Memory]` banner is transcript-local. Both clients reuse the memory list they already fetch, so the block costs no extra request.
+- **This is on by default**, so upgrading adds it to every session's opening context; `ASAKI_MEMORY_PROJECT_DIGEST=0` turns it off in one variable.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `ASAKI_MEMORY_PROJECT_DIGEST` | `1` | Set to `0`/`off`/`false` to disable the digest entirely. |
+| `ASAKI_MEMORY_PROJECT_DIGEST_MAX` | `10` | Hard cap on injected memories (clamped to 50). |
+| `ASAKI_MEMORY_PROJECT_DIGEST_MAX_CHARS` | `3000` | Character budget for the memory lines (clamped to 20000). |
+| `ASAKI_MEMORY_PROJECT_DIGEST_CONTENT_CHARS` | `240` | Per-memory character clamp (clamped to 2000). |
+
+Selection and rendering are one canonical implementation in [`src/services/projectDigest.ts`](src/services/projectDigest.ts), copied verbatim into the Pi extension and re-implemented in [`integrations/claude-code/project-digest.jq`](integrations/claude-code/project-digest.jq); `npm run eval:project-digest` fails if any copy drifts, and `npm run eval:session-inject` checks both clients' wiring.
+
+Known boundary shared by both blocks: the clients list at most 100 memories, which is also the server maximum, and the server returns the 100 most recently updated rows *before* the importance sort runs. Past ~100 active global+project memories an older high-importance one can therefore be dropped before selection sees it — watch the `memories=` count in the status banner.
+
+### Session status banner (both clients)
+
+Both clients open a session with a counts-only status line. Fields are fixed in this order and any field with no information is omitted entirely rather than printed as `off`/`0/0`/`?`:
+
+```
+user=asaki | project=asaki-memory-manager | memories=90 | pendingReviews=3 | classifier=on model=claude-haiku-4-5-20251001 | standingRules=25/25 | projectDigest=10/65
+```
+
+`autoExtract` is deliberately not on this line — the deprecated server-extraction path is off by default and uninformative when it is, so `/memory status` reports it (plus the effective classifier state) instead.
+
 ### Pi
 
 Pi doesn't support remote MCP, so it ships as a self-contained single-file extension, published as a standalone npm package:
@@ -149,7 +192,9 @@ Pi doesn't support remote MCP, so it ships as a self-contained single-file exten
 pi install npm:@asaki14/pi-memory
 ```
 
-On every `session_start` it renders a compact, transcript-local `[Memory]` status banner (user, project, memory count, pending reviews, auto-extract/classifier state). It appears with Pi's startup resource information, scrolls away with the conversation, and does not enter LLM context. On `agent_end` it runs a background classifier that pre-distills one candidate and writes it to the review queue — throttled, and skipping anything that trips the sensitive-text gate.
+On every `session_start` it renders a compact, transcript-local `[Memory]` status banner (see [Session status banner](#session-status-banner-both-clients)). It appears with Pi's startup resource information, scrolls away with the conversation, and does not enter LLM context — the standing-rule block and the project digest are what actually reach the model, via the `before_agent_start` system prompt. On `agent_end` it runs a background classifier that pre-distills one candidate and writes it to the review queue — throttled, and skipping anything that trips the sensitive-text gate.
+
+The extension is published as `npm:@asaki14/pi-memory` and that is what every machine consumes; a change merged here reaches Pi only after the next npm release (`npm run build:pi` → `npm publish` from `dist/pi-package/` → `pi update npm:@asaki14/pi-memory`). Env changes need a new Pi process: the extension reads env per call, but a running process keeps the environment it started with.
 
 <details>
 <summary><b>Common Pi environment variables</b></summary>
@@ -160,10 +205,12 @@ export ASAKI_MEMORY_API_KEY="your-admin-api-key"
 export ASAKI_MEMORY_USER_ID="alice"
 export ASAKI_MEMORY_PROJECT_ID="demo-app"
 export ASAKI_MEMORY_AUTO_INJECT="1"
-export ASAKI_MEMORY_AUTO_MIN_SCORE="0.67"
+export ASAKI_MEMORY_AUTO_INJECT_TOP_K="6"   # 1..20; invalid values fall back to 6
+export ASAKI_MEMORY_AUTO_MIN_SCORE="0.67"   # must be within [0,1]; anything else falls back
 export ASAKI_MEMORY_AUTO_EXTRACT="0"
 export ASAKI_MEMORY_AUTO_CLASSIFIER="1"
 export ASAKI_MEMORY_STANDING_RULES="1"
+export ASAKI_MEMORY_PROJECT_DIGEST="1"
 export ASAKI_MEMORY_CLASSIFIER_MODEL="openai-codex/gpt-5.6-luna"
 export ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS="300"
 # Both default on. Correction mode makes the classifier detect the user correcting the agent and

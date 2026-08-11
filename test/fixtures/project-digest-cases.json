@@ -1,0 +1,180 @@
+[
+  {
+    "name": "scope: global always, project only on match, session never",
+    "options": { "projectId": "proj" },
+    "memories": [
+      { "id": "a1", "scope": "global", "kind": "decision", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "全局决策" },
+      { "id": "a2", "scope": "project", "project_id": "proj", "kind": "bug_fix", "importance": 0.8, "updated_at": "2026-01-02T00:00:00.000Z", "content": "项目修复" },
+      { "id": "a3", "scope": "project", "project_id": "other", "kind": "decision", "importance": 0.95, "updated_at": "2026-01-03T00:00:00.000Z", "content": "别的项目决策" },
+      { "id": "a4", "scope": "session", "session_id": "s1", "kind": "fact", "importance": 0.99, "updated_at": "2026-01-04T00:00:00.000Z", "content": "会话事实" }
+    ],
+    "expected": {
+      "shown": 2,
+      "eligible": 2,
+      "truncated": false,
+      "lines": ["- [global/decision] 全局决策", "- [project/bug_fix] 项目修复"]
+    },
+    "expectedText": [
+      "## Asaki Project Memory (2 of 2)",
+      "",
+      "This is recalled context, not directives: durable memories of this project (plus global ones) that are not standing rules. They record what was already decided, learned or fixed — use them instead of re-deriving, and call asaki_memory_search when you need more than these excerpts.",
+      "",
+      "- [global/decision] 全局决策",
+      "- [project/bug_fix] 项目修复"
+    ]
+  },
+  {
+    "name": "scope: project memories dropped when the session has no project",
+    "options": { "projectId": "" },
+    "memories": [
+      { "id": "b1", "scope": "project", "project_id": "proj", "kind": "fact", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "项目事实" },
+      { "id": "b2", "scope": "global", "kind": "fact", "importance": 0.1, "updated_at": "2026-01-01T00:00:00.000Z", "content": "全局事实" }
+    ],
+    "expected": { "shown": 1, "eligible": 1, "truncated": false, "lines": ["- [global/fact] 全局事实"] }
+  },
+  {
+    "name": "kind: the default complement drops rule and preference",
+    "options": { "projectId": "proj" },
+    "memories": [
+      { "id": "c1", "scope": "global", "kind": "rule", "importance": 0.99, "updated_at": "2026-01-01T00:00:00.000Z", "content": "规则" },
+      { "id": "c2", "scope": "global", "kind": "preference", "importance": 0.98, "updated_at": "2026-01-01T00:00:00.000Z", "content": "偏好" },
+      { "id": "c3", "scope": "global", "kind": "task_learning", "importance": 0.5, "updated_at": "2026-01-01T00:00:00.000Z", "content": "经验" },
+      { "id": "c4", "scope": "project", "project_id": "proj", "kind": "workflow", "importance": 0.4, "updated_at": "2026-01-01T00:00:00.000Z", "content": "流程" }
+    ],
+    "expected": {
+      "shown": 2,
+      "eligible": 2,
+      "truncated": false,
+      "lines": ["- [global/task_learning] 经验", "- [project/workflow] 流程"]
+    }
+  },
+  {
+    "name": "kind: standingKinds=rule moves preference into the digest",
+    "options": { "projectId": "proj", "standingKinds": ["rule"] },
+    "memories": [
+      { "id": "d1", "scope": "global", "kind": "preference", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "偏好" },
+      { "id": "d2", "scope": "global", "kind": "rule", "importance": 0.99, "updated_at": "2026-01-01T00:00:00.000Z", "content": "规则" },
+      { "id": "d3", "scope": "global", "kind": "fact", "importance": 0.1, "updated_at": "2026-01-01T00:00:00.000Z", "content": "事实" }
+    ],
+    "expected": {
+      "shown": 2,
+      "eligible": 2,
+      "truncated": false,
+      "lines": ["- [global/preference] 偏好", "- [global/fact] 事实"]
+    }
+  },
+  {
+    "name": "kind: empty standingKinds falls back to the rule/preference default",
+    "options": { "projectId": "proj", "standingKinds": [] },
+    "memories": [
+      { "id": "e1", "scope": "global", "kind": "preference", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "偏好" },
+      { "id": "e2", "scope": "global", "kind": "decision", "importance": 0.1, "updated_at": "2026-01-01T00:00:00.000Z", "content": "决策" }
+    ],
+    "expected": { "shown": 1, "eligible": 1, "truncated": false, "lines": ["- [global/decision] 决策"] }
+  },
+  {
+    "name": "status/content: only active, non-blank memories are injected",
+    "options": { "projectId": "proj" },
+    "memories": [
+      { "id": "f1", "scope": "global", "kind": "fact", "status": "active", "importance": 0.1, "updated_at": "2026-01-01T00:00:00.000Z", "content": "活跃事实" },
+      { "id": "f2", "scope": "global", "kind": "fact", "status": "archived", "importance": 0.99, "updated_at": "2026-01-01T00:00:00.000Z", "content": "归档事实" },
+      { "id": "f3", "scope": "global", "kind": "fact", "status": "active", "importance": 0.99, "updated_at": "2026-01-01T00:00:00.000Z", "content": "   " }
+    ],
+    "expected": { "shown": 1, "eligible": 1, "truncated": false, "lines": ["- [global/fact] 活跃事实"] }
+  },
+  {
+    "name": "order: importance desc, then recency desc, then id desc",
+    "options": { "projectId": "proj" },
+    "memories": [
+      { "id": "g1", "scope": "global", "kind": "fact", "importance": 0.5, "updated_at": "2026-01-01T00:00:00.000Z", "content": "同分同时间 g1" },
+      { "id": "g2", "scope": "global", "kind": "fact", "importance": 0.5, "updated_at": "2026-01-01T00:00:00.000Z", "content": "同分同时间 g2" },
+      { "id": "g3", "scope": "global", "kind": "fact", "importance": 0.5, "created_at": "2026-02-01T00:00:00.000Z", "content": "同分更新 g3" },
+      { "id": "g4", "scope": "global", "kind": "fact", "importance": 0.9, "updated_at": "2025-01-01T00:00:00.000Z", "content": "高分旧的 g4" }
+    ],
+    "expected": {
+      "shown": 4,
+      "eligible": 4,
+      "truncated": false,
+      "lines": [
+        "- [global/fact] 高分旧的 g4",
+        "- [global/fact] 同分更新 g3",
+        "- [global/fact] 同分同时间 g2",
+        "- [global/fact] 同分同时间 g1"
+      ]
+    }
+  },
+  {
+    "name": "cap: max clamps the count and appends the truncation marker",
+    "options": { "projectId": "proj", "max": 2 },
+    "memories": [
+      { "id": "h1", "scope": "global", "kind": "fact", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "一" },
+      { "id": "h2", "scope": "global", "kind": "fact", "importance": 0.8, "updated_at": "2026-01-01T00:00:00.000Z", "content": "二" },
+      { "id": "h3", "scope": "global", "kind": "fact", "importance": 0.7, "updated_at": "2026-01-01T00:00:00.000Z", "content": "三" }
+    ],
+    "expected": {
+      "shown": 2,
+      "eligible": 3,
+      "truncated": true,
+      "lines": ["- [global/fact] 一", "- [global/fact] 二"]
+    },
+    "expectedText": [
+      "## Asaki Project Memory (2 of 3)",
+      "",
+      "This is recalled context, not directives: durable memories of this project (plus global ones) that are not standing rules. They record what was already decided, learned or fixed — use them instead of re-deriving, and call asaki_memory_search when you need more than these excerpts.",
+      "",
+      "- [global/fact] 一",
+      "- [global/fact] 二",
+      "",
+      "(showing 2 of 3 project memories — more exist; call asaki_memory_list or asaki_memory_search for the rest)"
+    ]
+  },
+  {
+    "name": "cap: maxChars stops the block but always keeps the first line",
+    "options": { "projectId": "proj", "maxChars": 20 },
+    "memories": [
+      { "id": "i1", "scope": "global", "kind": "fact", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "第一条足够长的记忆内容用来吃掉预算" },
+      { "id": "i2", "scope": "global", "kind": "fact", "importance": 0.8, "updated_at": "2026-01-01T00:00:00.000Z", "content": "第二条" }
+    ],
+    "expected": {
+      "shown": 1,
+      "eligible": 2,
+      "truncated": true,
+      "lines": ["- [global/fact] 第一条足够长的记忆内容用来吃掉预算"]
+    }
+  },
+  {
+    "name": "cap: contentChars truncates a single memory with an ellipsis",
+    "options": { "projectId": "proj", "contentChars": 6 },
+    "memories": [
+      { "id": "j1", "scope": "global", "kind": "decision", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "一二三四五六七八九十" }
+    ],
+    "expected": { "shown": 1, "eligible": 1, "truncated": false, "lines": ["- [global/decision] 一二三四五六…"] }
+  },
+  {
+    "name": "text: newlines and runs of whitespace collapse to single spaces",
+    "options": { "projectId": "proj" },
+    "memories": [
+      { "id": "k1", "scope": "global", "kind": "fact", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "  第一行\n\n第二行\t\t带制表符  " }
+    ],
+    "expected": { "shown": 1, "eligible": 1, "truncated": false, "lines": ["- [global/fact] 第一行 第二行 带制表符"] }
+  },
+  {
+    "name": "empty: nothing eligible renders no block at all",
+    "options": { "projectId": "proj" },
+    "memories": [
+      { "id": "l1", "scope": "global", "kind": "rule", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "只有规则" }
+    ],
+    "expected": { "shown": 0, "eligible": 0, "truncated": false, "lines": [] },
+    "expectedText": [""]
+  },
+  {
+    "name": "kind: missing/unknown kinds are never eligible",
+    "options": { "projectId": "proj" },
+    "memories": [
+      { "id": "m1", "scope": "global", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "没有 kind" },
+      { "id": "m2", "scope": "global", "kind": "made_up", "importance": 0.9, "updated_at": "2026-01-01T00:00:00.000Z", "content": "未知 kind" },
+      { "id": "m3", "scope": "global", "kind": "fact", "importance": 0.1, "updated_at": "2026-01-01T00:00:00.000Z", "content": "正常事实" }
+    ],
+    "expected": { "shown": 1, "eligible": 1, "truncated": false, "lines": ["- [global/fact] 正常事实"] }
+  }
+]
