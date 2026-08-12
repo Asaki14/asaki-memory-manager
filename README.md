@@ -234,6 +234,8 @@ The same tool surface is served two ways:
 - **Remote (recommended)** — `src/mcp.ts` serves MCP over HTTP at `POST /mcp`, guarded by the same `ADMIN_API_KEY` bearer as `/v1/*`. Clients like Claude Code need **no local process** — just the Worker URL + bearer. `project_id` is passed explicitly (no git root on the Worker); `user_id` defaults to `ASAKI_MCP_DEFAULT_USER_ID` (or `asaki`).
 - **Local stdio** — `integrations/mcp/asaki-memory.ts` (bundled to `dist/mcp-server.mjs`) is a standalone stdio server for clients that need a local process, e.g. Codex. See [`integrations/codex/README.md`](integrations/codex/README.md).
 
+That bundle is committed, so it can go stale. `npm install` wires a `pre-commit` hook (`.githooks/pre-commit`) that rebuilds it and folds it into any commit touching its sources; `npm run build:mcp` rebuilds it by hand and `npm run check:mcp-bundle` just reports whether it is current. CI checks it too.
+
 ## API reference
 
 All `/v1/*` endpoints require a bearer token. If `ADMIN_API_KEY` is unset, every `/v1/*` route returns `503`.

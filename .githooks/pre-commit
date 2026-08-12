@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# Git pre-commit hook: keep dist/mcp-server.mjs from ever drifting away from its sources.
+#
+# The CI job `mcp-build-drift` is the final line of defense and stays exactly as it was. This hook
+# is the *local* half: it makes "I changed the MCP source and forgot to rebuild the bundle" a
+# non-event instead of a red CI run (that failure burned CI #86-#88 on 2026-07-21).
+#
+# Behaviour when a commit stages any bundle input:
+#   - unstaged edits to those inputs  -> refuse (a rebuild would bundle code this commit does not
+#                                        contain, so the committed bundle would be a lie)
+#   - bundle out of date              -> rebuild and `git add` it into this same commit
+#   - bundle already current          -> silent no-op
+#
+# Escape hatches: ASAKI_SKIP_BUNDLE_GUARD=1 git commit ... , or the usual `git commit --no-verify`.
+#
+# Everything above the ASAKI_BUNDLE_GUARD_LIB guard is a library region: scripts/eval-bundle-guard.sh
+# sources this file to test the real decision function instead of a copy. Keep new side effects
+# below that guard — same convention as integrations/claude-code/stop-extract.sh.
+
+# Inputs whose change can alter dist/mcp-server.mjs: the bundle entry and everything it pulls in,
+# the dependency pin, and the build definition itself.
+asaki_bundle_input() {
+  case "$1" in
+    integrations/mcp/*) return 0 ;;
+    package-lock.json | package.json) return 0 ;;
+    scripts/build-mcp.mjs | .githooks/pre-commit) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Reads NUL-free paths on stdin, one per line; exits 0 if any of them is a bundle input.
+asaki_bundle_inputs_touched() {
+  local path
+  local touched=1
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    if asaki_bundle_input "$path"; then touched=0; fi
+  done
+  return "$touched"
+}
+
+if [ -n "${ASAKI_BUNDLE_GUARD_LIB:-}" ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
+set -uo pipefail
+
+if [ -n "${ASAKI_SKIP_BUNDLE_GUARD:-}" ]; then
+  exit 0
+fi
+
+ROOT="$(git rev-parse --show-toplevel)" || exit 0
+cd "$ROOT" || exit 0
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
+printf '%s\n' "$STAGED" | asaki_bundle_inputs_touched || exit 0
+
+# A rebuild reads the WORKING TREE, not the index. If an input differs between the two, the bundle
+# this hook would produce belongs to a commit that is not the one being made.
+DIRTY=$(git diff --name-only -- integrations/mcp package.json package-lock.json scripts/build-mcp.mjs)
+if [ -n "$DIRTY" ]; then
+  echo "pre-commit: MCP bundle inputs have unstaged changes:" >&2
+  printf '  %s\n' $DIRTY >&2
+  echo "pre-commit: stage them (or stash them) so the rebuilt bundle matches what you commit." >&2
+  echo "pre-commit: bypass with ASAKI_SKIP_BUNDLE_GUARD=1 git commit ..." >&2
+  exit 1
+fi
+
+if ! node scripts/build-mcp.mjs >/dev/null; then
+  echo "pre-commit: MCP bundle rebuild failed (see above); commit aborted." >&2
+  exit 1
+fi
+
+if ! git diff --quiet -- dist/mcp-server.mjs; then
+  git add dist/mcp-server.mjs || exit 1
+  echo "pre-commit: rebuilt dist/mcp-server.mjs and added it to this commit."
+fi
+
+exit 0

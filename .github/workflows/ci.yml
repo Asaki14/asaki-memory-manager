@@ -27,9 +27,15 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run build:mcp
-      - name: Ensure dist/mcp-server.mjs matches source (rebuild it if this fails)
-        run: git diff --exit-code dist/mcp-server.mjs
+      # Final line of defense. The local pre-commit guard (.githooks/pre-commit, wired up by the
+      # npm `prepare` script) is what normally keeps this green; this job stays because a hook can
+      # always be bypassed with --no-verify or skipped on a machine that never ran npm install.
+      - name: Ensure dist/mcp-server.mjs matches source (npm run build:mcp if this fails)
+        run: npm run check:mcp-bundle
+      - name: Ensure the rebuild is byte-stable in a clean checkout
+        run: |
+          npm run build:mcp
+          git diff --exit-code dist/mcp-server.mjs
 
   offline-evals:
     runs-on: ubuntu-latest
@@ -59,6 +65,7 @@ jobs:
       - run: npm run eval:lifecycle
       - run: npm run eval:purge-scrub
       - run: npm run eval:review-park
+      - run: npm run eval:bundle-guard
 
   hygiene:
     runs-on: ubuntu-latest
