@@ -550,7 +550,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'asaki_memory_review_resolve',
     description:
-      'Resolve a pending Asaki memory review as add, merge, update, delete, or ignore. update/delete/merge require memory_id (the existing memory to replace/delete/merge into). Only call after explicit user approval.',
+      'Resolve a pending Asaki memory review as add, merge, update, delete, or ignore. update = overwrite with candidate text unless content is given; for a merge, pass the merged text via content. update/delete/merge require memory_id. Only call after explicit user approval.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -558,6 +558,10 @@ const TOOLS: ToolDef[] = [
         action: { type: 'string', enum: ['add', 'merge', 'update', 'delete', 'ignore'] },
         memory_id: { type: 'string' },
         reason: { type: 'string' },
+        content: { type: 'string', description: 'Exact resulting text for action=update. Without it, the candidate text overwrites the target.' },
+        kind: { type: 'string', enum: [...KINDS], description: 'Optional resulting kind for action=update. Omit to preserve the target kind when content is given.' },
+        importance: { type: 'number', minimum: 0, maximum: 1, description: 'Optional resulting importance for action=update. Omit to preserve the target importance when content is given.' },
+        confidence: { type: 'number', minimum: 0, maximum: 1, description: 'Optional resulting confidence for action=update. Omit to preserve the target confidence when content is given.' },
         promote_to_global: {
           type: 'boolean',
           description: 'Accept the row\'s "⤷ promote:" suggestion: store the candidate as scope=global instead of project. Only valid with action=add, and only after the user approved promotion.',
@@ -569,6 +573,10 @@ const TOOLS: ToolDef[] = [
       const body: Record<string, unknown> = { user_id: userId, action: args.action };
       if (args.memory_id) body.memory_id = args.memory_id;
       if (args.reason) body.reason = args.reason;
+      if (args.content !== undefined) body.content = args.content;
+      if (args.kind !== undefined) body.kind = args.kind;
+      if (args.importance !== undefined) body.importance = args.importance;
+      if (args.confidence !== undefined) body.confidence = args.confidence;
       if (args.promote_to_global) body.promote_to_global = true;
       return { method: 'POST', path: `/v1/memories/reviews/${encodeURIComponent(args.id)}/resolve`, body };
     },
