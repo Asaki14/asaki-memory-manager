@@ -757,5 +757,114 @@
     "name": "neg: audit stale intermediate session-start state",
     "text": "Assistant: Removed large memory injection at Pi session start, now only shows compact status banner.",
     "expectFlag": false
+  },
+  {
+    "name": "correction-midstate-styling-churn",
+    "correction": true,
+    "text": "Prior context (ALREADY PROCESSED — antecedent only, never extract from this block):\nPrior memory candidate: 虚拟工作区高亮不要实心填色，改用半透明（透明度 0xa6，与 bracket 底色一致）\n--- current delta below ---\nUser: 不要颜色了，只加边框",
+    "expectSignal": "correction",
+    "expectSignalSubtype": "terse_redirect",
+    "expectRuleForm": "prohibition",
+    "expectAntecedentSource": "candidate",
+    "expectFlag": false
+  },
+  {
+    "name": "correction-overgeneralized-from-single-cleanup",
+    "correction": true,
+    "text": "Assistant: 保留调研文件作为参考资料\nUser: 调研的文件删掉",
+    "expectSignal": "correction",
+    "expectSignalSubtype": "override_of_action",
+    "expectRuleForm": "prohibition",
+    "expectAntecedentSource": "prose",
+    "expectFlag": false
+  },
+  {
+    "name": "correction-single-incident-troubleshooting-step",
+    "correction": true,
+    "text": "Prior context (ALREADY PROCESSED — antecedent only, never extract from this block):\nAssistant: 历史配方指向的凭证文件 ~/.config/fish/conf.d/xvpn-intel.fish 也不存在\n--- current delta below ---\nUser: 凭证在 ~/.config/fish/conf.d/xvpn-intel.fish，但是好像被删掉了，在 git 历史中尝试是否能恢复这一个文件",
+    "expectSignal": "correction",
+    "expectSignalSubtype": "terse_redirect",
+    "expectRuleForm": "procedure",
+    "expectAntecedentSource": "prior_tail",
+    "expectFlag": false
+  },
+  {
+    "name": "correction-transient-version-claim",
+    "correction": true,
+    "text": "Assistant: Pi 0.84.1 可通过模型覆盖支持约 1.05M context；请求超过 272K tokens 后长上下文费率会提高。\nUser: nonono，是今天 tibo 发的推文，说更新了 1m context，我在 X 上看到的，你去找到并看看他到底在说些什么",
+    "expectSignal": "correction",
+    "expectSignalSubtype": "explicit_negation",
+    "expectRuleForm": "retract",
+    "expectAntecedentSource": "prose",
+    "expectFlag": false
+  },
+  {
+    "name": "correction-one-off-task-scoping",
+    "correction": true,
+    "text": "Assistant: 为新增小组（王伟组、张旺阳组）请用户提供字辈，以在当前花名册更新中同步处理\nUser: 先不加这两组，把其他组坐好就可以了",
+    "expectSignal": "correction",
+    "expectSignalSubtype": "override_of_action",
+    "expectRuleForm": "prohibition",
+    "expectAntecedentSource": "prose",
+    "expectFlag": false
+  },
+  {
+    "name": "correction-one-off-task-scoping-gitignored-step",
+    "correction": true,
+    "text": "Assistant: I will update data/names-db.json as part of this task.\nUser: data/names-db.json is gitignored and absent in your worktree - skip that step.",
+    "expectSignal": "correction",
+    "expectSignalSubtype": "override_of_action",
+    "expectRuleForm": "prohibition",
+    "expectAntecedentSource": "prose",
+    "expectFlag": false
+  },
+  {
+    "name": "correction-one-off-task-scoping-same-pr",
+    "correction": true,
+    "text": "Assistant: This PR only changes the newly added groups.\nUser: also change 王少鹏 from 竹 to 杉 in src/generationChars.js, in this same PR.",
+    "expectSignal": "correction",
+    "expectSignalSubtype": "terse_redirect",
+    "expectRuleForm": "procedure",
+    "expectAntecedentSource": "prose",
+    "expectFlag": false
+  },
+  {
+    "name": "correction-already-curated-in-captain-md",
+    "correction": true,
+    "text": "Assistant: 等等，pane 那个改一下，我发现第二个船员会出现在 tab 左下，默认应该在右下\nUser: 与第一个船员共享右半侧才对，后面的船员以此类推",
+    "expectSignal": "correction",
+    "expectSignalSubtype": "explicit_negation",
+    "expectRuleForm": "preference",
+    "expectAntecedentSource": "prose",
+    "expectFlag": false
+  },
+  {
+    "name": "outcome-shipped-status-no-durable-value",
+    "text": "Assistant: Herdr pane placement feature completed: unit tests (11 cases), e2e verified in guarded lab (2026-08-12), lint clean, docs synced.",
+    "expectFlag": false
+  },
+  {
+    "name": "outcome-config-value-belongs-in-repo",
+    "text": "Assistant: paneru 启用焦点跟随鼠标（focus_follows_mouse = true）",
+    "expectFlag": false
+  },
+  {
+    "name": "outcome-contradicts-existing-nondisclosure-rule",
+    "text": "Assistant: subscription-monitor 的 live checkout 已配置 ops/env.local，权限为 0600，QBZ_HOST 指向 http://127.51.0.150。",
+    "expectFlag": false
+  },
+  {
+    "name": "correction-durable-procedure-positive",
+    "correction": true,
+    "text": "Assistant: 报告两个审计工已入队列进展正常，但未检查队列完成通知或处理任务成果\nUser: crew 已经完成很久了，为什么你没反应？",
+    "expectFlag": true,
+    "expectSignal": "correction",
+    "expectSignalSubtype": "explicit_negation",
+    "expectRuleForm": "procedure",
+    "expectAntecedentSource": "prose",
+    "expectScope": "project",
+    "expectRuleIncludes": [
+      "完成通知"
+    ]
   }
 ]
