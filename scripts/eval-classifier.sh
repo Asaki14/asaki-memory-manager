@@ -6,6 +6,11 @@
 # this hits `claude -p --safe-mode` for real, same as production, so it needs the `claude` CLI
 # logged in on this machine. No Worker/API key required; nothing gets written anywhere.
 #
+# The calls run with bounded concurrency (ASAKI_CLASSIFIER_CONCURRENCY, default 8) and a per-call
+# timeout with one retry (ASAKI_CLASSIFIER_TIMEOUT, default 120s). Concurrency covers ONLY the
+# calls; every assertion, counter and rollout gate is evaluated afterwards in fixture order, so a
+# parallel pass and a sequential one produce the same verdicts and the same output.
+#
 # Correction mode is ON by default here (ASAKI_MEMORY_CORRECTION_MODE=0 selects the legacy
 # prompt), because the rollout gates in the plan are stated for the correction prompt and the
 # 33 pre-correction cases must keep passing under it — that is the zero-regression check.
@@ -24,10 +29,19 @@ fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Defaults to the full fixture set. Point ASAKI_CLASSIFIER_FIXTURES at a subset file to run one
-# targeted group (each case is a real LLM call, so a full pass is minutes per case).
+# targeted group: either a full fixture file, or a file naming cases out of the full set — see
+# test/fixtures/classifier-smoke.json, the fast lane for prompt/fixture iteration.
 FIXTURES="${ASAKI_CLASSIFIER_FIXTURES:-$ROOT/test/fixtures/classifier-cases.json}"
 CLASSIFIER_MODEL="${ASAKI_MEMORY_CLASSIFIER_MODEL:-claude-haiku-4-5-20251001}"
 CORRECTION_MODE="${ASAKI_MEMORY_CORRECTION_MODE:-1}"
+# Each case is one real `claude -p` call, so the wall clock is dominated by process cold start
+# plus inference. The calls are run with bounded concurrency; every assertion still runs
+# sequentially in fixture order afterwards, so results are order-independent and identical to a
+# sequential pass.
+CONCURRENCY="${ASAKI_CLASSIFIER_CONCURRENCY:-8}"
+# Per-call wall-clock budget in seconds. A call that exceeds it is killed and retried ONCE; a
+# second failure is a normal case failure with a stated reason, never a silently hung run.
+CALL_TIMEOUT="${ASAKI_CLASSIFIER_TIMEOUT:-120}"
 
 # Rollout gates (plan §10). Percentages are compared in integer hundredths to stay in POSIX sh
 # arithmetic.
@@ -283,24 +297,98 @@ console.log(derived == null ? 0.5 : derived);
 ' -- "$1" "$2" "$3" 2>/dev/null)
 }
 
-CASE_COUNT=$(jq 'length' "$FIXTURES")
-for i in $(seq 0 $((CASE_COUNT - 1))); do
-  CASE=$(jq -c ".[$i]" "$FIXTURES")
-  NAME=$(echo "$CASE" | jq -r '.name')
-  TEXT=$(echo "$CASE" | jq -r '.text')
-  EXPECT_FLAG=$(echo "$CASE" | jq -r '.expectFlag')
-  IS_CORRECTION=$(echo "$CASE" | jq -r '.correction // false')
+# ---------------------------------------------------------------------------
+# Fixture selection. ASAKI_CLASSIFIER_FIXTURES accepts either a full fixture file (a JSON array
+# of case objects) or a SUBSET file naming cases out of the full set (a JSON array of strings) —
+# the fast lane, e.g. test/fixtures/classifier-smoke.json. A name that matches no case is an
+# error, so a renamed fixture can never silently shrink the subset.
+# ---------------------------------------------------------------------------
+BASE_FIXTURES="$ROOT/test/fixtures/classifier-cases.json"
+WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/asaki-classifier-eval.XXXXXX")
+trap 'rm -rf "$WORKDIR"' EXIT
+
+if jq -e 'type == "array" and length > 0 and (.[0] | type == "string")' "$FIXTURES" >/dev/null 2>&1; then
+  MISSING=$(jq -r --slurpfile all "$BASE_FIXTURES" '[ .[] | select(([$all[0][].name] | index(.)) == null) ] | join(", ")' "$FIXTURES")
+  if [ -n "$MISSING" ]; then
+    echo "unknown case name(s) in $FIXTURES: $MISSING" >&2
+    exit 1
+  fi
+  CASES_FILE="$WORKDIR/cases.json"
+  jq -c --slurpfile sel "$FIXTURES" '[ .[] | . as $c | select($sel[0] | index($c.name)) ]' "$BASE_FIXTURES" > "$CASES_FILE"
+else
+  CASES_FILE="$FIXTURES"
+fi
+
+CASE_COUNT=$(jq 'length' "$CASES_FILE")
+
+# Phase 1: the LLM calls, bounded-concurrency. Each case writes its raw response to
+# "$WORKDIR/<i>.resp", or a one-line reason to "$WORKDIR/<i>.err" when both attempts failed.
+call_case() {
+  local i="$1"
+  local fixture text project_context project_block prompt out attempt rc pid watchdog
+  fixture=$(jq -c ".[$i]" "$CASES_FILE")
+  text=$(echo "$fixture" | jq -r '.text')
 
   # Project attribution: a case may carry a `projectContext` snapshot. It is rendered by the same
   # module the clients use, so this eval feeds the model exactly the block production feeds it.
-  PROJECT_CONTEXT=$(echo "$CASE" | jq -c '.projectContext // empty')
-  if [ -n "$PROJECT_CONTEXT" ]; then
-    PROJECT_BLOCK=$(node "$ROOT/integrations/claude-code/project-context.mjs" render "$PROJECT_CONTEXT")
-    PROMPT=$(printf '%s\n\nDelta:\n%s' "$PROJECT_BLOCK" "$TEXT")
+  project_context=$(echo "$fixture" | jq -c '.projectContext // empty')
+  if [ -n "$project_context" ]; then
+    project_block=$(node "$ROOT/integrations/claude-code/project-context.mjs" render "$project_context")
+    prompt=$(printf '%s\n\nDelta:\n%s' "$project_block" "$text")
   else
-    PROMPT=$(printf 'Delta:\n%s' "$TEXT")
+    prompt=$(printf 'Delta:\n%s' "$text")
   fi
-  RESP=$(claude -p --safe-mode --tools "" --model "$CLASSIFIER_MODEL" --system-prompt "$SYSTEM_PROMPT" --json-schema "$SCHEMA" "$PROMPT" 2>/dev/null)
+
+  out="$WORKDIR/$i.resp"
+  rc=0
+  for attempt in 1 2; do
+    : > "$out"
+    claude -p --safe-mode --tools "" --model "$CLASSIFIER_MODEL" --system-prompt "$SYSTEM_PROMPT" --json-schema "$SCHEMA" "$prompt" >"$out" 2>/dev/null &
+    pid=$!
+    ( sleep "$CALL_TIMEOUT"; kill -9 "$pid" 2>/dev/null ) &
+    watchdog=$!
+    wait "$pid"
+    rc=$?
+    kill "$watchdog" 2>/dev/null
+    wait "$watchdog" 2>/dev/null
+    if [ "$rc" -eq 0 ] && [ -s "$out" ]; then
+      return 0
+    fi
+  done
+  if [ "$rc" -ne 0 ]; then
+    echo "classifier call failed on both attempts (last exit=$rc, per-call timeout=${CALL_TIMEOUT}s)" > "$WORKDIR/$i.err"
+  else
+    echo "classifier call returned empty output on both attempts" > "$WORKDIR/$i.err"
+  fi
+  return 0
+}
+
+echo "running ${CASE_COUNT} classifier cases (concurrency=${CONCURRENCY}, per-call timeout=${CALL_TIMEOUT}s)..." >&2
+for i in $(seq 0 $((CASE_COUNT - 1))); do
+  while [ "$(jobs -rp | wc -l | tr -d ' ')" -ge "$CONCURRENCY" ]; do
+    sleep 0.2
+  done
+  # Per-case stderr goes to a log rather than the terminal: a retried timeout would otherwise
+  # print a bare "Killed: 9" job notice. The log is surfaced with the failure when one happens.
+  call_case "$i" 2>"$WORKDIR/$i.log" &
+done
+wait
+
+# Phase 2: assertions, counters and gates, strictly sequential in fixture order.
+for i in $(seq 0 $((CASE_COUNT - 1))); do
+  CASE=$(jq -c ".[$i]" "$CASES_FILE")
+  NAME=$(echo "$CASE" | jq -r '.name')
+  EXPECT_FLAG=$(echo "$CASE" | jq -r '.expectFlag')
+  IS_CORRECTION=$(echo "$CASE" | jq -r '.correction // false')
+
+  PROJECT_CONTEXT=$(echo "$CASE" | jq -c '.projectContext // empty')
+
+  if [ -f "$WORKDIR/$i.err" ]; then
+    FAIL=$((FAIL + 1))
+    FAILURES+=("$NAME: $(cat "$WORKDIR/$i.err") $(tail -n 3 "$WORKDIR/$i.log" 2>/dev/null | tr '\n' ' ')")
+    continue
+  fi
+  RESP=$(cat "$WORKDIR/$i.resp")
   JSON=$(echo "$RESP" | sed -E '/^```/d')
 
   if ! echo "$JSON" | jq -e . >/dev/null 2>&1; then
