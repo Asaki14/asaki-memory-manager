@@ -1700,10 +1700,14 @@ Apply this checklist:
 
 Do NOT flag: an in-progress/undecided plan, a problem report that ends by asking whether to fix it, routine implementation-progress update within ongoing work, or prompt/eval calibration notes that quote hypothetical user inputs. Actual user forget/retract requests are durable and should be flag=true.
 
-Three noise classes that read like durable outcomes but are not — all flag=false:
-- Pipeline state: plan/review verdicts, blocker lists, eval pass rates, batch statistics, rollout gate numbers. They describe one run of a process and the next run replaces them.
+Additional noise classes that read like durable memories but are not — all flag=false:
+- Pipeline or shipped status: plan/review verdicts, blocker lists, eval pass rates, batch statistics, rollout gate numbers, or a feature merely reported completed/deployed/tested. They describe one run or delivery; save only a reusable learning or procedure learned from it.
 - A completed one-off edit to content or documentation whose own record is the artifact it changed (one row in a data file, a doc/skill/prompt file update). The durable configuration or behaviour state a change leaves behind still qualifies; the edit event by itself does not.
 - A restatement of a rule the delta itself presents as already recorded, already in effect, or unchanged. Flag it only when the delta actually establishes or changes the rule.
+- A one-off correction that only scopes the current task, names one cleanup action, or gives one troubleshooting step. Do not generalize "delete this file", "skip this step", "also change this in this PR", or "try git history for this incident" into a standing rule.
+- A transient version claim, release number, context-window figure, or time-relative fact such as "today". Likewise, a bare literal config assignment (key=value or a current numeric value) whose source of truth is a repository file belongs in that file, unless the delta captures a resolved bug or durable behaviour/learning beyond the literal value.
+- A candidate about firstmate dispatch layout, workspace placement, whether no-mistakes runs, or concrete model-routing tiers. Curated configuration files already enforce these matters; duplicating them into memory creates drift.
+- Content that a stated nondisclosure rule says must not be persisted or echoed, including named hosts, endpoints, or credential field names. Never turn prohibited content into memory.
 
 Two contrastive examples:
 - "解决了内存泄漏问题，已验证生效" -> flag=true (a previously-existing problem is now resolved).
@@ -1725,7 +1729,7 @@ Two contrastive examples:
 - "Claude Code 的交付文本必须放在回合最后，否则后续工具调用可能使文本不展示" -> flag=true, scope=project (app-specific harness behavior is not global).
 - "用户希望针对技能和工具进行优化，列出推荐项并决定是否禁用" -> flag=false (an open optimization intention is not a completed decision or durable outcome).
 - "paneru 四边 padding 4→10，与 sketchybar 左侧 10px 对齐" -> flag=true, scope=project, and distill the final 10px state rather than the change history.
-- A long SketchyBar popup implementation report -> flag=true, scope=project, but compress it to the stable entry point, switching mechanism, and fallback behavior within 300 characters.
+- A long SketchyBar popup implementation report -> flag=true, scope=project, but compress it within 300 characters while preserving the stable entry point status_popup.sh, switching mechanism, and fallback behavior.
 - "Claude Design 画布页（.dc.html）不在 DesignSync MCP 文件树里（get_file 404）。浏览器登录态下可直接调 Omelette API：读取 GetFile，写回用 UploadFile，DeleteFile 删文件；大段 HTML 下载用 Blob+anchor，上传方向页内 fetch 后再 SHA-256 对齐本地。" -> flag=false (raw one-off API procedure dump, not an explicit repeat-use convention or established project workflow).
 - "用户希望不使用嵌套并复用同一个 herdr 进程和 server" -> flag=false ("不使用嵌套" lacks an object and cannot stand alone).
 - "手动拖高 Ghostty 窗口以填补当前布局缺口" -> flag=false (transient manual UI adjustment).
@@ -1735,6 +1739,14 @@ Two contrastive examples:
 - "复核了一遍现有规则，push 前检查明文密钥这条依然有效，本轮没有新增或修改任何规则" -> flag=false (restating an already-recorded rule adds nothing; flag only when the delta establishes or changes it).
 - "修复 asaki-memory 记忆提取全线失效的 bash 3.2 负偏移 bug，已推送 e07ac92 并验证部署" -> flag=false (a short release/hash recap of a fix already captured in the project is a duplicate, not a second durable memory).
 - "Removed large memory injection at Pi session start, now only shows compact status banner" -> flag=false (an intermediate rollout snapshot that was superseded by the current session-start design is not stable memory).
+- When the user correction is another adjustment to the same visual value (colour, opacity, padding, radius, or offset) during an active tuning loop, and its antecedent is an earlier candidate or agent proposal from that session -> flag=false. Intermediate visual tuning states are expected to be superseded; only an explicitly reported converged final state may qualify.
+- "Prior memory candidate: 虚拟工作区高亮改用半透明" … "User: 不要颜色了，只加边框" -> flag=false (another visual-tuning redirect is an intermediate state, even when it rejects a prior candidate).
+- "保留调研文件" … "调研的文件删掉"; "update data/names-db.json" … "it is gitignored, skip that step"; or "also change X in this same PR" -> flag=false (single-task cleanup and PR scope, not standing rules).
+- "firstmate 第二个船员默认在右下" … "与第一个船员共享右半侧才对" -> flag=false (crew placement is enforced by curated configuration, so memory must not duplicate it).
+- "paneru 启用 focus_follows_mouse = true" -> flag=false (a bare literal repository config assignment belongs only in its source file). By contrast, a completed cross-repository behavioural state such as "two repositories now use build caching" remains flag=true even when project attribution is ambiguous.
+- "Herdr feature completed: tests and e2e passed, lint clean, docs synced" -> flag=false (shipped status without a reusable learning).
+- A candidate that writes a host, endpoint, or credential field which an existing nondisclosure rule says not to persist -> flag=false (memory cannot violate nondisclosure).
+- "Assistant: 报告 crew 仍在队列，未检查完成通知" … "User: crew 已经完成很久了，为什么你没反应？" -> flag=true, scope=project, rule_form=procedure, text must say to check the crew 完成通知 and process results before reporting queue progress (a reusable firstmate procedure failure, not one-off task scope or a global rule).
 
 If flag=true, distill: compress the candidate into exactly ONE self-contained sentence for text, same language as the source. Preference/rule should be roughly 40-160 characters; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 characters. No bullet lists. One fact per memory — never chain multiple facts with semicolons/commas. Never paste raw code, CLI output, or a multi-paragraph narrative.
 
@@ -1778,7 +1790,7 @@ Corrections are the PRIORITY, not the only thing worth saving. A delta with no c
 Fields:
 - signal: correction | preference | outcome | none. Use "preference" for a stated preference/rule with no correction, "outcome" for a completed decision/fix/learning, "none" when flag=false and nothing was detected.
 - signal_subtype, only when signal=correction (otherwise empty string):
-  - explicit_negation — 不对、不是这样、错了、这不行、no that is wrong, that is not right
+  - explicit_negation — 不对、不是这样、错了、这不行、为什么你没反应、no that is wrong, that is not right
   - override_of_action — 不用改了、别改、改回、回到…、还是原来的、撤销、revert, undo that, put it back
   - terse_redirect — 去掉、删掉、换成、直接用、应该是…、use X instead, drop that
   - repeat_complaint — 又…、还是…、说过了、都说了、第几次了、again, I already said
@@ -1808,10 +1820,14 @@ Apply this checklist to every candidate, correction or not:
 
 Do NOT flag: an in-progress/undecided plan, a problem report that ends by asking whether to fix it, routine implementation-progress update within ongoing work, or prompt/eval calibration notes that quote hypothetical user inputs. Actual user forget/retract requests are durable and should be flag=true.
 
-Three noise classes that read like durable outcomes but are not — all flag=false:
-- Pipeline state: plan/review verdicts, blocker lists, eval pass rates, batch statistics, rollout gate numbers. They describe one run of a process and the next run replaces them.
+Additional noise classes that read like durable memories but are not — all flag=false:
+- Pipeline or shipped status: plan/review verdicts, blocker lists, eval pass rates, batch statistics, rollout gate numbers, or a feature merely reported completed/deployed/tested. They describe one run or delivery; save only a reusable learning or procedure learned from it.
 - A completed one-off edit to content or documentation whose own record is the artifact it changed (one row in a data file, a doc/skill/prompt file update). The durable configuration or behaviour state a change leaves behind still qualifies; the edit event by itself does not.
 - A restatement of a rule the delta itself presents as already recorded, already in effect, or unchanged. Flag it only when the delta actually establishes or changes the rule.
+- A one-off correction that only scopes the current task, names one cleanup action, or gives one troubleshooting step. Do not generalize "delete this file", "skip this step", "also change this in this PR", or "try git history for this incident" into a standing rule.
+- A transient version claim, release number, context-window figure, or time-relative fact such as "today". Likewise, a bare literal config assignment (key=value or a current numeric value) whose source of truth is a repository file belongs in that file, unless the delta captures a resolved bug or durable behaviour/learning beyond the literal value.
+- A candidate about firstmate dispatch layout, workspace placement, whether no-mistakes runs, or concrete model-routing tiers. Curated configuration files already enforce these matters; duplicating them into memory creates drift.
+- Content that a stated nondisclosure rule says must not be persisted or echoed, including named hosts, endpoints, or credential field names. Never turn prohibited content into memory.
 
 Correction examples:
 - "Tool: bash git commit -m \"wip\"" … "User: 别再自动 commit 了" -> flag=true, signal=correction, signal_subtype=override_of_action, rule_form=prohibition, antecedent_source=trace, text="不要在未获得确认前自动 commit 本仓库的改动".
@@ -1849,7 +1865,7 @@ Non-correction examples (unchanged rules):
 - "Claude Code 的交付文本必须放在回合最后，否则后续工具调用可能使文本不展示" -> flag=true, scope=project (app-specific harness behavior is not global).
 - "用户希望针对技能和工具进行优化，列出推荐项并决定是否禁用" -> flag=false (an open optimization intention is not a completed decision or durable outcome).
 - "paneru 四边 padding 4→10，与 sketchybar 左侧 10px 对齐" -> flag=true, scope=project, and distill the final 10px state rather than the change history.
-- A long SketchyBar popup implementation report -> flag=true, scope=project, but compress it to the stable entry point, switching mechanism, and fallback behavior within 300 characters.
+- A long SketchyBar popup implementation report -> flag=true, scope=project, but compress it within 300 characters while preserving the stable entry point status_popup.sh, switching mechanism, and fallback behavior.
 - "Claude Design 画布页（.dc.html）不在 DesignSync MCP 文件树里（get_file 404）。浏览器登录态下可直接调 Omelette API：读取 GetFile，写回用 UploadFile，DeleteFile 删文件；大段 HTML 下载用 Blob+anchor，上传方向页内 fetch 后再 SHA-256 对齐本地。" -> flag=false (raw one-off API procedure dump, not an explicit repeat-use convention or established project workflow).
 - "用户希望不使用嵌套并复用同一个 herdr 进程和 server" -> flag=false ("不使用嵌套" lacks an object and cannot stand alone).
 - "手动拖高 Ghostty 窗口以填补当前布局缺口" -> flag=false (transient manual UI adjustment).
@@ -1859,6 +1875,14 @@ Non-correction examples (unchanged rules):
 - "复核了一遍现有规则，push 前检查明文密钥这条依然有效，本轮没有新增或修改任何规则" -> flag=false (restating an already-recorded rule adds nothing; flag only when the delta establishes or changes it).
 - "修复 asaki-memory 记忆提取全线失效的 bash 3.2 负偏移 bug，已推送 e07ac92 并验证部署" -> flag=false (a short release/hash recap of a fix already captured in the project is a duplicate, not a second durable memory).
 - "Removed large memory injection at Pi session start, now only shows compact status banner" -> flag=false (an intermediate rollout snapshot that was superseded by the current session-start design is not stable memory).
+- When the user correction is another adjustment to the same visual value (colour, opacity, padding, radius, or offset) during an active tuning loop, and its antecedent is an earlier candidate or agent proposal from that session -> flag=false. Intermediate visual tuning states are expected to be superseded; only an explicitly reported converged final state may qualify.
+- "Prior memory candidate: 虚拟工作区高亮改用半透明" … "User: 不要颜色了，只加边框" -> flag=false (another visual-tuning redirect is an intermediate state, even when it rejects a prior candidate).
+- "保留调研文件" … "调研的文件删掉"; "update data/names-db.json" … "it is gitignored, skip that step"; or "also change X in this same PR" -> flag=false (single-task cleanup and PR scope, not standing rules).
+- "firstmate 第二个船员默认在右下" … "与第一个船员共享右半侧才对" -> flag=false (crew placement is enforced by curated configuration, so memory must not duplicate it).
+- "paneru 启用 focus_follows_mouse = true" -> flag=false (a bare literal repository config assignment belongs only in its source file). By contrast, a completed cross-repository behavioural state such as "two repositories now use build caching" remains flag=true even when project attribution is ambiguous.
+- "Herdr feature completed: tests and e2e passed, lint clean, docs synced" -> flag=false (shipped status without a reusable learning).
+- A candidate that writes a host, endpoint, or credential field which an existing nondisclosure rule says not to persist -> flag=false (memory cannot violate nondisclosure).
+- "Assistant: 报告 crew 仍在队列，未检查完成通知" … "User: crew 已经完成很久了，为什么你没反应？" -> flag=true, scope=project, rule_form=procedure, text must say to check the crew 完成通知 and process results before reporting queue progress (a reusable firstmate procedure failure, not one-off task scope or a global rule).
 
 If flag=true, distill: compress the candidate into exactly ONE self-contained sentence for text, same language as the source. Preference/rule should be roughly 40-160 characters; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 characters. No bullet lists. One fact per memory — never chain multiple facts with semicolons/commas. Never paste raw code, CLI output, or a multi-paragraph narrative.
 
