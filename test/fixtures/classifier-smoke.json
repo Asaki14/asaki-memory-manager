@@ -1,0 +1,17 @@
+[
+  "neg: bare imperative command",
+  "neg: quoted source/prompt string",
+  "pos: explicit user preference",
+  "pos: assistant completed bug-fix summary",
+  "neg: eval batch pass rate is a run statistic",
+  "correction: explicit_negation over an assistant claim (zh)",
+  "correction: terse_redirect (en)",
+  "correction: approval_after_change (zh)",
+  "order: post-verdict tool line must not become the antecedent",
+  "competition: bug fix plus a correction in one delta",
+  "neg: correction with no recoverable antecedent",
+  "correction-one-off-task-scoping",
+  "correction-durable-procedure-positive",
+  "proj: orchestrator-hosted business memory lands in the business repo",
+  "proj: ambiguous multi-repository delta writes nothing"
+]
