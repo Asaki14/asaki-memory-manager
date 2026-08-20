@@ -413,7 +413,7 @@ server.tool(
 
 server.tool(
   "asaki_memory_list",
-  "List memories from Asaki personal memory with optional filters. Use during explicit memory audit.",
+  "List memories with optional filters. With scope omitted, visibility is global plus only the supplied project_id/session_id; with neither id it returns only global memories. Use asaki_memory_project_list to discover every project during an audit.",
   {
     scope: z.enum(["global", "project", "session"]).optional(),
     project_id: z.string().optional(),
@@ -441,6 +441,27 @@ server.tool(
   },
 );
 
+
+server.tool(
+  "asaki_memory_project_list",
+  "Enumerate every project_id that holds project-scoped memories, with total/active memory counts and pending-review counts. Page with limit/offset during a whole-store audit.",
+  {
+    limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).optional(),
+  },
+  async ({ limit, offset }, extra) => {
+    const cfg = memoryConfig();
+    const body: Record<string, unknown> = { user_id: cfg.userId };
+    if (limit != null) body.limit = limit;
+    if (offset != null) body.offset = offset;
+    const data = await apiRequest("/v1/memories/projects", body, combinedSignal(extra.signal));
+    const projects = Array.isArray(data.projects) ? (data.projects as Record<string, any>[]) : [];
+    if (projects.length === 0) return { content: [{ type: "text" as const, text: "No Asaki memory projects found." }] };
+    const lines = projects.map((project, index) => `${index + 1}. project=${project.project_id} memories=${project.memory_count} active=${project.active_memory_count} pendingReviews=${project.pending_review_count}`);
+    const listBudget = joinWithinBudget(lines);
+    return { content: [{ type: "text" as const, text: withBudgetFooter(listBudget, (offset ?? 0) + listBudget.shown) }] };
+  },
+);
 
 server.tool(
   "asaki_memory_review_create",
@@ -485,7 +506,7 @@ server.tool(
 
 server.tool(
   "asaki_memory_review_list",
-  "List pending or resolved Asaki memory review items. Use during explicit memory audit.",
+  "List pending or resolved review items. pending_count always means all pending rows for the user across every scope/project, independent of page filters. Use during explicit memory audit.",
   {
     status: z.string().optional(),
     project_id: z.string().optional(),
@@ -493,7 +514,7 @@ server.tool(
     source: z.string().optional(),
     limit: z.number().int().min(1).max(100).optional(),
     offset: z.number().int().min(0).optional(),
-    include_suggestions: z.boolean().optional().describe("Attach a potential_duplicate hint (matched memory + suggested add/merge/update/delete/ignore) to each pending review. Default off."),
+    include_suggestions: z.boolean().optional().describe("Attach similarity-based hints. Expensive mode requires limit <= 12; page with offset. Default off."),
   },
   async ({ status, project_id, session_id, source, limit, offset, include_suggestions }, extra) => {
     const cfg = memoryConfig();
@@ -506,9 +527,10 @@ server.tool(
     if (include_suggestions) body.include_suggestions = true;
     const data = await apiRequest("/v1/memories/reviews/list", body, combinedSignal(extra.signal));
     const reviews = Array.isArray(data.reviews) ? (data.reviews as Record<string, unknown>[]) : [];
-    if (reviews.length === 0) return { content: [{ type: "text" as const, text: "No Asaki memory reviews found." }] };
+    const pending = typeof data.pending_count === "number" ? ` Pending across store: ${data.pending_count}.` : "";
+    if (reviews.length === 0) return { content: [{ type: "text" as const, text: `No Asaki memory reviews found.${pending}` }] };
     const reviewBudget = joinWithinBudget(reviews.map((item, index) => formatReviewLine(item, index)));
-    return { content: [{ type: "text" as const, text: withBudgetFooter(reviewBudget, (offset ?? 0) + reviewBudget.shown) }] };
+    return { content: [{ type: "text" as const, text: `${withBudgetFooter(reviewBudget, (offset ?? 0) + reviewBudget.shown)}${pending}` }] };
   },
 );
 

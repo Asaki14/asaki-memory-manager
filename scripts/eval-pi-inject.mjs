@@ -78,7 +78,7 @@ globalThis.fetch = async (url, init) => {
   calls.push({ url: String(url), body });
   if (failFetch) throw new Error('network down');
   if (String(url).endsWith('/v1/memories/list')) return jsonResponse({ memories: MEMORIES });
-  if (String(url).endsWith('/v1/memories/reviews/list')) return jsonResponse({ reviews: [{ id: 'rev1' }, { id: 'rev2' }] });
+  if (String(url).endsWith('/v1/memories/reviews/list')) return jsonResponse({ reviews: [{ id: 'rev1' }, { id: 'rev2' }], pending_count: 113 });
   if (String(url).endsWith('/v1/memories/search')) return jsonResponse({ results: searchResults });
   return jsonResponse({});
 };
@@ -204,7 +204,7 @@ const bannerEntry = entries.find((entry) => entry.type === 'asaki-memory-banner'
 const bannerLine = bannerEntry ? String(bannerEntry.data).split('\n')[1] : '';
 check(
   'the banner prints the fixed field order with counts',
-  'user=asaki | project=proj | memories=4 | pendingReviews=2 | classifier=on model=claude-test | standingRules=2/2 | projectDigest=2/2',
+  'user=asaki | project=proj | memories=4 | pendingReviews=113 | classifier=on model=claude-test | standingRules=2/2 | projectDigest=2/2',
   bannerLine.replace(/classifier=on model=[^|]*/, 'classifier=on model=claude-test '),
 );
 checkTrue('the banner has no autoExtract field', !bannerLine.includes('autoExtract'));

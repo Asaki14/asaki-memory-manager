@@ -417,7 +417,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'asaki_memory_list',
-    description: 'List memories from Asaki personal memory with optional filters. Use during explicit memory audit.',
+    description: 'List memories with optional filters. With scope omitted, visibility is global plus only the supplied project_id/session_id; with neither id it returns only global memories. Use asaki_memory_project_list to discover every project during an audit.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -445,6 +445,30 @@ const TOOLS: ToolDef[] = [
       const memories = asArray(data.memories);
       if (memories.length === 0) return 'No Asaki memories found.';
       const budget = joinWithinBudget(memories.map((item, index) => formatLine(item, index)));
+      return withBudgetFooter(budget, (args.offset ?? 0) + budget.shown);
+    },
+  },
+  {
+    name: 'asaki_memory_project_list',
+    description: 'Enumerate every project_id that holds project-scoped memories, with total/active memory counts and pending-review counts. Page with limit/offset during a whole-store audit.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'integer', minimum: 1, maximum: 100 },
+        offset: { type: 'integer', minimum: 0 },
+      },
+    },
+    toRequest(args, userId) {
+      const body: Record<string, unknown> = { user_id: userId };
+      if (args.limit != null) body.limit = args.limit;
+      if (args.offset != null) body.offset = args.offset;
+      return { method: 'POST', path: '/v1/memories/projects', body };
+    },
+    format(data, args) {
+      const projects = asArray(data.projects) as Record<string, any>[];
+      if (projects.length === 0) return 'No Asaki memory projects found.';
+      const lines = projects.map((project, index) => `${index + 1}. project=${project.project_id} memories=${project.memory_count} active=${project.active_memory_count} pendingReviews=${project.pending_review_count}`);
+      const budget = joinWithinBudget(lines);
       return withBudgetFooter(budget, (args.offset ?? 0) + budget.shown);
     },
   },
@@ -489,7 +513,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'asaki_memory_review_list',
-    description: 'List pending or resolved Asaki memory review items. Use during explicit memory audit.',
+    description: 'List pending or resolved review items. pending_count always means all pending rows for the user across every scope/project, independent of page filters. Use during explicit memory audit.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -500,7 +524,7 @@ const TOOLS: ToolDef[] = [
         signal: { type: 'string', enum: ['correction', 'preference', 'outcome', 'none'], description: 'Filter by candidate signal. Corrections sort first regardless; use signal=correction to see only them during an audit.' },
         limit: { type: 'integer', minimum: 1, maximum: 100 },
         offset: { type: 'integer', minimum: 0 },
-        include_suggestions: { type: 'boolean', description: 'Attach a potential_duplicate hint per pending review, plus supersedes_candidates on correction rows. Default off.' },
+        include_suggestions: { type: 'boolean', description: 'Attach similarity-based hints. Expensive mode requires limit <= 12; page with offset. Default off.' },
       },
     },
     toRequest(args, userId) {
@@ -517,9 +541,10 @@ const TOOLS: ToolDef[] = [
     },
     format(data, args) {
       const reviews = asArray(data.reviews);
-      if (reviews.length === 0) return 'No Asaki memory reviews found.';
+      const pending = typeof data.pending_count === 'number' ? ` Pending across store: ${data.pending_count}.` : '';
+      if (reviews.length === 0) return `No Asaki memory reviews found.${pending}`;
       const budget = joinWithinBudget(reviews.map((item, index) => formatReviewLine(item, index)));
-      return withBudgetFooter(budget, (args.offset ?? 0) + budget.shown);
+      return `${withBudgetFooter(budget, (args.offset ?? 0) + budget.shown)}${pending}`;
     },
   },
   {
