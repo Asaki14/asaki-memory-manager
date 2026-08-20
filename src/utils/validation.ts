@@ -392,19 +392,41 @@ export function validatePruneStale(value: unknown): { ok: true; data: { days: nu
   return { ok: true, data: { days, limit, apply: input.apply === true } };
 }
 
-export function validateResolveMemoryReview(value: unknown): { ok: true; data: { user_id: string; action: 'add' | 'merge' | 'update' | 'delete' | 'ignore'; memory_id?: string | null; reason?: string | null; promote_to_global?: boolean } } | { ok: false; error: string } {
+export function validateResolveMemoryReview(value: unknown): { ok: true; data: { user_id: string; action: 'add' | 'merge' | 'update' | 'delete' | 'ignore'; memory_id?: string | null; reason?: string | null; promote_to_global?: boolean; content?: string; kind?: MemoryKind; importance?: number; confidence?: number } } | { ok: false; error: string } {
   if (!value || typeof value !== 'object') return { ok: false, error: 'Body must be a JSON object.' };
-  const input = value as { user_id?: unknown; action?: unknown; memory_id?: unknown; reason?: unknown; promote_to_global?: unknown };
+  const input = value as { user_id?: unknown; action?: unknown; memory_id?: unknown; reason?: unknown; promote_to_global?: unknown; content?: unknown; kind?: unknown; importance?: unknown; confidence?: unknown };
   const userId = validateUserId(input.user_id);
   if (!userId) return { ok: false, error: 'user_id is required.' };
   if (typeof input.action !== 'string' || !reviewActions.has(input.action)) return { ok: false, error: 'action must be add, merge, update, delete, or ignore.' };
   if (input.memory_id != null && (typeof input.memory_id !== 'string' || input.memory_id.trim().length === 0)) return { ok: false, error: 'memory_id must be a non-empty string when provided.' };
   if (input.reason != null && (typeof input.reason !== 'string' || input.reason.trim().length === 0)) return { ok: false, error: 'reason must be a non-empty string when provided.' };
   if ((input.action === 'merge' || input.action === 'update' || input.action === 'delete') && !input.memory_id) return { ok: false, error: 'memory_id is required when action is merge, update, or delete.' };
+  if (input.content !== undefined) {
+    if (input.action !== 'update') return { ok: false, error: 'content is only supported when action is update.' };
+    if (typeof input.content !== 'string' || input.content.trim().length === 0) return { ok: false, error: 'content must be a non-empty string when provided.' };
+    if (input.content.length > 8000) return { ok: false, error: 'content must be <= 8000 characters.' };
+    if (containsSensitiveContent(input.content)) return { ok: false, error: SENSITIVE_CONTENT_ERROR };
+  }
+  if (input.kind !== undefined && (input.action !== 'update' || typeof input.kind !== 'string' || !kinds.has(input.kind as MemoryKind))) return { ok: false, error: input.action !== 'update' ? 'kind is only supported when action is update.' : 'kind is invalid.' };
+  if (input.importance !== undefined && (input.action !== 'update' || typeof input.importance !== 'number' || input.importance < 0 || input.importance > 1)) return { ok: false, error: input.action !== 'update' ? 'importance is only supported when action is update.' : 'importance must be between 0 and 1.' };
+  if (input.confidence !== undefined && (input.action !== 'update' || typeof input.confidence !== 'number' || input.confidence < 0 || input.confidence > 1)) return { ok: false, error: input.action !== 'update' ? 'confidence is only supported when action is update.' : 'confidence must be between 0 and 1.' };
   // Accepts the review row's `promotion_candidates` hint in the same call that activates the rule.
   // The action check lives in resolveMemoryReview() (it is the invariant, not the input shape).
   if (input.promote_to_global !== undefined && typeof input.promote_to_global !== 'boolean') return { ok: false, error: 'promote_to_global must be a boolean.' };
-  return { ok: true, data: { user_id: userId, action: input.action as 'add' | 'merge' | 'update' | 'delete' | 'ignore', memory_id: input.memory_id?.trim() ?? null, reason: input.reason?.trim() ?? null, promote_to_global: input.promote_to_global === true } };
+  return {
+    ok: true,
+    data: {
+      user_id: userId,
+      action: input.action as 'add' | 'merge' | 'update' | 'delete' | 'ignore',
+      memory_id: typeof input.memory_id === 'string' ? input.memory_id.trim() : null,
+      reason: typeof input.reason === 'string' ? input.reason.trim() : null,
+      promote_to_global: input.promote_to_global === true,
+      ...(typeof input.content === 'string' ? { content: input.content.trim() } : {}),
+      ...(typeof input.kind === 'string' ? { kind: input.kind as MemoryKind } : {}),
+      ...(typeof input.importance === 'number' ? { importance: input.importance } : {}),
+      ...(typeof input.confidence === 'number' ? { confidence: input.confidence } : {}),
+    },
+  };
 }
 
 export function validateLifecycleReport(value: unknown): { ok: true; data: { user_id: string; project_id: string | null; idle_days: number; limit: number } } | { ok: false; error: string } {

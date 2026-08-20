@@ -2235,7 +2235,7 @@ Workflow:
 1. Use asaki_memory_review_list with include_suggestions: true, limit: 12, and increasing offset values to inspect pending reviews safely, and handle corrections FIRST: page with signal: "correction", work through those rows, then page again without the filter for everything else. A correction is the user telling the agent it got something wrong, so it is the highest-value row in the queue and the only kind that can retire an active memory. For any review with created_at older than 14 days, flag it explicitly in your output as "stale — pending review needs a decision" rather than treating it identically to a fresh review.
 2. Use asaki_memory_project_list with paging to discover every project id, including projects absent from external registries. Use asaki_memory_list to page global memories and each discovered project's memories (status: "all" for a complete store audit); omitting scope and project_id returns global-only, not the whole store. Then call asaki_memory_lifecycle once for the system-health view: standing-rule repeat rate, per-rule recurrence counts ("count=" means the agent had to be corrected on that rule again), and the "Possibly stale" bucket (standing rules with no reinforcement and no retrieval hit in the idle window, default 30 days). Background classifier candidates are attributed to a repository by the classifier and re-checked client-side against the repositories actually in play, so a session hosted by an orchestrator repo files its memories under the repo the work is about, and anything not uniquely attributable is skipped instead of landing on the host — a missing project memory can therefore be a correct refusal, and an older memory carrying the host repo by mistake should be proposed for RESCOPE.
 3. Analyze duplicates, stale items, noisy items, overlong items (>300 Chinese chars or ~600 ASCII chars; propose compression/splitting/doc-linking), wrong scope/kind (see Global scope discipline above), low-value items, pending reviews, and missing durable memories. For every "Possibly stale" rule the lifecycle report lists, form an explicit keep/retire recommendation for the user — that bucket exists for human judgment and is never an auto-delete list. A high "count=" rule is the opposite signal (the agent keeps violating it): consider sharpening its wording, not retiring it.
-4. Propose REVIEW_RESOLVE/DELETE/UPDATE(rescope)/MERGE/ADD/KEEP changes with reasons and affected ids. When a correction review prints "⤷ supersedes:" lines, prefer resolving it against that target — asaki_memory_review_resolve {action:"update", memory_id:<the id on that line>} to rewrite the old memory, {action:"delete", memory_id:…} when the suggestion says "suggest: delete" (the correction was a retraction) — over {action:"add"}, which leaves the contradicted memory active and retrievable. {action:"ignore"} rejects the inferred rule. Resolution never changes the target's scope: the suggestion line prints the target's current scope/kind/confidence, so if the scope is wrong, rescope it separately with asaki_memory_update. A "⤷ contradicts pending review <id>" line means two queued rows disagree — decide both, not one. A "⤷ promote:" line means the same rule already exists in ANOTHER project, so offer PROMOTE: asaki_memory_review_resolve {action:"add", promote_to_global:true} activates it as global in one call (valid only with action:"add"). Promotion is never automatic — if the cross-project match reads coincidental, resolve it project-scoped as usual.
+4. Propose REVIEW_RESOLVE/DELETE/UPDATE(rescope)/MERGE/ADD/KEEP changes with reasons and affected ids. When a correction review prints "⤷ supersedes:" lines, prefer resolving it against that target — asaki_memory_review_resolve {action:"update", memory_id:<the id on that line>, content:<the exact desired resulting text>} to rewrite the old memory. update overwrites with candidate text unless content is given; for a merge, pass the merged text via content. Omit kind/importance/confidence with explicit content to preserve the target metadata. Use {action:"delete", memory_id:…} when the suggestion says "suggest: delete" (the correction was a retraction) — over {action:"add"}, which leaves the contradicted memory active and retrievable. {action:"ignore"} rejects the inferred rule. Resolution never changes the target's scope: the suggestion line prints the target's current scope/kind/confidence, so if the scope is wrong, rescope it separately with asaki_memory_update. A "⤷ contradicts pending review <id>" line means two queued rows disagree — decide both, not one. A "⤷ promote:" line means the same rule already exists in ANOTHER project, so offer PROMOTE: asaki_memory_review_resolve {action:"add", promote_to_global:true} activates it as global in one call (valid only with action:"add"). Promotion is never automatic — if the cross-project match reads coincidental, resolve it project-scoped as usual.
 5. Use questionnaire before any write. Offer options like apply all high-confidence changes, resolve selected reviews, only deletes, only updates/additions, or skip.
 6. Execute approved changes using asaki_memory_review_resolve, asaki_memory_update, asaki_memory_delete, and asaki_memory_add.
 7. Use asaki_memory_review_create instead of asaki_memory_add for high-risk uncertain memories.
@@ -2736,11 +2736,11 @@ Safety:
   pi.registerTool({
     name: "asaki_memory_review_resolve",
     label: "Asaki Memory Review Resolve",
-    description: "Resolve a pending Asaki memory review as add, merge, update, delete, or ignore.",
+    description: "Resolve a pending Asaki memory review as add, merge, update, delete, or ignore. update = overwrite with candidate text unless content is given; for a merge, pass the merged text via content.",
     promptSnippet: "Resolve a specific Asaki memory review after explicit user approval.",
     promptGuidelines: [
       "Only call asaki_memory_review_resolve after the user has explicitly approved the action.",
-      "Use action=merge/update/delete only with a target memory_id — merge folds the candidate into the existing memory, update replaces the existing memory's content with the candidate's, delete removes the existing memory (the candidate contradicted or asked to forget/retract it).",
+      "Use action=merge/update/delete only with a target memory_id. update = overwrite with candidate text unless content is given; for a merge, pass the merged text via content. delete removes the target memory.",
     ],
     parameters: Type.Object({
       id: Type.String({ description: "Review id to resolve." }),
@@ -2750,6 +2750,11 @@ Safety:
       ),
       memory_id: Type.Optional(Type.String({ description: "Target memory id. Required when action is merge, update, or delete." })),
       reason: Type.Optional(Type.String({ description: "Short resolution reason." })),
+      content: Type.Optional(Type.String({ description: "Exact resulting text for action=update. Without it, the candidate text overwrites the target." })),
+      kind: Type.Optional(Type.Union(KINDS.map((kind) => Type.Literal(kind)), { description: "Optional resulting kind for action=update. Omit to preserve the target kind when content is given." })),
+      importance: Type.Optional(Type.Number({ description: "Optional resulting importance for action=update. Omit to preserve the target importance when content is given.", minimum: 0, maximum: 1 })),
+      confidence: Type.Optional(Type.Number({ description: "Optional resulting confidence for action=update. Omit to preserve the target confidence when content is given.", minimum: 0, maximum: 1 })),
+
       promote_to_global: Type.Optional(
         Type.Boolean({
           description: 'Accept the row\'s "⤷ promote:" suggestion: store the candidate as scope=global instead of project. Only valid with action=add, and only after the user approved promotion.',
@@ -2759,9 +2764,16 @@ Safety:
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
       const config = memoryConfig();
       try {
+        if (typeof params.content === "string" && containsSensitiveText(params.content)) {
+          throw new Error("Refusing to store: content appears to contain a secret/credential (API key, token, private key, or similar). Remove it and try again.");
+        }
         const body: Record<string, unknown> = { user_id: config.userId, action: params.action };
         if (params.memory_id) body.memory_id = params.memory_id;
         if (params.reason) body.reason = params.reason;
+        if (params.content !== undefined) body.content = params.content;
+        if (params.kind !== undefined) body.kind = params.kind;
+        if (params.importance !== undefined) body.importance = params.importance;
+        if (params.confidence !== undefined) body.confidence = params.confidence;
         if (params.promote_to_global) body.promote_to_global = true;
         const data = await memoryRequest(`/v1/memories/reviews/${params.id}/resolve`, body, signal);
         const review = data?.review;

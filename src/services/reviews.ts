@@ -1,4 +1,4 @@
-import type { Env, MemoryReviewRecord, MemoryReviewRow } from '../types';
+import type { Env, MemoryKind, MemoryReviewRecord, MemoryReviewRow } from '../types';
 import { UserFacingError } from '../utils/errors';
 import { createMemory, deleteMemory, getMemory, searchMemories, updateMemoryContent } from './memories';
 import { writeMemoryEvent } from './memoryEvents';
@@ -513,7 +513,7 @@ export async function listMemoryReviews(env: Env, input: { user_id: string; stat
   return { reviews: withSuggestions, suggestions_truncated: suggestionsTruncated, pending_count: pendingCount };
 }
 
-export async function resolveMemoryReview(env: Env, id: string, input: { user_id: string; action: 'add' | 'merge' | 'update' | 'delete' | 'ignore'; memory_id?: string | null; reason?: string | null; promote_to_global?: boolean }): Promise<{ review: MemoryReviewRow; memory?: Awaited<ReturnType<typeof createMemory>>; promoted_to_global?: boolean }> {
+export async function resolveMemoryReview(env: Env, id: string, input: { user_id: string; action: 'add' | 'merge' | 'update' | 'delete' | 'ignore'; memory_id?: string | null; reason?: string | null; promote_to_global?: boolean; content?: string; kind?: MemoryKind; importance?: number; confidence?: number }): Promise<{ review: MemoryReviewRow; memory?: Awaited<ReturnType<typeof createMemory>>; promoted_to_global?: boolean }> {
   const existing = await env.DB.prepare('SELECT * FROM memory_reviews WHERE id = ?1 AND user_id = ?2').bind(id, input.user_id).first<MemoryReviewRecord>();
   if (!existing) throw new UserFacingError('Review not found.');
   // `promote_to_global` accepts the row's promotion suggestion (captain decision 8) in the same call
@@ -581,13 +581,14 @@ export async function resolveMemoryReview(env: Env, id: string, input: { user_id
       if (!input.memory_id) throw new UserFacingError('memory_id is required when action is update.');
       const target = await getMemory(env, input.memory_id, input.user_id);
       if (!target) throw new UserFacingError('Target memory not found.');
+      const hasExplicitContent = input.content !== undefined;
       memory = await updateMemoryContent(env, target, {
-        content: review.candidate.content,
-        importance: review.candidate.importance,
-        confidence: review.candidate.confidence,
-        // A correction resolved as `update` usually retypes the target (a `rule` replacing a
-        // `fact`); scope stays untouched — rescoping is a separate, explicit audit action.
-        kind: review.candidate.kind !== target.kind ? review.candidate.kind : undefined,
+        content: input.content ?? review.candidate.content,
+        // Supplying exact content is the audit-safe path: preserve target metadata unless the
+        // caller explicitly changes it. Without content, retain the legacy candidate-wins update.
+        importance: input.importance ?? (hasExplicitContent ? target.importance : review.candidate.importance),
+        confidence: input.confidence ?? (hasExplicitContent ? target.confidence : review.candidate.confidence),
+        kind: input.kind ?? (hasExplicitContent || review.candidate.kind === target.kind ? undefined : review.candidate.kind),
       });
       mutated = true;
     }
