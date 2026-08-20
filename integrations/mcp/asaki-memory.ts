@@ -536,18 +536,29 @@ server.tool(
 
 server.tool(
   "asaki_memory_review_resolve",
-  "Resolve a pending Asaki memory review as add, merge, update, delete, or ignore. update/delete/merge require memory_id (the existing memory to replace/delete/merge into). Only call after explicit user approval.",
+  "Resolve a pending Asaki memory review as add, merge, update, delete, or ignore. update = overwrite with candidate text unless content is given; for a merge, pass the merged text via content. update/delete/merge require memory_id. Only call after explicit user approval.",
   {
     id: z.string(),
     action: z.enum(["add", "merge", "update", "delete", "ignore"]),
     memory_id: z.string().optional(),
     reason: z.string().optional(),
+    content: z.string().optional().describe("Exact resulting text for action=update. Without it, the candidate text overwrites the target."),
+    kind: z.enum(KINDS).optional().describe("Optional resulting kind for action=update. Omit to preserve the target kind when content is given."),
+    importance: z.number().min(0).max(1).optional().describe("Optional resulting importance for action=update. Omit to preserve the target importance when content is given."),
+    confidence: z.number().min(0).max(1).optional().describe("Optional resulting confidence for action=update. Omit to preserve the target confidence when content is given."),
   },
-  async ({ id, action, memory_id, reason }, extra) => {
+  async ({ id, action, memory_id, reason, content, kind, importance, confidence }, extra) => {
+    if (typeof content === "string" && containsSensitiveText(content)) {
+      throw new Error("Refusing to store: content appears to contain a secret/credential (API key, token, private key, or similar). Remove it and try again.");
+    }
     const cfg = memoryConfig();
     const body: Record<string, unknown> = { user_id: cfg.userId, action };
     if (memory_id) body.memory_id = memory_id;
     if (reason) body.reason = reason;
+    if (content !== undefined) body.content = content;
+    if (kind !== undefined) body.kind = kind;
+    if (importance !== undefined) body.importance = importance;
+    if (confidence !== undefined) body.confidence = confidence;
     const data = await apiRequest(`/v1/memories/reviews/${id}/resolve`, body, combinedSignal(extra.signal));
     const review = data.review as Record<string, unknown> | undefined;
     const memory = data.memory as Record<string, unknown> | undefined;

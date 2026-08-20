@@ -417,7 +417,7 @@ curl -X POST http://127.0.0.1:8787/v1/memories/reviews/<review-id>/resolve \
   -d '{"user_id":"alice","action":"add","reason":"approved"}'
 ```
 
-Resolve actions: `add`, `merge`, `update`, `delete`, `ignore`. `merge`/`update`/`delete` require `memory_id`.
+Resolve actions: `add`, `merge`, `update`, `delete`, `ignore`. `merge`/`update`/`delete` require `memory_id`. `update` overwrites the target with candidate text unless `content` is given; for a merge, pass the exact merged text via `content`. With explicit `content`, target `kind`/`importance`/`confidence` stay unchanged unless those fields are also passed.
 
 Every list response includes `pending_count`: the total number of `status=pending` review rows for that user across all scopes and projects. It intentionally ignores project/session/source/signal filters and pagination. Both session-start banners use this exact field and rule.
 

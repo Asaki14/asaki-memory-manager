@@ -85,6 +85,7 @@ npm run eval:candidate-fields
 npm run eval:purge-scrub
 npm run eval:lifecycle
 npm run eval:review-park
+npm run eval:review-resolve
 npm run eval:audit-read-api
 npm run eval:bundle-guard
 npm run check:mcp-bundle
