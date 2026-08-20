@@ -65,7 +65,7 @@ cat >"$WORK/list-rules-only.json" <<'JSON'
 JSON
 
 cat >"$WORK/reviews.json" <<'JSON'
-{"reviews":[{"id":"rev1"},{"id":"rev2"},{"id":"rev3"}]}
+{"reviews":[{"id":"rev1"},{"id":"rev2"},{"id":"rev3"}],"pending_count":113}
 JSON
 
 jq -cn '{results: [range(8) | {content: ("短记忆 " + (. | tostring)), score: (0.9 - (. / 100)), scope: "global", kind: "fact"}]}' >"$WORK/search-short.json"
@@ -150,7 +150,7 @@ if ! [ "$STANDING_AT" -lt "$DIGEST_AT" ] || ! [ "$DIGEST_AT" -lt "$BANNER_AT" ];
   fail "A: expected order standing($STANDING_AT) → digest($DIGEST_AT) → banner($BANNER_AT)"
 fi
 LINE=$(banner_line_of "$OUT")
-assert_eq "A: banner line" "$LINE" "user=asaki | project=proj | memories=4 | pendingReviews=3 | classifier=on model=model-x | standingRules=2/2 | projectDigest=2/2"
+assert_eq "A: banner line" "$LINE" "user=asaki | project=proj | memories=4 | pendingReviews=113 | classifier=on model=model-x | standingRules=2/2 | projectDigest=2/2"
 assert_not_contains "A: no autoExtract field" "$LINE" "autoExtract"
 assert_not_contains "A: no dangling separator" "$LINE" "| |"
 
@@ -181,7 +181,7 @@ OUT=$(ASAKI_MEMORY_AUTO_EXTRACT=1 run_session_start)
 LINE=$(banner_line_of "$OUT")
 assert_not_contains "D: no classifier field" "$LINE" "classifier"
 assert_not_contains "D: no autoExtract field" "$LINE" "autoExtract"
-assert_contains "D: fields before/after the omission still joined" "$LINE" "pendingReviews=3 | standingRules=2/2"
+assert_contains "D: fields before/after the omission still joined" "$LINE" "pendingReviews=113 | standingRules=2/2"
 
 # --- case E: list failure degrades both blocks -------------------------------------------------
 OUT=$(STUB_FAIL_LIST=1 run_session_start)

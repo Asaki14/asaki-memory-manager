@@ -12,6 +12,7 @@
     "eval:purge-scrub": "node --experimental-strip-types scripts/eval-purge-scrub.ts",
     "eval:lifecycle": "node --experimental-strip-types scripts/eval-lifecycle.ts",
     "eval:review-park": "node --experimental-strip-types scripts/eval-review-park.ts",
+    "eval:audit-read-api": "node --experimental-strip-types scripts/eval-audit-read-api.ts",
     "eval:search": "node --experimental-strip-types scripts/eval-search-scoring.ts",
     "eval:extraction": "bash scripts/eval-extraction.sh",
     "eval:extraction-guardrails": "node --experimental-strip-types scripts/eval-extraction-guardrails.ts",

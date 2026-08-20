@@ -1410,7 +1410,9 @@ async function buildSessionBanner(ctx: unknown, signal?: AbortSignal): Promise<s
       userId: config.userId,
       project,
       memories: memories ? `${memories.length}` : "?",
-      pendingReviews: Array.isArray(reviewData?.reviews) ? `${reviewData.reviews.length}` : "?",
+      pendingReviews: typeof reviewData?.pending_count === "number"
+        ? `${reviewData.pending_count}`
+        : Array.isArray(reviewData?.reviews) ? `${reviewData.reviews.length}` : "?",
       classifier,
       standingRules: bannerBlockField(config.standingRules, standingRules),
       projectDigest: bannerBlockField(config.projectDigest, projectDigest),
@@ -2230,8 +2232,8 @@ ${trimmedArgs ? `User focus: ${trimmedArgs}\n` : ""}
 Global scope discipline (the recurring failure mode this exists to catch): global memories get pulled into every project's context, so the bar is "genuinely useful in ANY conversation regardless of project" — cross-project dev preferences, communication/output style, secret-handling rules, this memory system's own operating rules, and durable personal/identity facts. It is NOT a dumping ground for system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs) that only happened to be captured while not inside a recognizable git repo — that content belongs in scope=project with project_id set to the relevant repo's basename (e.g. a dotfiles repo), even if it was captured elsewhere. For every global item ask "would this help in an unrelated project?" — if no, propose RESCOPE (UPDATE scope+project_id) rather than leaving it global. (This text is mirrored in commands/memory.md and the active classifier prompts; src/services/extraction.ts is legacy compatibility only.)
 
 Workflow:
-1. Use asaki_memory_review_list with include_suggestions: true to inspect pending reviews, and handle corrections FIRST: call it once with signal: "correction", work through those rows, then call it again without the filter for everything else. A correction is the user telling the agent it got something wrong, so it is the highest-value row in the queue and the only kind that can retire an active memory. For any review with created_at older than 14 days, flag it explicitly in your output as "stale — pending review needs a decision" rather than treating it identically to a fresh review.
-2. Use asaki_memory_list to list global memories and current project memories. Then call asaki_memory_lifecycle once for the system-health view: standing-rule repeat rate, per-rule recurrence counts ("count=" means the agent had to be corrected on that rule again), and the "Possibly stale" bucket (standing rules with no reinforcement and no retrieval hit in the idle window, default 30 days). Background classifier candidates are attributed to a repository by the classifier and re-checked client-side against the repositories actually in play, so a session hosted by an orchestrator repo files its memories under the repo the work is about, and anything not uniquely attributable is skipped instead of landing on the host — a missing project memory can therefore be a correct refusal, and an older memory carrying the host repo by mistake should be proposed for RESCOPE.
+1. Use asaki_memory_review_list with include_suggestions: true, limit: 12, and increasing offset values to inspect pending reviews safely, and handle corrections FIRST: page with signal: "correction", work through those rows, then page again without the filter for everything else. A correction is the user telling the agent it got something wrong, so it is the highest-value row in the queue and the only kind that can retire an active memory. For any review with created_at older than 14 days, flag it explicitly in your output as "stale — pending review needs a decision" rather than treating it identically to a fresh review.
+2. Use asaki_memory_project_list with paging to discover every project id, including projects absent from external registries. Use asaki_memory_list to page global memories and each discovered project's memories (status: "all" for a complete store audit); omitting scope and project_id returns global-only, not the whole store. Then call asaki_memory_lifecycle once for the system-health view: standing-rule repeat rate, per-rule recurrence counts ("count=" means the agent had to be corrected on that rule again), and the "Possibly stale" bucket (standing rules with no reinforcement and no retrieval hit in the idle window, default 30 days). Background classifier candidates are attributed to a repository by the classifier and re-checked client-side against the repositories actually in play, so a session hosted by an orchestrator repo files its memories under the repo the work is about, and anything not uniquely attributable is skipped instead of landing on the host — a missing project memory can therefore be a correct refusal, and an older memory carrying the host repo by mistake should be proposed for RESCOPE.
 3. Analyze duplicates, stale items, noisy items, overlong items (>300 Chinese chars or ~600 ASCII chars; propose compression/splitting/doc-linking), wrong scope/kind (see Global scope discipline above), low-value items, pending reviews, and missing durable memories. For every "Possibly stale" rule the lifecycle report lists, form an explicit keep/retire recommendation for the user — that bucket exists for human judgment and is never an auto-delete list. A high "count=" rule is the opposite signal (the agent keeps violating it): consider sharpening its wording, not retiring it.
 4. Propose REVIEW_RESOLVE/DELETE/UPDATE(rescope)/MERGE/ADD/KEEP changes with reasons and affected ids. When a correction review prints "⤷ supersedes:" lines, prefer resolving it against that target — asaki_memory_review_resolve {action:"update", memory_id:<the id on that line>} to rewrite the old memory, {action:"delete", memory_id:…} when the suggestion says "suggest: delete" (the correction was a retraction) — over {action:"add"}, which leaves the contradicted memory active and retrievable. {action:"ignore"} rejects the inferred rule. Resolution never changes the target's scope: the suggestion line prints the target's current scope/kind/confidence, so if the scope is wrong, rescope it separately with asaki_memory_update. A "⤷ contradicts pending review <id>" line means two queued rows disagree — decide both, not one. A "⤷ promote:" line means the same rule already exists in ANOTHER project, so offer PROMOTE: asaki_memory_review_resolve {action:"add", promote_to_global:true} activates it as global in one call (valid only with action:"add"). Promotion is never automatic — if the cross-project match reads coincidental, resolve it project-scoped as usual.
 5. Use questionnaire before any write. Offer options like apply all high-confidence changes, resolve selected reviews, only deletes, only updates/additions, or skip.
@@ -2474,11 +2476,11 @@ Safety:
   pi.registerTool({
     name: "asaki_memory_list",
     label: "Asaki Memory List",
-    description: "List memories from Asaki personal memory with optional filters.",
+    description: "List memories with optional filters; this is not a whole-store project discovery call.",
     promptSnippet: "List Asaki memories during memory audit to review, deduplicate, and manage stored memories.",
     promptGuidelines: [
       "Use asaki_memory_list only during explicit memory audit or management tasks (e.g., /memory command).",
-      "Omit scope to list global plus current project memories.",
+      "With scope omitted, visibility is global plus only the supplied/current project and session; use asaki_memory_project_list to discover every project.",
     ],
     parameters: Type.Object({
       scope: Type.Optional(
@@ -2534,6 +2536,42 @@ Safety:
     },
   });
 
+
+  pi.registerTool({
+    name: "asaki_memory_project_list",
+    label: "Asaki Memory Projects",
+    description: "Enumerate every project_id that holds project-scoped memories, with total/active memory counts and pending-review counts.",
+    promptSnippet: "List all Asaki memory projects during a whole-store audit before paging each project's memories.",
+    promptGuidelines: [
+      "Use asaki_memory_project_list during whole-store memory audits so unregistered projects are not hidden.",
+      "Page with limit and offset until no projects remain.",
+    ],
+    parameters: Type.Object({
+      limit: Type.Optional(Type.Integer({ description: "Max projects to return (1-100, default 50).", minimum: 1, maximum: 100 })),
+      offset: Type.Optional(Type.Integer({ description: "Pagination offset (default 0).", minimum: 0 })),
+    }),
+    async execute(_toolCallId, params, signal, onUpdate) {
+      const config = memoryConfig();
+      onUpdate?.({ content: [{ type: "text", text: "Listing Asaki memory projects..." }], details: {} });
+      try {
+        const body: Record<string, unknown> = { user_id: config.userId };
+        if (params.limit != null) body.limit = params.limit;
+        if (params.offset != null) body.offset = params.offset;
+        const data = await memoryRequest("/v1/memories/projects", body, signal);
+        const projects = Array.isArray(data?.projects) ? data.projects : [];
+        if (projects.length === 0) return { content: [{ type: "text", text: "No Asaki memory projects found." }], details: { count: 0 } };
+        const lines = projects.map((project: any, index: number) => `${index + 1}. project=${project.project_id} memories=${project.memory_count} active=${project.active_memory_count} pendingReviews=${project.pending_review_count}`);
+        const budget = joinWithinBudget(lines);
+        return {
+          content: [{ type: "text", text: withBudgetFooter(budget, (params.offset ?? 0) + budget.shown) }],
+          details: { count: projects.length, shown: budget.shown },
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Asaki memory project list failed: ${message}`);
+      }
+    },
+  });
 
   pi.registerTool({
     name: "asaki_memory_lifecycle",
@@ -2649,9 +2687,9 @@ Safety:
   pi.registerTool({
     name: "asaki_memory_review_list",
     label: "Asaki Memory Review List",
-    description: "List pending or resolved Asaki memory review items.",
+    description: "List pending or resolved reviews. pending_count always means all pending rows for the user across every scope/project, independent of page filters.",
     promptSnippet: "List pending Asaki memory reviews during memory audit or review workflow.",
-    promptGuidelines: ["Use asaki_memory_review_list during /memory audits before modifying memories."],
+    promptGuidelines: ["Use asaki_memory_review_list during /memory audits before modifying memories.", "With include_suggestions=true, set limit <= 12 and page with offset."],
     parameters: Type.Object({
       status: Type.Optional(Type.String({ description: "Filter by status: pending (default), resolved, all." })),
       project_id: Type.Optional(Type.String({ description: "Project id override." })),
@@ -2663,7 +2701,7 @@ Safety:
       limit: Type.Optional(Type.Integer({ description: "Max reviews to return (1-100, default 50).", minimum: 1, maximum: 100 })),
       offset: Type.Optional(Type.Integer({ description: "Pagination offset (default 0).", minimum: 0 })),
       include_suggestions: Type.Optional(
-        Type.Boolean({ description: "Attach a potential_duplicate hint (matched memory + suggested add/merge/update/delete/ignore) to each pending review, plus supersedes_candidates on correction rows. Default off." }),
+        Type.Boolean({ description: "Attach similarity-based hints. Expensive mode requires limit <= 12; page with offset. Default off." }),
       ),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -2681,11 +2719,12 @@ Safety:
         if (params.include_suggestions) body.include_suggestions = true;
         const data = await memoryRequest("/v1/memories/reviews/list", body, signal);
         const reviews = Array.isArray(data?.reviews) ? data.reviews : [];
-        if (reviews.length === 0) return { content: [{ type: "text", text: "No Asaki memory reviews found." }], details: { count: 0 } };
+        const pending = typeof data?.pending_count === "number" ? ` Pending across store: ${data.pending_count}.` : "";
+        if (reviews.length === 0) return { content: [{ type: "text", text: `No Asaki memory reviews found.${pending}` }], details: { count: 0, pending_count: data?.pending_count } };
         const budget = joinWithinBudget(reviews.map((item: any, index: number) => formatReviewLine(item, index)));
         return {
-          content: [{ type: "text", text: withBudgetFooter(budget, (params.offset ?? 0) + budget.shown) }],
-          details: { count: reviews.length, shown: budget.shown },
+          content: [{ type: "text", text: `${withBudgetFooter(budget, (params.offset ?? 0) + budget.shown)}${pending}` }],
+          details: { count: reviews.length, shown: budget.shown, pending_count: data?.pending_count },
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

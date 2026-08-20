@@ -403,7 +403,7 @@ const MAX_SUPERSEDE_LOOKUPS_PER_RESPONSE = 20;
 // and set the same `suggestions_truncated` flag — "some suggestion on this page was not computed".
 const MAX_PROMOTION_LOOKUPS_PER_RESPONSE = 20;
 
-export async function listMemoryReviews(env: Env, input: { user_id: string; status: 'pending' | 'resolved' | 'all'; project_id?: string | null; session_id?: string | null; source?: string | null; signal?: string | null; limit: number; offset: number; include_suggestions?: boolean }): Promise<{ reviews: MemoryReviewRow[]; suggestions_truncated: boolean }> {
+export async function listMemoryReviews(env: Env, input: { user_id: string; status: 'pending' | 'resolved' | 'all'; project_id?: string | null; session_id?: string | null; source?: string | null; signal?: string | null; limit: number; offset: number; include_suggestions?: boolean }): Promise<{ reviews: MemoryReviewRow[]; suggestions_truncated: boolean; pending_count: number }> {
   const clauses = ['user_id = ?'];
   const bindings: unknown[] = [input.user_id];
 
@@ -434,17 +434,25 @@ export async function listMemoryReviews(env: Env, input: { user_id: string; stat
     }
   }
 
-  const result = await env.DB.prepare(
-    `SELECT * FROM memory_reviews
-     WHERE ${clauses.join(' AND ')}
-     ORDER BY (${SIGNAL_EXPR} = 'correction') DESC, updated_at DESC, created_at DESC
-     LIMIT ? OFFSET ?`
-  )
-    .bind(...bindings, input.limit, input.offset)
-    .all<MemoryReviewRecord>();
+  const [result, pendingCountRow] = await Promise.all([
+    env.DB.prepare(
+      `SELECT * FROM memory_reviews
+       WHERE ${clauses.join(' AND ')}
+       ORDER BY (${SIGNAL_EXPR} = 'correction') DESC, updated_at DESC, created_at DESC
+       LIMIT ? OFFSET ?`
+    )
+      .bind(...bindings, input.limit, input.offset)
+      .all<MemoryReviewRecord>(),
+    // Canonical banner/audit count: every pending review for this user, across all scopes and
+    // projects. It deliberately ignores this page's filters and pagination.
+    env.DB.prepare("SELECT COUNT(*) AS count FROM memory_reviews WHERE user_id = ?1 AND status = 'pending'")
+      .bind(input.user_id)
+      .first<{ count: number }>(),
+  ]);
 
+  const pendingCount = Number(pendingCountRow?.count ?? 0);
   const reviews = (result.results ?? []).map(parseReview);
-  if (!input.include_suggestions) return { reviews, suggestions_truncated: false };
+  if (!input.include_suggestions) return { reviews, suggestions_truncated: false, pending_count: pendingCount };
 
   // Supersession lookups run only for pending correction rows that actually carry a query, and only
   // for the first N of them in page order — everything else would be a search that can't produce a
@@ -502,7 +510,7 @@ export async function listMemoryReviews(env: Env, input: { user_id: string; stat
     })
   );
 
-  return { reviews: withSuggestions, suggestions_truncated: suggestionsTruncated };
+  return { reviews: withSuggestions, suggestions_truncated: suggestionsTruncated, pending_count: pendingCount };
 }
 
 export async function resolveMemoryReview(env: Env, id: string, input: { user_id: string; action: 'add' | 'merge' | 'update' | 'delete' | 'ignore'; memory_id?: string | null; reason?: string | null; promote_to_global?: boolean }): Promise<{ review: MemoryReviewRow; memory?: Awaited<ReturnType<typeof createMemory>>; promoted_to_global?: boolean }> {
