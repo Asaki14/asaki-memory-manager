@@ -299,7 +299,21 @@ curl -X POST http://127.0.0.1:8787/v1/memories/list \
   }'
 ```
 
-Omit `scope` to list `global + current project + current session`. Use `status=all` to include archived and deleted memories.
+Omit `scope` to list global memories plus only the `project_id` / `session_id` supplied in the request. If neither id is supplied, the result is global-only; it is not a whole-store listing. Use `POST /v1/memories/projects` to discover and page every project before enumerating each project's memories. Use `status=all` to include archived and deleted memories.
+
+</details>
+
+<details>
+<summary><code>POST /v1/memories/projects</code> — enumerate memory projects</summary>
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/memories/projects \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -d '{"user_id":"alice","limit":50,"offset":0}'
+```
+
+Returns every distinct `project_id` that holds project-scoped memories, including `memory_count`, `active_memory_count`, and `pending_review_count`. Results sort by `project_id` and support `limit`/`offset` paging. Projects represented only by review rows are not included.
 
 </details>
 
@@ -405,7 +419,9 @@ curl -X POST http://127.0.0.1:8787/v1/memories/reviews/<review-id>/resolve \
 
 Resolve actions: `add`, `merge`, `update`, `delete`, `ignore`. `merge`/`update`/`delete` require `memory_id`.
 
-`include_suggestions: true` additionally attaches, per pending correction row: `supersedes_candidates` (active memories this correction invalidates) and `promotion_candidates` (the same rule already exists as a project rule in a **different** project — evidence it should be global). Accept a promotion in one call with `{"action":"add","promote_to_global":true}`; it is valid only with `add`, and nothing is ever rescoped without it. Resolving a correction into an active memory also stamps the compressed correction moment (`agent_did` / `captain_verdict`, ≤120 chars each) into that memory's `metadata_json`.
+Every list response includes `pending_count`: the total number of `status=pending` review rows for that user across all scopes and projects. It intentionally ignores project/session/source/signal filters and pagination. Both session-start banners use this exact field and rule.
+
+`include_suggestions: true` additionally attaches similarity-based duplicate, supersession, and promotion hints. Because these perform expensive searches, this mode requires `limit <= 12`; larger requests return HTTP 400 immediately. Page with `offset` to audit the queue safely. `supersedes_candidates` identifies active memories a correction invalidates; `promotion_candidates` identifies the same rule in a different project. Accept a promotion with `{"action":"add","promote_to_global":true}`. Resolving a correction into an active memory stamps the compressed correction moment (`agent_did` / `captain_verdict`, ≤120 chars each) into that memory's `metadata_json`.
 
 </details>
 

@@ -194,7 +194,7 @@ if command -v curl >/dev/null 2>&1; then
     -H "Authorization: Bearer ${ASAKI_MEMORY_API_KEY}" \
     -H "Content-Type: application/json" \
     -d "{\"user_id\":\"${ASAKI_USER}\",\"project_id\":\"${ASAKI_PROJECT}\",\"status\":\"pending\",\"limit\":100}" 2>/dev/null || echo "")
-  [ -n "$REVIEW_RESP" ] && PENDING_REVIEWS=$(echo "$REVIEW_RESP" | jq '(.reviews // []) | length' 2>/dev/null || echo "?")
+  [ -n "$REVIEW_RESP" ] && PENDING_REVIEWS=$(echo "$REVIEW_RESP" | jq '.pending_count // ((.reviews // []) | length)' 2>/dev/null || echo "?")
 fi
 
 # Standing rules lead the injected context: they are directives for the whole session,

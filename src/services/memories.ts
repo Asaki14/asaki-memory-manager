@@ -1,5 +1,5 @@
 import { generateEmbedding } from '../ai/embeddings';
-import type { CreateMemoryInput, Env, ListMemoriesInput, MemoryKind, MemoryRow, SearchMemoriesInput, SearchResult, UpdateMemoryInput } from '../types';
+import type { CreateMemoryInput, Env, ListMemoriesInput, ListMemoryProjectsInput, MemoryKind, MemoryProjectRow, MemoryRow, SearchMemoriesInput, SearchResult, UpdateMemoryInput } from '../types';
 import { UserFacingError } from '../utils/errors';
 import { writeMemoryEvent } from './memoryEvents';
 import { scoreMemoryForSearch } from './searchScoring';
@@ -342,6 +342,30 @@ export async function listMemories(env: Env, input: Required<Pick<ListMemoriesIn
     eventType: 'list',
     payload: { scope: input.scope, project_id: input.project_id, session_id: input.session_id, kind: input.kind, status: input.status, count: result.results?.length ?? 0 },
   });
+
+  return result.results ?? [];
+}
+
+export async function listMemoryProjects(env: Env, input: Required<ListMemoryProjectsInput>): Promise<MemoryProjectRow[]> {
+  const result = await env.DB.prepare(
+    `SELECT m.project_id,
+            COUNT(*) AS memory_count,
+            SUM(CASE WHEN m.status = 'active' THEN 1 ELSE 0 END) AS active_memory_count,
+            COALESCE(r.pending_review_count, 0) AS pending_review_count
+     FROM memories m
+     LEFT JOIN (
+       SELECT project_id, COUNT(*) AS pending_review_count
+       FROM memory_reviews
+       WHERE user_id = ?1 AND status = 'pending' AND project_id IS NOT NULL
+       GROUP BY project_id
+     ) r ON r.project_id = m.project_id
+     WHERE m.user_id = ?1 AND m.scope = 'project' AND m.project_id IS NOT NULL
+     GROUP BY m.project_id
+     ORDER BY m.project_id ASC
+     LIMIT ?2 OFFSET ?3`
+  )
+    .bind(input.user_id, input.limit, input.offset)
+    .all<MemoryProjectRow>();
 
   return result.results ?? [];
 }

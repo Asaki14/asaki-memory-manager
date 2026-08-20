@@ -1,4 +1,4 @@
-import type { CandidateAntecedentSource, CandidateCorrectionEvidence, CandidateEvidenceFields, CandidateRuleForm, CandidateSignal, CandidateSignalSubtype, CreateMemoryInput, ExtractMemoriesInput, ListMemoriesInput, MemoryIdInput, MemoryKind, MemoryScope, MemoryStatus, SearchMemoriesInput, UpdateMemoryInput } from '../types';
+import type { CandidateAntecedentSource, CandidateCorrectionEvidence, CandidateEvidenceFields, CandidateRuleForm, CandidateSignal, CandidateSignalSubtype, CreateMemoryInput, ExtractMemoriesInput, ListMemoriesInput, ListMemoryProjectsInput, MemoryIdInput, MemoryKind, MemoryScope, MemoryStatus, SearchMemoriesInput, UpdateMemoryInput } from '../types';
 import { confidenceForAntecedent, importanceForSignal } from '../services/candidateDecision';
 import { DEFAULT_IDLE_RULE_DAYS } from '../services/memoryLifecycle';
 import { containsSensitiveContent } from './sensitiveContent';
@@ -221,6 +221,18 @@ export function validateListMemories(value: unknown): { ok: true; data: Required
   };
 }
 
+export function validateListMemoryProjects(value: unknown): { ok: true; data: Required<ListMemoryProjectsInput> } | { ok: false; error: string } {
+  if (!value || typeof value !== 'object') return { ok: false, error: 'Body must be a JSON object.' };
+  const input = value as ListMemoryProjectsInput;
+  const userId = validateUserId(input.user_id);
+  if (!userId) return { ok: false, error: 'user_id is required.' };
+  const limit = input.limit ?? 50;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) return { ok: false, error: 'limit must be an integer between 1 and 100.' };
+  const offset = input.offset ?? 0;
+  if (!Number.isInteger(offset) || offset < 0) return { ok: false, error: 'offset must be a non-negative integer.' };
+  return { ok: true, data: { user_id: userId, limit, offset } };
+}
+
 export function validateMemoryIdInput(value: unknown): { ok: true; data: MemoryIdInput } | { ok: false; error: string } {
   if (!value || typeof value !== 'object') return { ok: false, error: 'Body must be a JSON object.' };
   const input = value as MemoryIdInput;
@@ -346,6 +358,7 @@ export function validateListMemoryReviews(value: unknown): { ok: true; data: { u
   const offset = input.offset == null ? 0 : input.offset;
   if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0) return { ok: false, error: 'offset must be a non-negative integer.' };
   if (input.include_suggestions !== undefined && typeof input.include_suggestions !== 'boolean') return { ok: false, error: 'include_suggestions must be a boolean.' };
+  if (input.include_suggestions === true && limit > 12) return { ok: false, error: 'limit must be <= 12 when include_suggestions is true; page with offset to bound similarity lookup work.' };
   return {
     ok: true,
     data: {

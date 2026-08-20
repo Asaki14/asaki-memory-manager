@@ -4,10 +4,10 @@ import { handleMcpRequest } from './mcp';
 import { UserFacingError } from './utils/errors';
 import { dedupeCandidateBatch, isAutoAddEligible, isUnsupervisedSource, processMemoryCandidates } from './services/candidates';
 import { extractMemoryCandidates } from './services/extraction';
-import { backfillPendingIndex, createMemory, deleteMemory, getMemory, listMemories, pruneStaleMemories, purgeMemory, searchMemories, updateMemory } from './services/memories';
+import { backfillPendingIndex, createMemory, deleteMemory, getMemory, listMemories, listMemoryProjects, pruneStaleMemories, purgeMemory, searchMemories, updateMemory } from './services/memories';
 import { createMemoryReviews, listMemoryReviews, resolveMemoryReview } from './services/reviews';
 import { lifecycleReport } from './services/memoryLifecycle';
-import { validateBackfillIndex, validateCreateMemory, validateCreateMemoryReviews, validateExtractMemories, validateLifecycleReport, validateListMemories, validateListMemoryReviews, validateMemoryIdInput, validatePruneStale, validateProcessCandidates, validatePurgeMemory, validateResolveMemoryReview, validateSearchMemories, validateUpdateMemory } from './utils/validation';
+import { validateBackfillIndex, validateCreateMemory, validateCreateMemoryReviews, validateExtractMemories, validateLifecycleReport, validateListMemories, validateListMemoryProjects, validateListMemoryReviews, validateMemoryIdInput, validatePruneStale, validateProcessCandidates, validatePurgeMemory, validateResolveMemoryReview, validateSearchMemories, validateUpdateMemory } from './utils/validation';
 
 type Bindings = Env;
 
@@ -195,6 +195,17 @@ app.post('/v1/memories/list', async (c) => {
   return c.json({ memories });
 });
 
+app.post('/v1/memories/projects', async (c) => {
+  const body = await readJson(c);
+  if (!body.ok) return body.response;
+
+  const validation = validateListMemoryProjects(body.body);
+  if (!validation.ok) return c.json({ error: validation.error }, 400);
+
+  const projects = await listMemoryProjects(c.env, validation.data);
+  return c.json({ projects });
+});
+
 app.post('/v1/memories/backfill-index', async (c) => {
   const body = await readJson(c);
   if (!body.ok) return body.response;
@@ -253,10 +264,8 @@ app.post('/v1/memories/reviews/list', async (c) => {
   const validation = validateListMemoryReviews(body.body);
   if (!validation.ok) return c.json({ error: validation.error }, 400);
 
-  const { reviews, suggestions_truncated } = await listMemoryReviews(c.env, validation.data);
-  // The flag only appears when it's true, so a response without suggestion truncation stays
-  // byte-identical to what clients already parse.
-  return c.json(suggestions_truncated ? { reviews, suggestions_truncated: true } : { reviews });
+  const { reviews, suggestions_truncated, pending_count } = await listMemoryReviews(c.env, validation.data);
+  return c.json(suggestions_truncated ? { reviews, pending_count, suggestions_truncated: true } : { reviews, pending_count });
 });
 
 app.post('/v1/memories/reviews/:id/resolve', async (c) => {

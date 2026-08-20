@@ -97,6 +97,19 @@ export interface ListMemoriesInput {
   offset?: number;
 }
 
+export interface ListMemoryProjectsInput {
+  user_id: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface MemoryProjectRow {
+  project_id: string;
+  memory_count: number;
+  active_memory_count: number;
+  pending_review_count: number;
+}
+
 export interface UpdateMemoryInput {
   user_id: string;
   content?: string;
