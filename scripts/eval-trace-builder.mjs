@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { buildDelta, redactCommand, redactToken, traceLineForToolUse } from '../integrations/claude-code/build-delta.mjs';
+import { buildDelta, buildDeltaResult, redactCommand, redactToken, stripPrivate, traceLineForToolUse } from '../integrations/claude-code/build-delta.mjs';
 import { loadPiTraceBuilder } from './pi-trace-region.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -171,6 +171,64 @@ check(
   ),
   [pi.PRIOR_BLOCK_HEADER, 'Tool: edit src/a.ts', pi.CURRENT_DELTA_DELIMITER, 'User: 不对', 'Tool: edit src/a.ts'].join('\n\n'),
 );
+
+// --- `<private>…</private>` user-explicit exclusion (report §四 P2-A, captain ruling c) ---------
+// Three shapes matter: a mixed turn keeps only the non-private half; a fully private turn drops
+// the WHOLE delta and (uniquely among skips) tells the caller to advance its offset; an unclosed
+// marker strips to the end of the segment.
+const userLine = (text) => JSON.stringify({ type: 'user', message: { content: text } });
+const asstLine = (text) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
+
+check('private / a closed block is stripped, the rest of the turn survives', buildDelta(userLine('以后都用 pnpm <private>我的体检报告在 ~/health.pdf</private> 记住这条'), {}), 'User: 以后都用 pnpm 记住这条');
+check('private / the marker is case-insensitive and multi-line', buildDelta(userLine('前 <PRIVATE>\n秘密第一行\n秘密第二行\n</Private> 后'), {}), 'User: 前 后');
+check('private / several blocks in one turn', buildDelta(userLine('a <private>x</private> b <private>y</private> c'), {}), 'User: a b c');
+check(
+  'private / a mixed delta keeps the non-private turns and drops only the private text',
+  buildDelta([userLine('<private>薪资细节</private>'), asstLine('好的'), userLine('以后都用 pnpm')].join('\n'), {}),
+  ['Assistant: 好的', 'User: 以后都用 pnpm'].join('\n\n'),
+);
+check('private / a mixed delta is NOT flagged private-only', String(buildDeltaResult([userLine('<private>薪资细节</private>'), userLine('以后都用 pnpm')].join('\n'), {}).privateOnly), 'false');
+
+const allPrivate = buildDeltaResult([userLine('<private>整轮都是私密内容</private>'), asstLine('好的，已处理')].join('\n'), {});
+check('private / an all-private turn empties the delta', allPrivate.text, '');
+check('private / an all-private turn sets privateOnly so the caller advances the offset', String(allPrivate.privateOnly), 'true');
+const allPrivateTrace = buildDeltaResult(
+  [
+    userLine('<private>整轮都是私密内容</private>'),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: { file_path: '/repo/src/index.ts' } }] } }),
+  ].join('\n'),
+  { repoRoot: REPO_ROOT, actionTrace: true },
+);
+check('private / an all-private turn drops its trace lines too', allPrivateTrace.text, '');
+check('private / an all-private turn still advances with trace on', String(allPrivateTrace.privateOnly), 'true');
+
+const unclosed = buildDeltaResult(userLine('先说正事 <private>然后开始讲私事\n还有第二行'), {});
+check('private / an unclosed marker strips to the end of the segment', unclosed.text, 'User: 先说正事');
+check('private / an unclosed marker leaves the surviving prefix, so it is not private-only', String(unclosed.privateOnly), 'false');
+check('private / an unclosed marker covering the whole turn is private-only', String(buildDeltaResult(userLine('<private>全部都是私事'), {}).privateOnly), 'true');
+check('private / an orphan closer drops the tag text only', buildDelta(userLine('正文</private>继续'), {}), 'User: 正文 继续');
+check('private / assistant text is stripped as well', buildDelta(asstLine('公开结论 <private>内部推测</private> 结束'), {}), 'Assistant: 公开结论 结束');
+check('private / an assistant-side marker never drops the delta (only the user can exclude a turn)', String(buildDeltaResult(asstLine('公开结论 <private>内部推测</private>'), {}).privateOnly), 'false');
+check('private / a delta with no marker is untouched (no privateOnly, no whitespace change)', String(buildDeltaResult(claudeTranscript, { repoRoot: REPO_ROOT, actionTrace: true }).privateOnly), 'false');
+check('private / stripPrivate reports sawMarker only when it changed the text', String(stripPrivate('nothing here').sawMarker), 'false');
+
+// Pi: same three shapes. Pi keeps no offset, so "advance the cursor" collapses to an empty delta.
+const piUser = (text) => ({ role: 'user', content: [{ type: 'text', text }] });
+const piAsst = (text) => ({ role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text }] });
+check('pi / private / a closed block is stripped, the rest survives', pi.buildExtractionText([piUser('以后都用 pnpm <private>我的体检报告</private> 记住这条')], {}), 'User: 以后都用 pnpm 记住这条');
+check(
+  'pi / private / a mixed delta keeps the non-private turns',
+  pi.buildExtractionText([piUser('<private>薪资细节</private>'), piAsst('好的'), piUser('以后都用 pnpm')], {}),
+  ['Assistant: 好的', 'User: 以后都用 pnpm'].join('\n\n'),
+);
+check('pi / private / an all-private current turn empties the whole delta', pi.buildExtractionText([piUser('以后都用 pnpm'), piAsst('好的'), piUser('<private>整轮都是私密内容</private>')], {}), '');
+check(
+  'pi / private / an all-private current turn empties the delta in correction mode too',
+  pi.buildExtractionText([piUser('以后都用 pnpm'), piAsst('好的'), piUser('<PRIVATE>整轮都是私密内容</private>')], { correctionMode: true, actionTrace: true, repoRoot: REPO_ROOT }),
+  '',
+);
+check('pi / private / an unclosed marker strips to the end of the segment', pi.buildExtractionText([piUser('先说正事 <private>然后开始讲私事')], {}), 'User: 先说正事');
+check('pi / private / an unclosed marker covering the whole turn empties the delta', pi.buildExtractionText([piUser('<private>全部都是私事')], {}), '');
 
 // --- Cross-client agreement on the shared rules ------------------------------------------------
 for (const command of [

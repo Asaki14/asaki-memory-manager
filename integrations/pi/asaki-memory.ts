@@ -1530,6 +1530,25 @@ function cleanMemoryText(text: string): string {
   return text.replace(/\r/g, "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+// User-explicit exclusion marker (research report §四 P2-A, captain ruling c 2026-08-28).
+// KEEP IN SYNC (behaviourally) with stripPrivate() in integrations/claude-code/build-delta.mjs:
+// case-insensitive, multi-line, any number of blocks; an UNCLOSED `<private>` strips to the end of
+// that segment; an orphan `</private>` drops the tag text only. Independent of the credential gate
+// — both stay on. It only affects THIS local delta build: it retracts nothing already stored (that
+// is asaki_memory_delete) and does not touch Pi's own session history.
+const PRIVATE_BLOCK_RE = /<private\s*>[\s\S]*?<\/private\s*>/gi;
+const PRIVATE_OPEN_RE = /<private\s*>[\s\S]*$/i;
+const PRIVATE_CLOSE_RE = /<\/private\s*>/gi;
+
+function stripPrivateText(text: string): { text: string; sawMarker: boolean } {
+  const original = text ?? "";
+  let out = original.replace(PRIVATE_BLOCK_RE, " ");
+  out = out.replace(PRIVATE_OPEN_RE, " ");
+  out = out.replace(PRIVATE_CLOSE_RE, " ");
+  if (out === original) return { text: out, sawMarker: false };
+  return { text: out, sawMarker: true };
+}
+
 function containsSensitiveText(text: string): boolean {
   return SENSITIVE_RE_LIST.some((pattern) => pattern.test(text));
 }
@@ -1660,20 +1679,32 @@ function buildExtractionText(messages: unknown, options: ExtractionTextOptions =
   const { actionTrace = false, correctionMode = false, repoRoot = "", priorCandidate = "" } = options;
   const lines: string[] = [];
   let currentTurnAt = -1;
+  // Tracks the LAST user message only: if the user wrapped this whole turn in `<private>`, the
+  // delta must be dropped entirely rather than silently re-labelling an OLDER turn as "current".
+  let lastUserSawPrivate = false;
+  let lastUserSurvived = false;
   for (const message of messages as any[]) {
     if (!message || typeof message !== "object") continue;
     if (message.role === "user") {
-      const text = cleanMemoryText(extractTextContent(message.content));
+      const stripped = stripPrivateText(extractTextContent(message.content));
+      const text = cleanMemoryText(stripped.text);
+      lastUserSawPrivate = stripped.sawMarker;
+      lastUserSurvived = Boolean(text);
       if (text) {
         currentTurnAt = lines.length;
         lines.push(`User: ${text}`);
       }
     } else if (message.role === "assistant" && (!message.stopReason || message.stopReason === "stop" || message.stopReason === "toolUse")) {
-      const text = cleanMemoryText(extractTextContent(message.content));
+      const text = cleanMemoryText(stripPrivateText(extractTextContent(message.content)).text);
       if (text) lines.push(`Assistant: ${text}`);
       if (actionTrace) lines.push(...extractToolCalls(message.content, repoRoot));
     }
   }
+
+  // Pi keeps no cross-delta offset (it re-reads the whole message list every agent_end), so
+  // "skip and advance the cursor" collapses to returning an empty delta — autoExtractMemory()
+  // already short-circuits on `!text.trim()`.
+  if (lastUserSawPrivate && !lastUserSurvived) return "";
 
   if (!correctionMode) return lines.join("\n\n");
 
@@ -2308,6 +2339,7 @@ export default function (pi: ExtensionAPI) {
           `- standingRules: ${config.standingRules ? "on" : "off"} (max=${config.standingRulesMax}, kinds=${config.standingRulesKinds.join(",")})`,
           `- projectDigest: ${config.projectDigest ? "on" : "off"} (max=${config.projectDigestMax}, maxChars=${config.projectDigestMaxChars}, contentChars=${config.projectDigestContentChars}, index=${config.digestIndex ? "on" : "off"}, kinds=${projectDigestKinds(config.standingRulesKinds).join(",")})`,
           `- autoInject: ${envFlagEnabled("ASAKI_MEMORY_AUTO_INJECT", false) ? "on" : "off"} (topK=${config.autoInjectTopK}, minScore=${config.autoMinScore})`,
+          "- privateMarker: on (wrap text in <private>…</private> to keep that turn out of capture; local delta only, retracts nothing already stored)",
           `- projectId: ${resolveProjectId(ctx) || "missing"}`,
           `- sessionId: ${config.sessionId || "missing"}`,
         ];

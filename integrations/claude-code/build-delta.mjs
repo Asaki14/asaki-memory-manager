@@ -5,6 +5,10 @@
 // string in a hand-written classifier fixture only proves the model can read that string, not
 // that this builder ever emits it.
 //
+// `<private>…</private>` blocks are stripped from every user/assistant text segment before any
+// gate, prompt or request sees them; when a turn's user text is ENTIRELY private the whole delta
+// is dropped and the CLI exits 3 so the caller advances its offset (see buildDeltaResult).
+//
 // Two output modes:
 //   - action trace ON (default; ASAKI_MEMORY_ACTION_TRACE unset or 1): each assistant tool call
 //     also emits one `Tool: <name> <one whitelisted arg>` line. Tool RESULTS are never read;
@@ -86,6 +90,35 @@ export const CLAUDE_TRACE_TOOLS = {
   Glob: { arg: 'pattern', shape: 'text' },
   Grep: { arg: 'pattern', shape: 'text' },
 };
+
+// User-explicit exclusion marker (research report §四 P2-A, captain ruling c 2026-08-28): text the
+// user wraps in `<private>…</private>` is removed from the delta BEFORE any gate, prompt, tail
+// file or HTTP request sees it. Independent of the credential gate above — both stay on.
+// Semantics, deliberately conservative:
+//   - case-insensitive, multi-line, any number of blocks per segment;
+//   - an UNCLOSED `<private>` strips to the end of that segment (a user who opened the marker and
+//     never closed it meant everything after it);
+//   - an orphan `</private>` with no opener drops the tag text only, keeping the prose.
+// The marker only affects THIS local delta build; it retracts nothing already stored (that is
+// asaki_memory_delete) and does not touch Claude Code's own transcript file.
+const PRIVATE_BLOCK_RE = /<private\s*>[\s\S]*?<\/private\s*>/gi;
+const PRIVATE_OPEN_RE = /<private\s*>[\s\S]*$/i;
+const PRIVATE_CLOSE_RE = /<\/private\s*>/gi;
+
+// Returns the stripped text plus whether any marker was seen at all — the caller needs the flag
+// to tell "nothing durable this turn" (carry the delta forward) from "the user excluded this
+// turn" (drop it AND advance the offset, or the text just folds into the next delta).
+export function stripPrivate(text) {
+  const original = String(text ?? '');
+  let out = original.replace(PRIVATE_BLOCK_RE, ' ');
+  out = out.replace(PRIVATE_OPEN_RE, ' ');
+  out = out.replace(PRIVATE_CLOSE_RE, ' ');
+  if (out === original) return { text: out, sawMarker: false };
+  // Tidy only the whitespace the removal itself introduced, so a delta with no marker keeps its
+  // byte-identical shape.
+  out = out.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n');
+  return { text: out, sawMarker: true };
+}
 
 export function containsSensitive(text) {
   return SENSITIVE_PATTERNS.some((pattern) => pattern.test(text));
@@ -187,9 +220,11 @@ export function traceLineForToolUse(name, input, repoRoot) {
 // Transcript JSONL slice → the classifier delta. `lines` is the raw slice; order is preserved
 // exactly, since the trace line format carries no timestamp and order is the only temporal
 // signal the model gets.
-export function buildDelta(lines, options = {}) {
+export function buildDeltaResult(lines, options = {}) {
   const { repoRoot = '', actionTrace = false } = options;
   const out = [];
+  let sawPrivate = false; // user-side markers only
+  let userTextSurvived = false;
   for (const line of String(lines).split('\n')) {
     if (!line.trim()) continue;
     let j;
@@ -199,13 +234,22 @@ export function buildDelta(lines, options = {}) {
       continue;
     }
     if (j.type === 'user' && j.message && typeof j.message.content === 'string') {
-      out.push('User: ' + j.message.content.trim());
+      const stripped = stripPrivate(j.message.content);
+      if (stripped.sawMarker) sawPrivate = true;
+      const text = stripped.text.trim();
+      if (text) {
+        userTextSurvived = true;
+        out.push('User: ' + text);
+      }
     } else if (j.type === 'assistant' && j.message && Array.isArray(j.message.content)) {
-      const text = j.message.content
-        .filter((c) => c.type === 'text')
-        .map((c) => c.text)
-        .join(' ')
-        .trim();
+      // An assistant-side marker strips that text but never drops the delta: only the USER can
+      // exclude a turn (mirrors Pi's lastUserSawPrivate).
+      const text = stripPrivate(
+        j.message.content
+          .filter((c) => c.type === 'text')
+          .map((c) => c.text)
+          .join(' '),
+      ).text.trim();
       if (text) out.push('Assistant: ' + text);
       if (actionTrace) {
         for (const part of j.message.content) {
@@ -216,7 +260,15 @@ export function buildDelta(lines, options = {}) {
       }
     }
   }
-  return out.join('\n\n');
+  // `privateOnly` is the one case where the hook must advance its offset on a SKIP. Everywhere
+  // else a skip deliberately carries the delta forward, but here carrying forward would fold the
+  // excluded text into the next delta — i.e. not exclude it at all.
+  const privateOnly = sawPrivate && !userTextSurvived;
+  return { text: privateOnly ? '' : out.join('\n\n'), privateOnly };
+}
+
+export function buildDelta(lines, options = {}) {
+  return buildDeltaResult(lines, options).text;
 }
 
 function isMain() {
@@ -232,6 +284,10 @@ if (isMain()) {
     // all, while an explicit empty value keeps meaning "off" (an unset var in the hook reads as '').
     const raw = process.env.ASAKI_MEMORY_ACTION_TRACE;
     const actionTrace = raw == null ? true : !['', '0', 'false', 'off', 'no'].includes(raw.toLowerCase());
-    process.stdout.write(buildDelta(stdin, { repoRoot: process.env.ASAKI_TRACE_REPO_ROOT ?? '', actionTrace }));
+    const result = buildDeltaResult(stdin, { repoRoot: process.env.ASAKI_TRACE_REPO_ROOT ?? '', actionTrace });
+    process.stdout.write(result.text);
+    // Exit 3 = "the user excluded this whole turn": the caller must skip AND advance its offset.
+    // A plain empty delta still exits 0, so its carry-forward behaviour is unchanged.
+    if (result.privateOnly) process.exitCode = 3;
   });
 }
