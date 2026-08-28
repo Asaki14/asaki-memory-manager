@@ -26,7 +26,7 @@ function check(label, expected, actual) {
 const variants = [
   { name: 'topK', def: AUTO_INJECT_TOP_K_DEFAULT, cap: AUTO_INJECT_TOP_K_CAP },
   { name: 'digestMax', def: 10, cap: PROJECT_DIGEST_MAX_CAP },
-  { name: 'maxChars', def: 3000, cap: PROJECT_DIGEST_MAX_CHARS_CAP },
+  { name: 'maxChars', def: 6000, cap: PROJECT_DIGEST_MAX_CHARS_CAP },
   { name: 'contentChars', def: 240, cap: PROJECT_DIGEST_CONTENT_CHARS_CAP },
 ];
 
@@ -37,21 +37,21 @@ check('constants: maxChars cap', 20000, PROJECT_DIGEST_MAX_CHARS_CAP);
 check('constants: contentChars cap', 2000, PROJECT_DIGEST_CONTENT_CHARS_CAP);
 
 const HUGE = '9'.repeat(42);
-// raw -> [topK(6,20), digestMax(10,50), maxChars(3000,20000), contentChars(240,2000)]
+// raw -> [topK(6,20), digestMax(10,50), maxChars(6000,20000), contentChars(240,2000)]
 const intTable = [
   ['8', [8, 8, 8, 8]],
   ['99', [20, 50, 99, 99]],
-  ['0', [6, 10, 3000, 240]],
-  ['-1', [6, 10, 3000, 240]],
-  ['abc', [6, 10, 3000, 240]],
-  ['8junk', [6, 10, 3000, 240]],
-  ['1.5', [6, 10, 3000, 240]],
-  ['.', [6, 10, 3000, 240]],
-  ['1.2.3', [6, 10, 3000, 240]],
-  ['', [6, 10, 3000, 240]],
-  ['   ', [6, 10, 3000, 240]],
+  ['0', [6, 10, 6000, 240]],
+  ['-1', [6, 10, 6000, 240]],
+  ['abc', [6, 10, 6000, 240]],
+  ['8junk', [6, 10, 6000, 240]],
+  ['1.5', [6, 10, 6000, 240]],
+  ['.', [6, 10, 6000, 240]],
+  ['1.2.3', [6, 10, 6000, 240]],
+  ['', [6, 10, 6000, 240]],
+  ['   ', [6, 10, 6000, 240]],
   ['007', [7, 7, 7, 7]],
-  ['000', [6, 10, 3000, 240]],
+  ['000', [6, 10, 6000, 240]],
   [' 12 ', [12, 12, 12, 12]],
   ['20', [20, 20, 20, 20]],
   ['21', [20, 21, 21, 21]],
@@ -60,11 +60,11 @@ const intTable = [
   ['20000', [20, 50, 20000, 2000]],
   ['20001', [20, 50, 20000, 2000]],
   [HUGE, [20, 50, 20000, 2000]],
-  [undefined, [6, 10, 3000, 240]],
-  [null, [6, 10, 3000, 240]],
-  [Infinity, [6, 10, 3000, 240]],
+  [undefined, [6, 10, 6000, 240]],
+  [null, [6, 10, 6000, 240]],
+  [Infinity, [6, 10, 6000, 240]],
   [8, [8, 8, 8, 8]],
-  [-1, [6, 10, 3000, 240]],
+  [-1, [6, 10, 6000, 240]],
 ];
 
 for (const [raw, expected] of intTable) {

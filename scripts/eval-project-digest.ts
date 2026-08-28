@@ -14,6 +14,9 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   PROJECT_DIGEST_CONTENT_CHARS,
+  PROJECT_DIGEST_INDEX_CONTENT_CHARS,
+  PROJECT_DIGEST_INDEX_MAX,
+  PROJECT_DIGEST_INDEX_MAX_CHARS,
   PROJECT_DIGEST_DEFAULT_MAX,
   PROJECT_DIGEST_DEFAULT_STANDING_KINDS,
   PROJECT_DIGEST_KNOWN_KINDS,
@@ -27,8 +30,18 @@ import { selectStandingRules } from '../src/services/standingRules.ts';
 type Case = {
   name: string;
   memories: ProjectDigestItem[];
-  options?: { projectId?: string; standingKinds?: string[]; max?: number; maxChars?: number; contentChars?: number };
-  expected: { shown: number; eligible: number; truncated: boolean; lines: string[] };
+  options?: {
+    projectId?: string;
+    standingKinds?: string[];
+    max?: number;
+    maxChars?: number;
+    contentChars?: number;
+    index?: boolean;
+    indexMax?: number;
+    indexMaxChars?: number;
+    indexContentChars?: number;
+  };
+  expected: { shown: number; eligible: number; truncated: boolean; lines: string[]; indexed?: number; indexLines?: string[] };
   expectedText?: string[];
 };
 
@@ -69,6 +82,18 @@ function jqBlock(item: Case): string {
       '--argjson',
       'contentChars',
       String(options.contentChars ?? PROJECT_DIGEST_CONTENT_CHARS),
+      '--argjson',
+      'index',
+      String(options.index ?? true),
+      '--argjson',
+      'indexMax',
+      String(options.indexMax ?? PROJECT_DIGEST_INDEX_MAX),
+      '--argjson',
+      'indexMaxChars',
+      String(options.indexMaxChars ?? PROJECT_DIGEST_INDEX_MAX_CHARS),
+      '--argjson',
+      'indexContentChars',
+      String(options.indexContentChars ?? PROJECT_DIGEST_INDEX_CONTENT_CHARS),
       '-f',
       jqPath,
     ],
@@ -84,6 +109,13 @@ for (const item of cases) {
   if (actual.shown !== item.expected.shown) failures.push(`${item.name}: shown expected ${item.expected.shown}, got ${actual.shown}`);
   if (actual.eligible !== item.expected.eligible) failures.push(`${item.name}: eligible expected ${item.expected.eligible}, got ${actual.eligible}`);
   if (actual.truncated !== item.expected.truncated) failures.push(`${item.name}: truncated expected ${item.expected.truncated}, got ${actual.truncated}`);
+  const expectedIndexed = item.expected.indexed ?? 0;
+  if (actual.indexed !== expectedIndexed) failures.push(`${item.name}: indexed expected ${expectedIndexed}, got ${actual.indexed}`);
+  const actualIndexLines = actual.text ? actual.text.split('\n').filter((line) => /^- \S+ \[/.test(line)) : [];
+  const expectedIndexLines = item.expected.indexLines ?? [];
+  if (actualIndexLines.join('\n') !== expectedIndexLines.join('\n')) {
+    failures.push(`${item.name}: index lines expected\n${expectedIndexLines.join('\n')}\ngot\n${actualIndexLines.join('\n')}`);
+  }
   if (actualLines.join('\n') !== item.expected.lines.join('\n')) {
     failures.push(`${item.name}: lines expected\n${item.expected.lines.join('\n')}\ngot\n${actualLines.join('\n')}`);
   }

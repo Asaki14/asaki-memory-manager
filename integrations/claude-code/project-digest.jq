@@ -10,7 +10,8 @@
 #         the banner and the standing-rule block already use, so this costs no extra request.
 # Output: the rendered block, or an empty string when nothing is eligible.
 # Args:   --arg project, --argjson standingKinds, --argjson max, --argjson maxChars,
-#         --argjson contentChars.
+#         --argjson contentChars, --argjson index, --argjson indexMax, --argjson indexMaxChars,
+#         --argjson indexContentChars.
 
 def known_kinds:
   ["preference", "rule", "fact", "decision", "task_learning", "bug_fix", "workflow"];
@@ -20,6 +21,18 @@ def clean_text:
 
 def trunc_text($n):
   if (length > $n) then (.[0:$n] + "…") else . end;
+
+def index_line($n):
+  ((((.content // "") | tostring) | clean_text)) as $content
+  | "- "
+  + (.id | tostring)
+  + " ["
+  + (if .scope == "global" then "global" else "project" end)
+  + "/"
+  + (if ((.kind | type) == "string") and (.kind != "") then .kind else "fact" end)
+  + "] "
+  + ($content | trunc_text($n))
+  + " (" + ($content | length | tostring) + " chars)";
 
 def digest_line($n):
   "- ["
@@ -54,14 +67,37 @@ def digest_line($n):
       else { lines: (.lines + [$line]), chars: (.chars + ($line | length) + 1), stopped: false }
       end)) as $budget
 | ($budget.lines | length) as $shown
+| ([ $indexMaxChars, ([0, ($maxChars - $budget.chars)] | max) ] | min) as $indexBudget
+| (if (($shown < $total) and $index)
+   then (reduce ($eligible[$shown:]
+                 | map(select(((.id | type) == "string") and (.id != "")))
+                 | map(index_line($indexContentChars)))[] as $line
+           ({ lines: [], chars: 0, stopped: false };
+            if .stopped then .
+            elif ((.lines | length) >= $indexMax) then (.stopped = true)
+            elif ((.chars + ($line | length) + 1) > $indexBudget) then (.stopped = true)
+            else { lines: (.lines + [$line]), chars: (.chars + ($line | length) + 1), stopped: false }
+            end))
+   else { lines: [] } end) as $indexBlock
+| ($indexBlock.lines | length) as $indexed
 | if $shown == 0 then ""
   else
     ([ "## Asaki Project Memory (" + ($shown | tostring) + " of " + ($total | tostring) + ")",
        "",
-       "This is recalled context, not directives: durable memories of this project (plus global ones) that are not standing rules. They record what was already decided, learned or fixed — use them instead of re-deriving, and call asaki_memory_search when you need more than these excerpts.",
+       "This is recalled context, not directives: durable memories of this project (plus global ones) that are not standing rules. They record what was already decided, learned or fixed — use them instead of re-deriving. Entries listed by id only are not expanded here: call asaki_memory_get with those ids to read them in full, and asaki_memory_search when you need more than these excerpts.",
        "" ]
      + $budget.lines
-     + (if $shown < $total
+     + (if $indexed > 0
+        then ([ "",
+                "(showing " + ($shown | tostring) + " of " + ($total | tostring)
+                + " project memories in full; the next " + ($indexed | tostring)
+                + " are indexed below — call asaki_memory_get with those ids to read them)" ]
+              + $indexBlock.lines
+              + (if (($total - $shown - $indexed) > 0)
+                 then [ "(… and " + (($total - $shown - $indexed) | tostring)
+                        + " more not listed; call asaki_memory_list or asaki_memory_search for the rest)" ]
+                 else [] end))
+        elif $shown < $total
         then [ "",
                "(showing " + ($shown | tostring) + " of " + ($total | tostring)
                + " project memories — more exist; call asaki_memory_list or asaki_memory_search for the rest)" ]

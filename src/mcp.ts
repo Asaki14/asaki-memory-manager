@@ -23,6 +23,9 @@ const SOURCE_TAG = 'mcp';
 
 // KEEP IN SYNC with integrations/mcp/asaki-memory.ts.
 const MAX_TOOL_OUTPUT_CHARS = 6000;
+// asaki_memory_get exists to return UNTRUNCATED content, so it gets its own, larger budget: 20 ids
+// of a few hundred characters each would otherwise hit the shared 6000-char cap. KEEP IN SYNC.
+const MAX_GET_OUTPUT_CHARS = 20000;
 const MEMORY_CONTEXT_CONTENT_CHARS = 280;
 const KINDS = ['preference', 'rule', 'fact', 'decision', 'task_learning', 'bug_fix', 'workflow'] as const;
 
@@ -322,6 +325,35 @@ const TOOLS: ToolDef[] = [
         return `${formatLine(item, index, MEMORY_CONTEXT_CONTENT_CHARS)}${score}${similarity}${scoreDetails}`;
       });
       return withBudgetFooter(joinWithinBudget(lines));
+    },
+  },
+  {
+    name: 'asaki_memory_get',
+    description:
+      'Read specific memories in FULL by id, with no content truncation. Ids come from the session-start project-memory index lines (the entries that block lists but does not expand), from asaki_memory_search / asaki_memory_list output, or from a review suggestion. Use it whenever an excerpt is not enough — search truncates content and list only pages by recency, so this is the only way to read a memory whole. At most 20 ids per call; reading counts as an access.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: {
+          type: 'array',
+          items: { type: 'string' },
+          minItems: 1,
+          maxItems: 20,
+          description: 'Memory ids to read (at most 20).',
+        },
+      },
+      required: ['ids'],
+    },
+    toRequest(args, userId) {
+      return { method: 'POST', path: '/v1/memories/get', body: { user_id: userId, ids: Array.isArray(args.ids) ? args.ids : [] } };
+    },
+    format(data) {
+      const memories = asArray(data.memories);
+      const missing = Array.isArray(data.missing) ? (data.missing as unknown[]).map(String) : [];
+      const parts: string[] = [];
+      if (memories.length > 0) parts.push(withBudgetFooter(joinWithinBudget(memories.map((item, index) => formatLine(item, index)), MAX_GET_OUTPUT_CHARS)));
+      if (missing.length > 0) parts.push(`not found: ${missing.join(', ')}`);
+      return parts.length > 0 ? parts.join('\n\n') : 'No Asaki memories found for those ids.';
     },
   },
   {

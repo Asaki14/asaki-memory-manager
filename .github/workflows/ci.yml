@@ -64,6 +64,7 @@ jobs:
       - run: npm run eval:candidate-fields
       - run: npm run eval:lifecycle
       - run: npm run eval:purge-scrub
+      - run: npm run eval:memory-get
       - run: npm run eval:review-park
       - run: npm run eval:bundle-guard
 

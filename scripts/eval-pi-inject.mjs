@@ -7,7 +7,8 @@
 //  2. the injected order is base system prompt → precheck → standing rules → project digest;
 //  3. a whole session start costs ONE /v1/memories/list — including when `session_start` and
 //     `before_agent_start` overlap (the loader's in-flight promise is shared, not just its value);
-//  4. the switches and the dynamic kind complement behave (digest off, standing off + digest on,
+//  4. the switches and the dynamic kind complement behave (digest off, digest index off, standing
+//     off + digest on,
 //     ASAKI_MEMORY_STANDING_RULES_KINDS=rule pushing preference into the digest);
 //  5. the banner field/omission matrix, on the pure builder from `// #region asaki-banner`;
 //  6. the auto-inject display boundaries (8 short results vs one oversized first result) and that
@@ -167,6 +168,27 @@ checkTrue('ASAKI_MEMORY_PROJECT_DIGEST=0 removes the digest', !digestOff.systemP
 checkTrue('ASAKI_MEMORY_PROJECT_DIGEST=0 keeps the standing rules', digestOff.systemPrompt.includes('## Asaki Standing Rules'));
 checkTrue('a disabled digest leaves no dangling blank block', !/\n{3}/.test(digestOff.systemPrompt));
 delete process.env.ASAKI_MEMORY_PROJECT_DIGEST;
+
+// The digest's compact id index: with only 1 of 2 eligible memories expanded, the other must come
+// back as an `id [scope/kind] excerpt (N chars)` row, and the switch must restore the old marker.
+process.env.ASAKI_MEMORY_PROJECT_DIGEST_MAX = '1';
+await freshSession();
+const indexOn = await runBeforeAgentStart();
+checkTrue(
+  'the digest indexes the memory it could not expand',
+  indexOn.systemPrompt.includes('(showing 1 of 2 project memories in full; the next 1 are indexed below — call asaki_memory_get with those ids to read them)') &&
+    indexOn.systemPrompt.includes('- b1 [project/bug_fix] 修复一 (3 chars)')
+);
+process.env.ASAKI_MEMORY_DIGEST_INDEX = '0';
+await freshSession();
+const indexOff = await runBeforeAgentStart();
+checkTrue(
+  'ASAKI_MEMORY_DIGEST_INDEX=0 restores the one-sentence marker',
+  indexOff.systemPrompt.includes('(showing 1 of 2 project memories — more exist; call asaki_memory_list or asaki_memory_search for the rest)') &&
+    !indexOff.systemPrompt.includes('- b1 [project/bug_fix]')
+);
+delete process.env.ASAKI_MEMORY_DIGEST_INDEX;
+delete process.env.ASAKI_MEMORY_PROJECT_DIGEST_MAX;
 
 process.env.ASAKI_MEMORY_STANDING_RULES = '0';
 process.env.ASAKI_MEMORY_STANDING_RULES_KINDS = 'rule';

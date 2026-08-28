@@ -23,6 +23,9 @@ const SOURCE_TAG = process.env.ASAKI_MEMORY_SOURCE || "mcp";
 // search/list can return up to 50/100 items). KEEP IN SYNC with the same constant in
 // integrations/pi/asaki-memory.ts and integrations/claude-code/user-prompt.sh.
 const MAX_TOOL_OUTPUT_CHARS = 6000;
+// asaki_memory_get exists to return UNTRUNCATED content, so it gets its own, larger budget: 20 ids
+// of a few hundred characters each would otherwise hit the shared 6000-char cap. KEEP IN SYNC.
+const MAX_GET_OUTPUT_CHARS = 20000;
 const MEMORY_CONTEXT_CONTENT_CHARS = 280;
 
 const SCOPES = ["global", "project", "session"] as const;
@@ -303,6 +306,27 @@ server.tool(
       return `${formatLine(item, index, MEMORY_CONTEXT_CONTENT_CHARS)}${score}${similarity}${scoreDetails}`;
     });
     return { content: [{ type: "text" as const, text: withBudgetFooter(joinWithinBudget(lines)) }] };
+  },
+);
+
+server.tool(
+  "asaki_memory_get",
+  "Read specific memories in FULL by id, with no content truncation. Ids come from the session-start project-memory index lines (the entries that block lists but does not expand), from asaki_memory_search / asaki_memory_list output, or from a review suggestion. Use it whenever an excerpt is not enough — search truncates content and list only pages by recency, so this is the only way to read a memory whole. At most 20 ids per call; reading counts as an access.",
+  {
+    ids: z.array(z.string()).min(1).max(20).describe("Memory ids to read (at most 20)."),
+  },
+  async ({ ids }, extra) => {
+    const cfg = memoryConfig();
+    const data = await apiRequest("/v1/memories/get", { user_id: cfg.userId, ids }, combinedSignal(extra.signal));
+    const memories = Array.isArray(data.memories) ? (data.memories as Record<string, unknown>[]) : [];
+    const missing = Array.isArray(data.missing) ? (data.missing as unknown[]).map(String) : [];
+    const parts: string[] = [];
+    if (memories.length > 0) {
+      parts.push(withBudgetFooter(joinWithinBudget(memories.map((item, index) => formatLine(item, index)), MAX_GET_OUTPUT_CHARS)));
+    }
+    if (missing.length > 0) parts.push(`not found: ${missing.join(", ")}`);
+    const text = parts.length > 0 ? parts.join("\n\n") : "No Asaki memories found for those ids.";
+    return { content: [{ type: "text" as const, text }] };
   },
 );
 

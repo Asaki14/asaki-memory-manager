@@ -1,4 +1,4 @@
-import type { CandidateAntecedentSource, CandidateCorrectionEvidence, CandidateEvidenceFields, CandidateRuleForm, CandidateSignal, CandidateSignalSubtype, CreateMemoryInput, ExtractMemoriesInput, ListMemoriesInput, ListMemoryProjectsInput, MemoryIdInput, MemoryKind, MemoryScope, MemoryStatus, SearchMemoriesInput, UpdateMemoryInput } from '../types';
+import type { CandidateAntecedentSource, CandidateCorrectionEvidence, CandidateEvidenceFields, CandidateRuleForm, CandidateSignal, CandidateSignalSubtype, CreateMemoryInput, ExtractMemoriesInput, GetMemoriesInput, ListMemoriesInput, ListMemoryProjectsInput, MemoryIdInput, MemoryKind, MemoryScope, MemoryStatus, SearchMemoriesInput, UpdateMemoryInput } from '../types';
 import { confidenceForAntecedent, importanceForSignal } from '../services/candidateDecision';
 import { DEFAULT_IDLE_RULE_DAYS } from '../services/memoryLifecycle';
 import { containsSensitiveContent } from './sensitiveContent';
@@ -231,6 +231,32 @@ export function validateListMemoryProjects(value: unknown): { ok: true; data: Re
   const offset = input.offset ?? 0;
   if (!Number.isInteger(offset) || offset < 0) return { ok: false, error: 'offset must be a non-negative integer.' };
   return { ok: true, data: { user_id: userId, limit, offset } };
+}
+
+// Batch read by id. The cap is deliberately small: this endpoint returns FULL content (that is the
+// whole point of it), so 20 memories is already several KB of response.
+const GET_MEMORIES_MAX_IDS = 20;
+const MEMORY_ID_MAX_CHARS = 128;
+
+export function validateGetMemories(value: unknown): { ok: true; data: Required<Pick<GetMemoriesInput, 'user_id' | 'ids'>> & Omit<GetMemoriesInput, 'user_id' | 'ids'> } | { ok: false; error: string } {
+  if (!value || typeof value !== 'object') return { ok: false, error: 'Body must be a JSON object.' };
+  const input = value as GetMemoriesInput;
+  const userId = validateUserId(input.user_id);
+  if (!userId) return { ok: false, error: 'user_id is required.' };
+  if (!Array.isArray(input.ids)) return { ok: false, error: 'ids must be an array of memory ids.' };
+  if (input.ids.length === 0) return { ok: false, error: 'ids must contain at least one memory id.' };
+  if (input.ids.length > GET_MEMORIES_MAX_IDS) return { ok: false, error: `ids must contain at most ${GET_MEMORIES_MAX_IDS} memory ids.` };
+
+  const ids: string[] = [];
+  for (const raw of input.ids) {
+    if (typeof raw !== 'string') return { ok: false, error: 'ids must contain only strings.' };
+    const id = raw.trim();
+    if (id.length === 0) return { ok: false, error: 'ids must not contain empty strings.' };
+    if (id.length > MEMORY_ID_MAX_CHARS) return { ok: false, error: `ids must contain memory ids of at most ${MEMORY_ID_MAX_CHARS} characters.` };
+    if (ids.indexOf(id) === -1) ids.push(id);
+  }
+
+  return { ok: true, data: { user_id: userId, ids } };
 }
 
 export function validateMemoryIdInput(value: unknown): { ok: true; data: MemoryIdInput } | { ok: false; error: string } {

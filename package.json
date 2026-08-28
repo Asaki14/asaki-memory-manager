@@ -10,6 +10,7 @@
     "eval:candidates": "node --experimental-strip-types scripts/eval-candidates.ts",
     "eval:candidate-fields": "node --experimental-strip-types scripts/eval-candidate-fields.ts",
     "eval:purge-scrub": "node --experimental-strip-types scripts/eval-purge-scrub.ts",
+    "eval:memory-get": "node --experimental-strip-types scripts/eval-memory-get.ts",
     "eval:lifecycle": "node --experimental-strip-types scripts/eval-lifecycle.ts",
     "eval:review-park": "node --experimental-strip-types scripts/eval-review-park.ts",
     "eval:review-resolve": "node --experimental-strip-types scripts/eval-review-resolve.ts",

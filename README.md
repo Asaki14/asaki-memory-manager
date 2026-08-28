@@ -150,16 +150,23 @@ Standing rules cover the memories that are *directives*. Everything else — dec
 
 This is recalled context, not directives: durable memories of this project (plus global
 ones) that are not standing rules. They record what was already decided, learned or fixed
-— use them instead of re-deriving, and call asaki_memory_search when you need more than
-these excerpts.
+— use them instead of re-deriving. Entries listed by id only are not expanded here: call
+asaki_memory_get with those ids to read them in full, and asaki_memory_search when you
+need more than these excerpts.
 
 - [project/decision] 记忆抽取的 scope 判断标准前移至抽取阶段…
 - [project/bug_fix] Vectorize upsert 失败时保留 D1 写入并标记 index_status…
+
+(showing 10 of 65 project memories in full; the next 30 are indexed below — call
+asaki_memory_get with those ids to read them)
+- 6f0c… [project/workflow] 部署是手动的：合并进 main 不会自动上线… (212 chars)
+- b41a… [global/decision] 交互式 PRD 模板路线：只保留一个模板… (287 chars)
 ```
 
 - **Kinds**: the DYNAMIC complement of the standing kinds — `KNOWN_MEMORY_KINDS − ASAKI_MEMORY_STANDING_RULES_KINDS`. With the defaults that is `fact`, `decision`, `task_learning`, `bug_fix`, `workflow`; set `ASAKI_MEMORY_STANDING_RULES_KINDS=rule` and `preference` moves into this block instead of vanishing. No memory is ever in both blocks, and the boundary does not depend on either block's on/off switch.
 - **Scope and order**: identical to standing rules — global always, project on match, session never; importance desc → recency desc → id desc.
-- **Cap**: at most 10 memories and 3000 characters of memory lines, each clamped to 240 characters, with the same `(showing N of M project memories — more exist…)` marker. Worst case is ~3.3 KB (~0.8k English / ~1.65k Chinese tokens) on top of the standing-rule block.
+- **Cap**: at most 10 expanded memories and 6000 characters of block text, each expanded line clamped to 240 characters.
+- **Id index**: whatever the memory cap cut off is then listed as compact `id [scope/kind] excerpt (N chars)` rows — up to 30 rows / 2000 characters, inside the same 6000-character budget. Knowing the id is what makes an unexpanded memory addressable: `asaki_memory_get(ids)` reads it in full, and the trailing character count is the fetch-cost hint. `ASAKI_MEMORY_DIGEST_INDEX=0` falls back to the old one-sentence `(showing N of M project memories — more exist…)` marker. Standing rules deliberately have no index. Worst case is therefore ~6 KB on top of the standing-rule block's 4 KB.
 - **Delivery**: Claude Code emits it from the SessionStart hook right after the standing rules (re-emitted on compact); Pi appends it to the `before_agent_start` system prompt after the standing rules — that is the only Pi path that reaches the model, since its `[Memory]` banner is transcript-local. Both clients reuse the memory list they already fetch, so the block costs no extra request.
 - **This is on by default**, so upgrading adds it to every session's opening context; `ASAKI_MEMORY_PROJECT_DIGEST=0` turns it off in one variable.
 
@@ -167,12 +174,13 @@ these excerpts.
 | --- | --- | --- |
 | `ASAKI_MEMORY_PROJECT_DIGEST` | `1` | Set to `0`/`off`/`false` to disable the digest entirely. |
 | `ASAKI_MEMORY_PROJECT_DIGEST_MAX` | `10` | Hard cap on injected memories (clamped to 50). |
-| `ASAKI_MEMORY_PROJECT_DIGEST_MAX_CHARS` | `3000` | Character budget for the memory lines (clamped to 20000). |
-| `ASAKI_MEMORY_PROJECT_DIGEST_CONTENT_CHARS` | `240` | Per-memory character clamp (clamped to 2000). |
+| `ASAKI_MEMORY_PROJECT_DIGEST_MAX_CHARS` | `6000` | Character budget for the whole block, expanded lines plus id index (clamped to 20000). |
+| `ASAKI_MEMORY_PROJECT_DIGEST_CONTENT_CHARS` | `240` | Per-memory character clamp for the expanded lines (clamped to 2000). |
+| `ASAKI_MEMORY_DIGEST_INDEX` | `1` | Set to `0`/`off`/`false` to replace the id index with the old one-sentence marker. |
 
 Selection and rendering are one canonical implementation in [`src/services/projectDigest.ts`](src/services/projectDigest.ts), copied verbatim into the Pi extension and re-implemented in [`integrations/claude-code/project-digest.jq`](integrations/claude-code/project-digest.jq); `npm run eval:project-digest` fails if any copy drifts, and `npm run eval:session-inject` checks both clients' wiring.
 
-Known boundary shared by both blocks: the clients list at most 100 memories, which is also the server maximum, and the server returns the 100 most recently updated rows *before* the importance sort runs. Past ~100 active global+project memories an older high-importance one can therefore be dropped before selection sees it — watch the `memories=` count in the status banner.
+Known boundary shared by both blocks: the clients list at most 100 memories, which is also the server maximum, and the server returns the 100 most recently updated rows *before* the importance sort runs. Past ~100 active global+project memories an older high-importance one can therefore be dropped before selection sees it — the digest's id index makes the gap visible (a memory in neither the expanded lines nor the index was never listed) but does not close it. Watch the `memories=` count in the status banner.
 
 ### Session status banner (both clients)
 
@@ -211,6 +219,7 @@ export ASAKI_MEMORY_AUTO_EXTRACT="0"
 export ASAKI_MEMORY_AUTO_CLASSIFIER="1"
 export ASAKI_MEMORY_STANDING_RULES="1"
 export ASAKI_MEMORY_PROJECT_DIGEST="1"
+export ASAKI_MEMORY_DIGEST_INDEX="1"   # 0 replaces the digest id index with the old marker
 export ASAKI_MEMORY_CLASSIFIER_MODEL="openai-codex/gpt-5.6-luna"
 export ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS="300"
 # Both default on. Correction mode makes the classifier detect the user correcting the agent and
@@ -280,6 +289,23 @@ curl -X POST http://127.0.0.1:8787/v1/memories/search \
 ```
 
 Defaults to `global + current project + current session` when `project_id` / `session_id` are provided. Explicit `scope=project` requires `project_id`; explicit `scope=session` requires `session_id`. Optional `min_score` (0–1) drops low-scoring results.
+
+</details>
+
+<details>
+<summary><code>POST /v1/memories/get</code> — read memories in full by id</summary>
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/memories/get \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -d '{
+    "user_id": "alice",
+    "ids": ["3f1c…", "9ab2…"]
+  }'
+```
+
+Returns `{ "memories": [...], "missing": [...] }` with content untruncated — the counterpart of the session-start digest's id index and of `asaki_memory_search`, which truncates content. At most 20 ids per call; ids belonging to another user are reported in `missing`, never returned. A read by id counts as a real retrieval, so it refreshes `last_accessed_at` exactly like a tracked search.
 
 </details>
 

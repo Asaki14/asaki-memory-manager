@@ -1,5 +1,5 @@
 import { generateEmbedding } from '../ai/embeddings';
-import type { CreateMemoryInput, Env, ListMemoriesInput, ListMemoryProjectsInput, MemoryKind, MemoryProjectRow, MemoryRow, SearchMemoriesInput, SearchResult, UpdateMemoryInput } from '../types';
+import type { CreateMemoryInput, Env, GetMemoriesInput, ListMemoriesInput, ListMemoryProjectsInput, MemoryKind, MemoryProjectRow, MemoryRow, SearchMemoriesInput, SearchResult, UpdateMemoryInput } from '../types';
 import { UserFacingError } from '../utils/errors';
 import { writeMemoryEvent } from './memoryEvents';
 import { scoreMemoryForSearch } from './searchScoring';
@@ -285,6 +285,45 @@ export async function updateMemoryContent(env: Env, memory: MemoryRow, input: { 
 export async function getMemory(env: Env, id: string, userId: string): Promise<MemoryRow | null> {
   const result = await env.DB.prepare('SELECT * FROM memories WHERE id = ?1 AND user_id = ?2').bind(id, userId).first<MemoryRow>();
   return result ?? null;
+}
+
+/**
+ * Batch read by id — the counterpart of the bounded session-start injection blocks, which list the
+ * memories they could not expand as `id [scope/kind] excerpt` index lines. Without this an agent
+ * could see that a memory exists but had no way to read it: search truncates content and list only
+ * pages by `updated_at DESC`.
+ *
+ * Reads are scoped to the caller's user_id (a foreign id is reported as missing, never leaked), and
+ * they count as a real retrieval: `last_accessed_at` is refreshed exactly like a tracked search, so
+ * a memory an agent actually reads never looks idle to pruneStaleMemories()/lifecycleReport().
+ */
+export async function getMemoriesByIds(env: Env, input: Required<Pick<GetMemoriesInput, 'user_id' | 'ids'>> & Omit<GetMemoriesInput, 'user_id' | 'ids'>): Promise<{ memories: MemoryRow[]; missing: string[] }> {
+  const rows = await selectMemoriesByIds(env, input.ids);
+  const rowById = new Map(rows.filter((row) => row.user_id === input.user_id).map((row) => [row.id, row]));
+
+  const memories: MemoryRow[] = [];
+  const missing: string[] = [];
+  for (const id of input.ids) {
+    const row = rowById.get(id);
+    if (row) memories.push(row);
+    else missing.push(id);
+  }
+
+  const trackAccess = input.track_access !== false;
+  if (trackAccess && memories.length > 0) {
+    const timestamp = nowIso();
+    await Promise.all(
+      memories.map((memory) => env.DB.prepare('UPDATE memories SET last_accessed_at = ?1 WHERE id = ?2').bind(timestamp, memory.id).run())
+    );
+  }
+
+  await writeMemoryEvent(env, {
+    userId: input.user_id,
+    eventType: 'get',
+    payload: { requested: input.ids.length, found: memories.length, result_ids: memories.map((memory) => memory.id), missing_ids: missing },
+  });
+
+  return { memories, missing };
 }
 
 export async function listMemories(env: Env, input: Required<Pick<ListMemoriesInput, 'user_id' | 'status' | 'limit' | 'offset'>> & Omit<ListMemoriesInput, 'user_id' | 'status' | 'limit' | 'offset'>): Promise<MemoryRow[]> {

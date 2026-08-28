@@ -6,6 +6,8 @@
 #   - the whole hook still costs ONE /v1/memories/list plus ONE /v1/memories/reviews/list,
 #   - the injected order is standing rules → project digest → status banner,
 #   - ASAKI_MEMORY_PROJECT_DIGEST=0 removes the block with no leftover whitespace,
+#   - the digest's id index renders (id + tag + excerpt + char count) and ASAKI_MEMORY_DIGEST_INDEX=0
+#     restores the old one-sentence marker,
 #   - standing off + digest on still computes the kind complement (kinds parsing is hoisted),
 #   - the banner's field/omission matrix on all three paths (setup-required, normal, list failure),
 #   - auto-inject sends the validated top_k/min_score and honours its display budget.
@@ -61,6 +63,23 @@ JSON
 cat >"$WORK/list-rules-only.json" <<'JSON'
 {"memories":[
   {"id":"r1","scope":"global","kind":"rule","status":"active","importance":0.9,"updated_at":"2026-01-03T00:00:00.000Z","content":"规则一"}
+]}
+JSON
+
+cat >"$WORK/list-many.json" <<'JSON'
+{"memories":[
+  {"id":"g01","scope":"global","kind":"decision","status":"active","importance":0.89,"updated_at":"2026-01-01T00:00:00.000Z","content":"决策01 正文正文正文"},
+  {"id":"g02","scope":"global","kind":"decision","status":"active","importance":0.88,"updated_at":"2026-01-01T00:00:00.000Z","content":"决策02 正文正文正文"},
+  {"id":"g03","scope":"global","kind":"decision","status":"active","importance":0.87,"updated_at":"2026-01-01T00:00:00.000Z","content":"决策03 正文正文正文"},
+  {"id":"g04","scope":"global","kind":"decision","status":"active","importance":0.86,"updated_at":"2026-01-01T00:00:00.000Z","content":"决策04 正文正文正文"},
+  {"id":"g05","scope":"global","kind":"decision","status":"active","importance":0.85,"updated_at":"2026-01-01T00:00:00.000Z","content":"决策05 正文正文正文"},
+  {"id":"g06","scope":"global","kind":"decision","status":"active","importance":0.84,"updated_at":"2026-01-01T00:00:00.000Z","content":"决策06 正文正文正文"},
+  {"id":"g07","scope":"global","kind":"decision","status":"active","importance":0.83,"updated_at":"2026-01-01T00:00:00.000Z","content":"决策07 正文正文正文"},
+  {"id":"g08","scope":"global","kind":"decision","status":"active","importance":0.82,"updated_at":"2026-01-01T00:00:00.000Z","content":"决策08 正文正文正文"},
+  {"id":"g09","scope":"global","kind":"decision","status":"active","importance":0.81,"updated_at":"2026-01-01T00:00:00.000Z","content":"决策09 正文正文正文"},
+  {"id":"g10","scope":"global","kind":"decision","status":"active","importance":0.8,"updated_at":"2026-01-01T00:00:00.000Z","content":"决策10 正文正文正文"},
+  {"id":"g11","scope":"global","kind":"decision","status":"active","importance":0.79,"updated_at":"2026-01-01T00:00:00.000Z","content":"决策11 正文正文正文"},
+  {"id":"g12","scope":"global","kind":"decision","status":"active","importance":0.78,"updated_at":"2026-01-01T00:00:00.000Z","content":"决策12 正文正文正文"}
 ]}
 JSON
 
@@ -188,6 +207,24 @@ assert_not_contains "C: the configured standing kind stays out of the digest" "$
 LINE=$(banner_line_of "$OUT")
 assert_not_contains "C: no standingRules field" "$LINE" "standingRules"
 assert_contains "C: projectDigest field present" "$LINE" "projectDigest=3/3"
+
+# --- case G: the digest id index (P1-B/P2-B) --------------------------------------------------
+# 12 eligible memories, 2 expanded: the other 10 must show up as `id [scope/kind] excerpt (N chars)`
+# rows so asaki_memory_get can reach them, and the switch must restore the old one-line marker.
+OUT=$(STUB_LIST_FIXTURE="$WORK/list-many.json" ASAKI_MEMORY_PROJECT_DIGEST_MAX=2 run_session_start)
+assert_contains "G: digest header" "$OUT" "## Asaki Project Memory (2 of 12)"
+assert_contains "G: index header" "$OUT" "(showing 2 of 12 project memories in full; the next 10 are indexed below — call asaki_memory_get with those ids to read them)"
+assert_contains "G: index row carries id, tag, excerpt and char count" "$OUT" "- g03 [global/decision] 决策03 正文正文正文 (11 chars)"
+assert_contains "G: last index row" "$OUT" "- g12 [global/decision] 决策12 正文正文正文 (11 chars)"
+assert_not_contains "G: an expanded memory is not repeated in the index" "$OUT" "- g01 [global/decision]"
+assert_not_contains "G: no legacy marker when the index rendered" "$OUT" "project memories — more exist"
+assert_eq "G: ten index rows" "$(printf '%s\n' "$OUT" | grep -c '^- g[0-9]* \[global/decision\]')" "10"
+assert_contains "G: preamble names the fetch tool" "$OUT" "call asaki_memory_get with those ids to read them in full"
+assert_eq "G: still one list call" "$(grep -c '/v1/memories/list$' "$STUB_CALL_LOG")" "1"
+
+OUT=$(STUB_LIST_FIXTURE="$WORK/list-many.json" ASAKI_MEMORY_PROJECT_DIGEST_MAX=2 ASAKI_MEMORY_DIGEST_INDEX=0 run_session_start)
+assert_contains "G: switch off restores the legacy marker" "$OUT" "(showing 2 of 12 project memories — more exist; call asaki_memory_list or asaki_memory_search for the rest)"
+assert_eq "G: switch off renders no index rows" "$(printf '%s\n' "$OUT" | grep -c '^- g[0-9]* \[global/decision\]')" "0"
 
 # --- case D: classifier off (only reachable via the deprecated auto-extract path) -------------
 OUT=$(ASAKI_MEMORY_AUTO_EXTRACT=1 run_session_start)

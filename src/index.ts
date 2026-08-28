@@ -4,10 +4,10 @@ import { handleMcpRequest } from './mcp';
 import { UserFacingError } from './utils/errors';
 import { dedupeCandidateBatch, isAutoAddEligible, isUnsupervisedSource, processMemoryCandidates } from './services/candidates';
 import { extractMemoryCandidates } from './services/extraction';
-import { backfillPendingIndex, createMemory, deleteMemory, getMemory, listMemories, listMemoryProjects, pruneStaleMemories, purgeMemory, searchMemories, updateMemory } from './services/memories';
+import { backfillPendingIndex, createMemory, deleteMemory, getMemoriesByIds, getMemory, listMemories, listMemoryProjects, pruneStaleMemories, purgeMemory, searchMemories, updateMemory } from './services/memories';
 import { createMemoryReviews, listMemoryReviews, resolveMemoryReview } from './services/reviews';
 import { lifecycleReport } from './services/memoryLifecycle';
-import { validateBackfillIndex, validateCreateMemory, validateCreateMemoryReviews, validateExtractMemories, validateLifecycleReport, validateListMemories, validateListMemoryProjects, validateListMemoryReviews, validateMemoryIdInput, validatePruneStale, validateProcessCandidates, validatePurgeMemory, validateResolveMemoryReview, validateSearchMemories, validateUpdateMemory } from './utils/validation';
+import { validateBackfillIndex, validateCreateMemory, validateCreateMemoryReviews, validateExtractMemories, validateGetMemories, validateLifecycleReport, validateListMemories, validateListMemoryProjects, validateListMemoryReviews, validateMemoryIdInput, validatePruneStale, validateProcessCandidates, validatePurgeMemory, validateResolveMemoryReview, validateSearchMemories, validateUpdateMemory } from './utils/validation';
 
 type Bindings = Env;
 
@@ -182,6 +182,20 @@ app.post('/v1/memories/extract', async (c) => {
   const decisions = autoBucket.length > 0 ? await processMemoryCandidates(c.env, autoBucket) : [];
   const queued = reviewBucket.length > 0 ? await createMemoryReviews(c.env, reviewBucket) : { reviews: [], reinforcements: [] };
   return c.json({ decisions, reviews: queued.reviews, extracted_count: extracted.length });
+});
+
+app.post('/v1/memories/get', async (c) => {
+  const body = await readJson(c);
+  if (!body.ok) return body.response;
+
+  const validation = validateGetMemories(body.body);
+  if (!validation.ok) return c.json({ error: validation.error }, 400);
+
+  const rateLimited = await checkRateLimit(c, `get:${validation.data.user_id}`);
+  if (rateLimited) return rateLimited;
+
+  const { memories, missing } = await getMemoriesByIds(c.env, validation.data);
+  return c.json({ memories, missing });
 });
 
 app.post('/v1/memories/list', async (c) => {
