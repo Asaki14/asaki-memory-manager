@@ -153,6 +153,29 @@ environment (never hardcoded / never committed). Set them once in
   prose antecedents without it, at lower recall. The flag is per-machine and
   takes effect on the next Stop event.
 
+  **`<private>…</private>` — excluding one turn by hand.** Anything you wrap in
+  `<private>…</private>` in your own message is removed from the delta before any
+  gate, prompt, tail-carry file or HTTP request sees it, in both clients. The
+  marker is case-insensitive, may span lines, may appear several times per turn,
+  and an unclosed `<private>` excludes everything after it to the end of that
+  message. When a turn's user text is *entirely* private, the whole delta is
+  dropped and — uniquely among the skips described here — the offset is
+  **advanced**, since carrying that delta forward would simply fold the excluded
+  text into the next one. Semantic boundaries, all deliberate:
+
+  - It affects only this local delta build for this turn. It does **not** delete
+    or retract anything already stored — use `asaki_memory_delete` (plus a purge)
+    for that.
+  - It does **not** touch Claude Code's own transcript file, Pi's session
+    history, or anything the main conversation model already saw; only the
+    background classifier/extraction path is affected.
+  - It does **not** apply to the `UserPromptSubmit` auto-inject path, which sends
+    your prompt to `/v1/memories/search` as a retrieval query. Turn that off with
+    `ASAKI_MEMORY_AUTO_INJECT=0` if that matters to you.
+  - An `Assistant:` text segment carrying the marker is stripped as well, but an
+    assistant-side marker never drops the delta — only your own turn can do that.
+  - It is independent of the credential gate: both run, in that order.
+
   **What the project context block sends off-machine.** Every classifier call is
   now prefixed with a short, client-computed block naming the host repository,
   the repositories currently in play, and the one the work is attributed to.

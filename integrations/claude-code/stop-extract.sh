@@ -384,6 +384,16 @@ TOTAL=$(wc -l <"$TRANSCRIPT" | tr -d ' ')
 # The builder lives in build-delta.mjs so it is testable offline (scripts/eval-trace-builder.mjs).
 TEXT=$(sed -n "$((LAST + 1)),${TOTAL}p" "$TRANSCRIPT" \
   | ASAKI_MEMORY_ACTION_TRACE="$ACTION_TRACE" ASAKI_TRACE_REPO_ROOT="$GIT_ROOT" node "$HOOK_DIR/build-delta.mjs")
+BUILD_STATUS=$?
+
+# Exit 3 from the builder = the user wrapped this whole turn in `<private>…</private>`. This is
+# the ONE skip that advances the offset: every other skip below carries the delta forward on
+# purpose, but carrying an excluded turn forward would just fold it into the next delta, i.e. not
+# exclude it at all. Nothing has been sent, logged or written at this point.
+if [ "$BUILD_STATUS" -eq 3 ]; then
+  echo "$TOTAL" >"$STATE_FILE"
+  report_and_exit
+fi
 
 # Whole-delta sensitive gate. Per-trace-line gating already ran inside the builder on the
 # original (un-redacted) tool arguments; this is the second line of defence over the assembled
