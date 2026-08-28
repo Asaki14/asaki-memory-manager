@@ -116,6 +116,19 @@ export ASAKI_MEMORY_API_KEY="test-key"
 export ASAKI_MEMORY_USER_ID="asaki"
 export ASAKI_MEMORY_PROJECT_ID="proj"
 export ASAKI_MEMORY_CLASSIFIER_MODEL="model-x"
+# The banner reads the classifier health ledger out of $TMPDIR — pin it at the sandbox so this
+# eval never sees (or is perturbed by) the developer's real stop-extract state.
+export TMPDIR="$WORK/"
+HEALTH_DIR="$WORK/asaki-memory-stop-extract"
+mkdir -p "$HEALTH_DIR"
+health_ledger() {
+  if [ -z "${1:-}" ]; then
+    rm -f "$HEALTH_DIR/health.json"
+  else
+    printf '%s\n' "$1" >"$HEALTH_DIR/health.json"
+  fi
+}
+health_ledger ""
 
 run_session_start() {
   : >"$STUB_CALL_LOG"
@@ -207,6 +220,34 @@ LINE=$(banner_line_of "$OUT")
 assert_eq "G: setup banner line" "$LINE" "user=asaki | project=proj | auth=none | classifier=on model=model-x"
 assert_not_contains "G: no autoExtract field" "$LINE" "autoExtract"
 
+# --- case H1..H5: the classifier health ledger (research report §4, P1-A) ---------------------
+# Below threshold, absent and corrupt all render NOTHING; at/over threshold the two `!` fields
+# appear right after classifier= and before the block counts.
+health_ledger '{"consecutive_failures":2,"failing_since":"2026-08-25T09:00:00Z","sessions_since_last_candidate":14}'
+LINE=$(banner_line_of "$(run_session_start)")
+assert_not_contains "H1: below both thresholds is silent" "$LINE" "!"
+assert_eq "H1: banner unchanged from the no-ledger case" "$LINE" "user=asaki | project=proj | memories=4 | pendingReviews=113 | classifier=on model=model-x | standingRules=2/2 | projectDigest=2/2"
+
+health_ledger '{"consecutive_failures":3,"failing_since":"2026-08-25T09:00:00Z","sessions_since_last_candidate":0}'
+LINE=$(banner_line_of "$(run_session_start)")
+assert_eq "H2: three consecutive failures raise the alarm" "$LINE" "user=asaki | project=proj | memories=4 | pendingReviews=113 | classifier=on model=model-x | !failing=3 since=2026-08-25 | standingRules=2/2 | projectDigest=2/2"
+
+health_ledger '{"consecutive_failures":0,"failing_since":null,"sessions_since_last_candidate":15}'
+LINE=$(banner_line_of "$(run_session_start)")
+assert_eq "H3: fifteen idle sessions raise the hint only" "$LINE" "user=asaki | project=proj | memories=4 | pendingReviews=113 | classifier=on model=model-x | !idle=15sessions | standingRules=2/2 | projectDigest=2/2"
+
+health_ledger 'not json at all {'
+LINE=$(banner_line_of "$(run_session_start)")
+assert_not_contains "H4: a corrupt ledger renders nothing" "$LINE" "!"
+assert_contains "H4: a corrupt ledger does not break the rest of the banner" "$LINE" "projectDigest=2/2"
+
+health_ledger '{"consecutive_failures":9,"failing_since":"2026-08-01T00:00:00Z","sessions_since_last_candidate":40}'
+LINE=$(ASAKI_MEMORY_API_KEY="" run_session_start | grep -o 'user=[^`]*' | head -1)
+assert_eq "H5: the setup-required path still reports health" "$LINE" "user=asaki | project=proj | auth=none | classifier=on model=model-x | !failing=9 since=2026-08-01 | !idle=40sessions"
+LINE=$(ASAKI_MEMORY_HEALTH_FAILING_THRESHOLD=10 ASAKI_MEMORY_HEALTH_IDLE_THRESHOLD=41 run_session_start | grep -o 'user=[^`]*' | head -1)
+assert_not_contains "H5b: raised thresholds silence both fields" "$LINE" "!"
+health_ledger ""
+
 # --- auto-inject: request fields and display budget --------------------------------------------
 export ASAKI_MEMORY_AUTO_INJECT=1
 export ASAKI_MEMORY_AUTO_INJECT_ALWAYS=1
@@ -252,15 +293,19 @@ ASAKI_MEMORY_SESSION_START_LIB=1 . "$ROOT/integrations/claude-code/session-start
 
 claude_matrix_line() {
   case "$1" in
-    all-on) asaki_banner_line asaki proj "" 90 3 "on model=m" "25/25" "10/65" ;;
-    classifier-off) asaki_banner_line asaki proj "" 90 3 "" "25/25" "10/65" ;;
-    standing-omitted) asaki_banner_line asaki proj "" 90 3 "on model=m" "" "10/65" ;;
-    digest-omitted) asaki_banner_line asaki proj "" 90 3 "on model=m" "25/25" "" ;;
-    both-omitted) asaki_banner_line asaki proj "" 90 3 "on model=m" "" "" ;;
-    fetch-failed) asaki_banner_line asaki proj "" "?" "?" "on model=m" "" "" ;;
-    no-project) asaki_banner_line asaki unknown "" 0 0 "on model=m" "" "" ;;
-    setup-required) asaki_banner_line asaki proj none "" "" "on model=m" "" "" ;;
-    setup-required-no-classifier) asaki_banner_line asaki proj none "" "" "" "" "" ;;
+    all-on) asaki_banner_line asaki proj "" 90 3 "on model=m" "" "" "25/25" "10/65" ;;
+    classifier-off) asaki_banner_line asaki proj "" 90 3 "" "" "" "25/25" "10/65" ;;
+    standing-omitted) asaki_banner_line asaki proj "" 90 3 "on model=m" "" "" "" "10/65" ;;
+    digest-omitted) asaki_banner_line asaki proj "" 90 3 "on model=m" "" "" "25/25" "" ;;
+    both-omitted) asaki_banner_line asaki proj "" 90 3 "on model=m" "" "" "" "" ;;
+    fetch-failed) asaki_banner_line asaki proj "" "?" "?" "on model=m" "" "" "" "" ;;
+    no-project) asaki_banner_line asaki unknown "" 0 0 "on model=m" "" "" "" "" ;;
+    setup-required) asaki_banner_line asaki proj none "" "" "on model=m" "" "" "" "" ;;
+    setup-required-no-classifier) asaki_banner_line asaki proj none "" "" "" "" "" "" "" ;;
+    health-failing) asaki_banner_line asaki proj "" 90 3 "on model=m" "3 since=2026-08-25" "" "25/25" "10/65" ;;
+    health-idle) asaki_banner_line asaki proj "" 90 3 "on model=m" "" "15sessions" "25/25" "10/65" ;;
+    health-both) asaki_banner_line asaki proj "" 90 3 "on model=m" "7 since=2026-08-20" "22sessions" "" "" ;;
+    health-quiet) asaki_banner_line asaki proj "" 90 3 "on model=m" "" "" "25/25" "10/65" ;;
     *) printf 'UNKNOWN-STATE' ;;
   esac
 }

@@ -25,6 +25,7 @@
     "eval:trace-sensitive": "bash scripts/eval-trace-sensitive.sh",
     "eval:trace-builder": "node scripts/eval-trace-builder.mjs",
     "eval:throttle-state": "bash scripts/eval-throttle-state.sh",
+    "eval:health-ledger": "bash scripts/eval-health-ledger.sh",
     "eval:review-format": "node --experimental-strip-types scripts/eval-review-format.ts",
     "eval:standing-rules": "node --experimental-strip-types scripts/eval-standing-rules.ts",
     "eval:project-digest": "node --experimental-strip-types scripts/eval-project-digest.ts",
