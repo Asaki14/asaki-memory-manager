@@ -21108,6 +21108,7 @@ var DEFAULT_USER_ID = "asaki";
 var DEFAULT_SCOPE = "project";
 var SOURCE_TAG = process.env.ASAKI_MEMORY_SOURCE || "mcp";
 var MAX_TOOL_OUTPUT_CHARS = 6e3;
+var MAX_GET_OUTPUT_CHARS = 2e4;
 var MEMORY_CONTEXT_CONTENT_CHARS = 280;
 var SCOPES = ["global", "project", "session"];
 var KINDS = ["preference", "rule", "fact", "decision", "task_learning", "bug_fix", "workflow"];
@@ -21336,6 +21337,26 @@ server.tool(
       return `${formatLine(item, index, MEMORY_CONTEXT_CONTENT_CHARS)}${score}${similarity}${scoreDetails}`;
     });
     return { content: [{ type: "text", text: withBudgetFooter(joinWithinBudget(lines)) }] };
+  }
+);
+server.tool(
+  "asaki_memory_get",
+  "Read specific memories in FULL by id, with no content truncation. Ids come from the session-start project-memory index lines (the entries that block lists but does not expand), from asaki_memory_search / asaki_memory_list output, or from a review suggestion. Use it whenever an excerpt is not enough \u2014 search truncates content and list only pages by recency, so this is the only way to read a memory whole. At most 20 ids per call; reading counts as an access.",
+  {
+    ids: external_exports.array(external_exports.string()).min(1).max(20).describe("Memory ids to read (at most 20).")
+  },
+  async ({ ids }, extra) => {
+    const cfg = memoryConfig();
+    const data = await apiRequest("/v1/memories/get", { user_id: cfg.userId, ids }, combinedSignal(extra.signal));
+    const memories = Array.isArray(data.memories) ? data.memories : [];
+    const missing = Array.isArray(data.missing) ? data.missing.map(String) : [];
+    const parts = [];
+    if (memories.length > 0) {
+      parts.push(withBudgetFooter(joinWithinBudget(memories.map((item, index) => formatLine(item, index)), MAX_GET_OUTPUT_CHARS)));
+    }
+    if (missing.length > 0) parts.push(`not found: ${missing.join(", ")}`);
+    const text = parts.length > 0 ? parts.join("\n\n") : "No Asaki memories found for those ids.";
+    return { content: [{ type: "text", text }] };
   }
 );
 server.tool(

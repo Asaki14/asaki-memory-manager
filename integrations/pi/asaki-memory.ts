@@ -22,6 +22,9 @@ const CLASSIFIER_TIMEOUT_MS = 120_000;
 // integrations/mcp/asaki-memory.ts and integrations/claude-code/user-prompt.sh.
 // #region asaki-auto-inject
 const MAX_TOOL_OUTPUT_CHARS = 6000;
+// asaki_memory_get exists to return UNTRUNCATED content, so it gets its own, larger budget: 20 ids
+// of a few hundred characters each would otherwise hit the shared 6000-char cap. KEEP IN SYNC.
+const MAX_GET_OUTPUT_CHARS = 20000;
 const MEMORY_CONTEXT_CONTENT_CHARS = 280;
 // #endregion
 const MEMORY_NEEDED_RE =
@@ -313,10 +316,20 @@ export const PROJECT_DIGEST_KNOWN_KINDS = [
 ] as const;
 export const PROJECT_DIGEST_DEFAULT_STANDING_KINDS = ['rule', 'preference'] as const;
 export const PROJECT_DIGEST_DEFAULT_MAX = 10;
-export const PROJECT_DIGEST_MAX_CHARS = 3000;
+export const PROJECT_DIGEST_MAX_CHARS = 6000;
 export const PROJECT_DIGEST_CONTENT_CHARS = 240;
+
+// The compact id index: the eligible memories the block could NOT expand, rendered as
+// `- <id> [scope/kind] <excerpt> (N chars)` instead of the one-sentence "more exist" marker.
+// Knowing an id is what makes an unexpanded memory addressable — `asaki_memory_get(ids)` reads it
+// in full — and the trailing character count is the fetch-cost hint the agent budgets against.
+// Bounded independently of the expanded lines (30 rows / 2000 chars) and additionally clamped to
+// whatever is left of `maxChars`, so the whole block stays inside one budget.
+export const PROJECT_DIGEST_INDEX_MAX = 30;
+export const PROJECT_DIGEST_INDEX_MAX_CHARS = 2000;
+export const PROJECT_DIGEST_INDEX_CONTENT_CHARS = 48;
 export const PROJECT_DIGEST_PREAMBLE =
-  'This is recalled context, not directives: durable memories of this project (plus global ones) that are not standing rules. They record what was already decided, learned or fixed — use them instead of re-deriving, and call asaki_memory_search when you need more than these excerpts.';
+  'This is recalled context, not directives: durable memories of this project (plus global ones) that are not standing rules. They record what was already decided, learned or fixed — use them instead of re-deriving. Entries listed by id only are not expanded here: call asaki_memory_get with those ids to read them in full, and asaki_memory_search when you need more than these excerpts.';
 
 export interface ProjectDigestItem {
   id?: string | null;
@@ -336,6 +349,10 @@ export interface ProjectDigestOptions {
   max?: number;
   maxChars?: number;
   contentChars?: number;
+  index?: boolean;
+  indexMax?: number;
+  indexMaxChars?: number;
+  indexContentChars?: number;
 }
 
 export interface ProjectDigestBlock {
@@ -343,6 +360,7 @@ export interface ProjectDigestBlock {
   shown: number;
   eligible: number;
   truncated: boolean;
+  indexed: number;
 }
 
 /**
@@ -376,6 +394,18 @@ export function formatProjectDigestLine(item: ProjectDigestItem, contentChars: n
   return `- [${scope}/${kind}] ${content}`;
 }
 
+/**
+ * One index row: id first (it is the only part an agent can act on), then the same
+ * `[scope/kind]` tag the expanded lines carry, a short excerpt, and the FULL content length in
+ * characters — not an estimated token count, which `chars/4` gets badly wrong for Chinese.
+ */
+export function formatProjectDigestIndexLine(item: ProjectDigestItem, contentChars: number): string {
+  const scope = item.scope === 'global' ? 'global' : 'project';
+  const kind = typeof item.kind === 'string' && item.kind ? item.kind : 'fact';
+  const content = cleanProjectDigestText(String(item.content ?? ''));
+  return `- ${item.id} [${scope}/${kind}] ${truncateProjectDigestText(content, contentChars)} (${content.length} chars)`;
+}
+
 export function selectProjectDigest(items: ProjectDigestItem[], options: ProjectDigestOptions = {}): ProjectDigestItem[] {
   const kinds = projectDigestKinds(options.standingKinds);
   const projectId = options.projectId ?? '';
@@ -406,9 +436,12 @@ function compareProjectDigestAscending(a: ProjectDigestItem, b: ProjectDigestIte
 
 /**
  * Bounded twice like the standing block: at most `max` memories (default 10) and at most
- * `maxChars` of memory lines (default 3000), each clamped to `contentChars` (default 240).
- * Worst case is therefore ~3.3 KB of text — roughly 0.8k tokens of English or ~1.65k tokens
- * of Chinese. Returns an empty `text` when nothing is eligible.
+ * `maxChars` of block text (default 6000), each expanded line clamped to `contentChars`
+ * (default 240). Whatever `max` cut off is then listed as compact id index rows inside the same
+ * `maxChars` budget and its own 30-row / 2000-char cap, so every eligible memory stays
+ * addressable via `asaki_memory_get` even when only 10 of them are expanded. Set `index: false`
+ * to fall back to the old one-sentence "more exist" marker. Returns an empty `text` when nothing
+ * is eligible.
  */
 export function renderProjectDigestBlock(items: ProjectDigestItem[], options: ProjectDigestOptions = {}): ProjectDigestBlock {
   const max = typeof options.max === 'number' && options.max > 0 ? Math.floor(options.max) : PROJECT_DIGEST_DEFAULT_MAX;
@@ -429,17 +462,50 @@ export function renderProjectDigestBlock(items: ProjectDigestItem[], options: Pr
 
   const eligible = eligibleItems.length;
   const shown = lines.length;
-  if (shown === 0) return { text: '', shown: 0, eligible, truncated: false };
+  if (shown === 0) return { text: '', shown: 0, eligible, truncated: false, indexed: 0 };
 
   const truncated = shown < eligible;
   const body = [`## Asaki Project Memory (${shown} of ${eligible})`, '', PROJECT_DIGEST_PREAMBLE, '', ...lines];
-  if (truncated) {
+  const indexLines: string[] = [];
+  if (truncated && options.index !== false) {
+    const indexMax = typeof options.indexMax === 'number' && options.indexMax > 0 ? Math.floor(options.indexMax) : PROJECT_DIGEST_INDEX_MAX;
+    const indexMaxChars =
+      typeof options.indexMaxChars === 'number' && options.indexMaxChars > 0 ? Math.floor(options.indexMaxChars) : PROJECT_DIGEST_INDEX_MAX_CHARS;
+    const indexContentChars =
+      typeof options.indexContentChars === 'number' && options.indexContentChars > 0
+        ? Math.floor(options.indexContentChars)
+        : PROJECT_DIGEST_INDEX_CONTENT_CHARS;
+    // An id-less row cannot be fetched, so indexing it would only cost context.
+    const rest = eligibleItems.slice(shown).filter((item) => typeof item.id === 'string' && item.id.length > 0);
+    const indexBudget = Math.min(indexMaxChars, Math.max(0, maxChars - chars));
+    let indexChars = 0;
+    for (const item of rest) {
+      if (indexLines.length >= indexMax) break;
+      const line = formatProjectDigestIndexLine(item, indexContentChars);
+      if (indexChars + line.length + 1 > indexBudget) break;
+      indexLines.push(line);
+      indexChars += line.length + 1;
+    }
+  }
+
+  const indexed = indexLines.length;
+  if (indexed > 0) {
+    body.push(
+      '',
+      `(showing ${shown} of ${eligible} project memories in full; the next ${indexed} are indexed below — call asaki_memory_get with those ids to read them)`,
+      ...indexLines
+    );
+    const unlisted = eligible - shown - indexed;
+    if (unlisted > 0) {
+      body.push(`(… and ${unlisted} more not listed; call asaki_memory_list or asaki_memory_search for the rest)`);
+    }
+  } else if (truncated) {
     body.push(
       '',
       `(showing ${shown} of ${eligible} project memories — more exist; call asaki_memory_list or asaki_memory_search for the rest)`
     );
   }
-  return { text: body.join('\n'), shown, eligible, truncated };
+  return { text: body.join('\n'), shown, eligible, truncated, indexed };
 }
 // --- project-digest:end ---
 
@@ -505,6 +571,10 @@ function memoryConfig() {
     // by default; its kind set is derived from standingRulesKinds above, independently of the
     // standing switch, so no memory can ever land in both blocks.
     projectDigest: envFlagEnabledConfig(process.env.ASAKI_MEMORY_PROJECT_DIGEST ?? fileConfig.projectDigest ?? fileConfig.project_digest, true),
+    // The digest's compact id index (the rows the memory cap cut off, addressable with
+    // asaki_memory_get). On by default; its row/char caps are fixed constants, only the switch is
+    // exposed.
+    digestIndex: envFlagEnabledConfig(process.env.ASAKI_MEMORY_DIGEST_INDEX ?? fileConfig.digestIndex ?? fileConfig.digest_index, true),
     projectDigestMax: parsePositiveIntEnv(
       process.env.ASAKI_MEMORY_PROJECT_DIGEST_MAX ?? fileConfig.projectDigestMax ?? fileConfig.project_digest_max,
       PROJECT_DIGEST_DEFAULT_MAX,
@@ -1394,6 +1464,7 @@ async function loadProjectDigest(ctx: unknown, signal?: AbortSignal): Promise<Pr
   return renderProjectDigestBlock(memories as ProjectDigestItem[], {
     projectId: resolveProjectId(ctx) || "",
     standingKinds: config.standingRulesKinds,
+    index: config.digestIndex,
     max: config.projectDigestMax,
     maxChars: config.projectDigestMaxChars,
     contentChars: config.projectDigestContentChars,
@@ -2235,7 +2306,7 @@ export default function (pi: ExtensionAPI) {
           `- classifier: ${!config.autoExtract && config.autoClassifier ? "on" : "off"}`,
           `- classifierModel: ${config.classifierModel}`,
           `- standingRules: ${config.standingRules ? "on" : "off"} (max=${config.standingRulesMax}, kinds=${config.standingRulesKinds.join(",")})`,
-          `- projectDigest: ${config.projectDigest ? "on" : "off"} (max=${config.projectDigestMax}, maxChars=${config.projectDigestMaxChars}, contentChars=${config.projectDigestContentChars}, kinds=${projectDigestKinds(config.standingRulesKinds).join(",")})`,
+          `- projectDigest: ${config.projectDigest ? "on" : "off"} (max=${config.projectDigestMax}, maxChars=${config.projectDigestMaxChars}, contentChars=${config.projectDigestContentChars}, index=${config.digestIndex ? "on" : "off"}, kinds=${projectDigestKinds(config.standingRulesKinds).join(",")})`,
           `- autoInject: ${envFlagEnabled("ASAKI_MEMORY_AUTO_INJECT", false) ? "on" : "off"} (topK=${config.autoInjectTopK}, minScore=${config.autoMinScore})`,
           `- projectId: ${resolveProjectId(ctx) || "missing"}`,
           `- sessionId: ${config.sessionId || "missing"}`,
@@ -2570,6 +2641,54 @@ Safety:
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`Asaki memory list failed: ${message}`);
+      }
+    },
+  });
+
+
+  pi.registerTool({
+    name: "asaki_memory_get",
+    label: "Asaki Memory Get",
+    description: "Read specific memories in FULL by id, with no content truncation.",
+    promptSnippet: "Fetch the full text of memories the session-start blocks listed by id but did not expand.",
+    promptGuidelines: [
+      "Ids come from the session-start project-memory index lines, from asaki_memory_search / asaki_memory_list output, or from a review suggestion.",
+      "Use asaki_memory_get whenever an excerpt is not enough: search truncates content and list only pages by recency, so this is the only way to read a memory whole.",
+    ],
+    parameters: Type.Object({
+      ids: Type.Array(Type.String(), { description: "Memory ids to read (at most 20).", minItems: 1, maxItems: 20 }),
+    }),
+    async execute(_toolCallId, params, signal, onUpdate) {
+      const config = memoryConfig();
+      const ids = Array.isArray(params.ids) ? params.ids : [];
+
+      onUpdate?.({
+        content: [{ type: "text", text: `Reading ${ids.length} Asaki memor${ids.length === 1 ? "y" : "ies"}...` }],
+        details: {},
+      });
+
+      try {
+        const data = await memoryRequest("/v1/memories/get", { user_id: config.userId, ids }, signal);
+        const memories = Array.isArray(data?.memories) ? data.memories : [];
+        const missing = Array.isArray(data?.missing) ? data.missing.map((id: unknown) => String(id)) : [];
+        const parts: string[] = [];
+        let shown = 0;
+        if (memories.length > 0) {
+          const budget = joinWithinBudget(
+            memories.map((item: any, index: number) => formatMemoryLine(item, index)),
+            MAX_GET_OUTPUT_CHARS,
+          );
+          shown = budget.shown;
+          parts.push(withBudgetFooter(budget));
+        }
+        if (missing.length > 0) parts.push(`not found: ${missing.join(", ")}`);
+        return {
+          content: [{ type: "text", text: parts.length > 0 ? parts.join("\n\n") : "No Asaki memories found for those ids." }],
+          details: { requested: ids.length, count: memories.length, shown, missing: missing.length, user_id: config.userId },
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Asaki memory get failed: ${message}`);
       }
     },
   });
