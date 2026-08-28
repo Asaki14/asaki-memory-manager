@@ -13,8 +13,11 @@
 # 2. The project-digest block: the ACTIVE memories of every OTHER known kind (the dynamic
 #    complement of the standing kinds — decisions, facts, bug fixes, learnings, workflows) as
 #    CONTEXT, not directives, so a session opens knowing what was already decided here. Capped
-#    (10 memories / 3000 chars by default); rendering lives in project-digest.jq. Set
-#    ASAKI_MEMORY_PROJECT_DIGEST=0 to turn it off.
+#    (10 memories / 6000 chars by default); rendering lives in project-digest.jq. Whatever the
+#    memory cap cut off is listed as compact `id [scope/kind] excerpt (N chars)` index rows so an
+#    unexpanded memory is still addressable with asaki_memory_get — set
+#    ASAKI_MEMORY_DIGEST_INDEX=0 for the old one-sentence marker, ASAKI_MEMORY_PROJECT_DIGEST=0 to
+#    turn the whole block off.
 #
 # Both blocks reuse the one memory-list response this hook already fetches (no extra request) and
 # both ARE re-emitted on compact on purpose — session-opening context has to survive compaction.
@@ -176,8 +179,14 @@ case "$(printf '%s' "${ASAKI_MEMORY_PROJECT_DIGEST:-1}" | tr '[:upper:]' '[:lowe
   0|false|off|no) PROJECT_DIGEST_STATE="off" ;;
 esac
 PROJECT_DIGEST_MAX=$(asaki_parse_positive_int "${ASAKI_MEMORY_PROJECT_DIGEST_MAX:-}" 10 50)
-PROJECT_DIGEST_MAX_CHARS=$(asaki_parse_positive_int "${ASAKI_MEMORY_PROJECT_DIGEST_MAX_CHARS:-}" 3000 20000)
+PROJECT_DIGEST_MAX_CHARS=$(asaki_parse_positive_int "${ASAKI_MEMORY_PROJECT_DIGEST_MAX_CHARS:-}" 6000 20000)
 PROJECT_DIGEST_CONTENT_CHARS=$(asaki_parse_positive_int "${ASAKI_MEMORY_PROJECT_DIGEST_CONTENT_CHARS:-}" 240 2000)
+# The id index rides inside the digest's own character budget; its row/char caps are fixed (30 /
+# 2000, see src/services/projectDigest.ts) and only the on/off switch is exposed.
+DIGEST_INDEX_STATE="true"
+case "$(printf '%s' "${ASAKI_MEMORY_DIGEST_INDEX:-1}" | tr '[:upper:]' '[:lower:]')" in
+  0|false|off|no) DIGEST_INDEX_STATE="false" ;;
+esac
 STANDING_RULES_KINDS_JSON=$(jq -cn --arg kinds "$STANDING_RULES_KINDS" \
   '[$kinds | split(",") | .[] | sub("^ +"; "") | sub(" +$"; "") | select(length > 0)]' 2>/dev/null || echo '["rule","preference"]')
 
@@ -244,6 +253,10 @@ if command -v curl >/dev/null 2>&1; then
       --argjson max "$PROJECT_DIGEST_MAX" \
       --argjson maxChars "$PROJECT_DIGEST_MAX_CHARS" \
       --argjson contentChars "$PROJECT_DIGEST_CONTENT_CHARS" \
+      --argjson index "$DIGEST_INDEX_STATE" \
+      --argjson indexMax 30 \
+      --argjson indexMaxChars 2000 \
+      --argjson indexContentChars 48 \
       -f "$SCRIPT_DIR/project-digest.jq" 2>/dev/null || echo "")
     PROJECT_DIGEST_STATUS=$(asaki_block_counts "Asaki Project Memory" "$PROJECT_DIGEST_BLOCK")
   fi

@@ -97,6 +97,15 @@ export interface ListMemoriesInput {
   offset?: number;
 }
 
+export interface GetMemoriesInput {
+  user_id: string;
+  ids: string[];
+  // Internal-only, same contract as SearchMemoriesInput.track_access: a read by id IS a retrieval,
+  // so it refreshes last_accessed_at by default (captain decision a, 2026-08-28). Never read off a
+  // request body — validateGetMemories returns an explicit whitelist.
+  track_access?: boolean;
+}
+
 export interface ListMemoryProjectsInput {
   user_id: string;
   limit?: number;

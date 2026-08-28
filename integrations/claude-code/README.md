@@ -68,9 +68,15 @@ environment (never hardcoded / never committed). Set them once in
   framed as CONTEXT rather than directives. Same scope discipline and ordering
   as the standing block, capped at `ASAKI_MEMORY_PROJECT_DIGEST_MAX`
   (default 10, clamped to 50), `ASAKI_MEMORY_PROJECT_DIGEST_MAX_CHARS`
-  (default 3000, clamped to 20000) and
-  `ASAKI_MEMORY_PROJECT_DIGEST_CONTENT_CHARS` (default 240, clamped to 2000),
-  with a truncation marker when more exist. It reuses the same list response, so
+  (default 6000, clamped to 20000 — the budget for the whole block) and
+  `ASAKI_MEMORY_PROJECT_DIGEST_CONTENT_CHARS` (default 240, clamped to 2000).
+  Whatever the memory cap cut off is then listed as compact
+  `- <id> [scope/kind] <first 48 chars> (N chars)` index rows (at most 30 rows /
+  2000 chars, inside the same block budget) instead of the old one-sentence
+  marker: the id is what makes an unexpanded memory addressable, since
+  `asaki_memory_get(ids)` reads it in full, and the trailing character count is
+  the fetch-cost hint. Set `ASAKI_MEMORY_DIGEST_INDEX=0` to restore the plain
+  marker; the standing-rule block deliberately has no index. It reuses the same list response, so
   it costs no extra request, and it IS re-emitted on compact. On by default —
   set `ASAKI_MEMORY_PROJECT_DIGEST=0` to disable. KEEP IN SYNC with
   `src/services/projectDigest.ts` (canonical) and its verbatim copy in
