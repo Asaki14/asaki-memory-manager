@@ -165,6 +165,141 @@ outcome_for_status() {
   echo "hold"
 }
 
+# ---------------------------------------------------------------------------------------------
+# Cross-session classifier health ledger (research report §4, P1-A).
+#
+# Every other state file in this directory is keyed by SESSION_ID, so a classifier that fails
+# the SAME way in every session leaves no trace anybody looks at. The 2026 bash-3.2
+# `${VAR: -N}` regression is the shape this guards: no error code, no exception — every turn
+# legitimately captured nothing. `health.json` is therefore deliberately NOT session-keyed; it
+# accumulates across every session on this machine and session-start.sh renders it.
+#
+# Shape (all fields always present after a write):
+#   consecutive_failures          int   reset to 0 by any success
+#   failing_since                 ISO8601|null  stamped on the 0→1 transition only
+#   last_error_code               string|null   "http-500" / "classifier-1"
+#   last_error_at                 ISO8601|null
+#   last_success_at               ISO8601|null
+#   sessions_since_last_candidate int   counted per SESSION, not per turn
+#   last_rebuilt_at               ISO8601|null  set once when a corrupt ledger was rebuilt
+#
+# Uses $HEALTH_FILE, $HEALTH_LOCK_DIR and $HEALTH_SESSION_MARK, set with the other state paths
+# below — same convention as throttle_decision()/outcome_for_status().
+# Failure to record is ALWAYS silent and non-fatal: a diagnostic must never break capture.
+
+# Reset-to-zero ledger, also the recovery value for a missing/corrupt file.
+asaki_health_default_json() {
+  printf '%s' '{"consecutive_failures":0,"failing_since":null,"last_error_code":null,"last_error_at":null,"last_success_at":null,"sessions_since_last_candidate":0,"last_rebuilt_at":null}'
+}
+
+# Echoes the ledger JSON. Exit 1 means specifically "a file was there and it was NOT usable",
+# which the caller turns into a one-time last_rebuilt_at stamp. A ledger that simply does not
+# exist yet is the normal first run, not damage, so it returns the default with exit 0.
+asaki_health_read() {
+  local raw=""
+  if [ ! -f "$HEALTH_FILE" ]; then
+    asaki_health_default_json
+    return 0
+  fi
+  raw=$(cat "$HEALTH_FILE" 2>/dev/null)
+  if [ -n "$raw" ] && printf '%s' "$raw" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    printf '%s' "$raw"
+    return 0
+  fi
+  asaki_health_default_json
+  return 1
+}
+
+# Atomic replace: a concurrent reader (session-start.sh) never sees a half-written file, and a
+# crash mid-write leaves the previous ledger intact rather than a truncated one.
+asaki_health_write() {
+  local tmp="${HEALTH_FILE}.tmp.$$"
+  printf '%s\n' "$1" >"$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+  mv -f "$tmp" "$HEALTH_FILE" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+}
+
+# `mkdir` lock, same portable primitive the per-session lock above uses (no flock on macOS).
+# Several sessions can end a turn at the same instant and each runs its ledger update inside a
+# backgrounded subshell, so read-modify-write really does race here. Bounded wait, then give up
+# silently; a stale lock (crashed writer) is reclaimed after 30s.
+asaki_health_lock() {
+  local waited=0 mtime
+  while ! mkdir "$HEALTH_LOCK_DIR" 2>/dev/null; do
+    mtime=$(stat -f %m "$HEALTH_LOCK_DIR" 2>/dev/null || stat -c %Y "$HEALTH_LOCK_DIR" 2>/dev/null || echo 0)
+    case "$mtime" in ''|*[!0-9]*) mtime=0 ;; esac
+    if [ $(( $(date +%s) - mtime )) -ge 30 ]; then
+      rmdir "$HEALTH_LOCK_DIR" 2>/dev/null
+      continue
+    fi
+    waited=$((waited + 1))
+    [ "$waited" -gt 20 ] && return 1
+    sleep 0.1 2>/dev/null || sleep 1
+  done
+  return 0
+}
+
+asaki_health_unlock() {
+  rmdir "$HEALTH_LOCK_DIR" 2>/dev/null || true
+}
+
+# Args: EVENT(success|failure|candidate|no-candidate) [ERROR_CODE]
+#   success      — the classifier ran and its verdict was acted on (a flag=false verdict counts:
+#                  it means the pipeline works, it just had nothing to save).
+#   failure      — `claude -p` produced no usable JSON, or the candidate POST did not land.
+#   candidate    — a candidate actually reached the server this session.
+#   no-candidate — this session has now gone a whole session without producing one.
+asaki_health_record() {
+  local event="$1" code="${2:-}" now json rebuilt=0 updated
+  now=$(date -u +%FT%TZ)
+  asaki_health_lock || return 0
+  json=$(asaki_health_read) || rebuilt=1
+  updated=$(printf '%s' "$json" | jq -c \
+    --arg event "$event" --arg code "$code" --arg now "$now" --argjson rebuilt "$rebuilt" '
+      def num($v): if ($v | type) == "number" then $v else 0 end;
+      def str($v): if ($v | type) == "string" then $v else null end;
+      {
+        consecutive_failures: num(.consecutive_failures),
+        failing_since: str(.failing_since),
+        last_error_code: str(.last_error_code),
+        last_error_at: str(.last_error_at),
+        last_success_at: str(.last_success_at),
+        sessions_since_last_candidate: num(.sessions_since_last_candidate),
+        last_rebuilt_at: str(.last_rebuilt_at),
+      }
+      | (if $rebuilt == 1 then .last_rebuilt_at = $now else . end)
+      | if $event == "failure" then
+          .consecutive_failures = (.consecutive_failures + 1)
+          | .failing_since = (if .failing_since == null then $now else .failing_since end)
+          | .last_error_code = (if $code == "" then .last_error_code else $code end)
+          | .last_error_at = $now
+        elif $event == "success" then
+          .consecutive_failures = 0 | .failing_since = null | .last_success_at = $now
+        elif $event == "candidate" then
+          .sessions_since_last_candidate = 0
+        elif $event == "no-candidate" then
+          .sessions_since_last_candidate = (.sessions_since_last_candidate + 1)
+        else . end
+    ' 2>/dev/null)
+  [ -n "$updated" ] && asaki_health_write "$updated"
+  asaki_health_unlock
+  return 0
+}
+
+# Session-level idle accounting. The marker file is written by whichever of the two fires first
+# and then blocks the other for the rest of the session, so a 40-turn session that never yields
+# a candidate adds exactly 1 — and a session that does yield one resets the counter outright,
+# which also erases its own earlier increment.
+asaki_health_session_candidate() {
+  asaki_health_record candidate
+  : >"$HEALTH_SESSION_MARK" 2>/dev/null || true
+}
+
+asaki_health_session_idle() {
+  [ -f "$HEALTH_SESSION_MARK" ] && return 0
+  : >"$HEALTH_SESSION_MARK" 2>/dev/null || true
+  asaki_health_record no-candidate
+}
+
 # Project attribution (plan: project-aware classifier). Thin wrapper over the canonical logic in
 # integrations/claude-code/project-context.mjs so there is exactly ONE implementation of the
 # allowlist rule: the classifier names a repository, and this accepts that name only when the
@@ -251,6 +386,13 @@ RETRY_FILE="$STATE_DIR/${SESSION_ID}.retry"
 # replayed into the next prompt as labelled antecedent-only context.
 TAIL_FILE="$STATE_DIR/${SESSION_ID}.tail"
 TAIL_MAX_LINES=8
+# Cross-session classifier health ledger. Deliberately NOT keyed by SESSION_ID — a silent
+# classifier failure only becomes visible once it is counted across sessions; session-start.sh
+# reads this same path to render the banner's `!failing`/`!idle` fields. The session marker IS
+# session-keyed: it is what keeps the idle counter per-session rather than per-turn.
+HEALTH_FILE="$STATE_DIR/health.json"
+HEALTH_LOCK_DIR="$STATE_DIR/health.lock"
+HEALTH_SESSION_MARK="$STATE_DIR/${SESSION_ID}.health_counted"
 
 # The extraction/classifier calls run fire-and-forget in the background (see below), so their
 # result isn't known when this invocation exits. Instead, each Stop event first checks whether
@@ -785,6 +927,10 @@ ${CORRECTION_SIGNAL_LINES}
       if [ "$SCOPE_FIELD" = "project" ] && [ -z "$RESOLVED_PROJECT_ID" ]; then
         echo "$TOTAL" >"$STATE_FILE"
         [ -n "$TAIL_LINES" ] && printf '%s' "$TAIL_LINES" >"$TAIL_FILE"
+        # The classifier itself worked; nothing reached the server, so this is a healthy turn
+        # that produced no candidate.
+        asaki_health_record success
+        asaki_health_session_idle
         FINAL_JSON=$(jq -cn --arg memory "$TEXT_FIELD" '{action: "skipped", memory: $memory, reason: "project-unresolved"}')
         echo "$(date -u +%FT%TZ) ${FINAL_JSON}" >>"$CLASSIFIER_LOG_FILE"
         exit 0
@@ -830,6 +976,9 @@ ${CORRECTION_SIGNAL_LINES}
       # the write — resending the same body would just resend the same secret.
       if echo "$CANDIDATE_BODY" | grep -qiE -e "$SENSITIVE_PATTERN"; then
         echo "$TOTAL" >"$STATE_FILE"
+        # The output gate firing is the pipeline working, not failing.
+        asaki_health_record success
+        asaki_health_session_idle
         FINAL_JSON=$(jq -cn '{action: "skipped", memory: "", reason: "sensitive-content-in-candidate"}')
         echo "$(date -u +%FT%TZ) ${FINAL_JSON}" >>"$CLASSIFIER_LOG_FILE"
         exit 0
@@ -854,12 +1003,20 @@ ${CORRECTION_SIGNAL_LINES}
       ACTION=$(echo "$ADD_RESP" | jq -r 'if (.decisions // [] | length) > 0 then .decisions[0].action elif (.reviews // [] | length) > 0 then "review" else "failed" end' 2>/dev/null)
       [ -z "$ACTION" ] && ACTION="failed"
       REASON=""
+      # Health ledger, keyed off the SAME advance/hold/giveup classification rather than a
+      # second opinion: a delta the server accepted is a success, anything the server would not
+      # take (a deterministic rejection included) is a failure worth counting.
       case "$OUTCOME" in
         advance)
           echo "$TOTAL" >"$STATE_FILE"
           if [ "$ACTION" = "failed" ]; then
             REASON="rejected-${HTTP_CODE}"
             ACTION="skipped"
+            asaki_health_record failure "http-${HTTP_CODE}"
+            asaki_health_session_idle
+          else
+            asaki_health_record success
+            asaki_health_session_candidate
           fi
           ;;
         giveup)
@@ -867,6 +1024,8 @@ ${CORRECTION_SIGNAL_LINES}
           echo "$TOTAL" >"$STATE_FILE"
           ACTION="skipped"
           REASON="give-up-after-${MAX_DELTA_RETRIES}-${HTTP_CODE}"
+          asaki_health_record failure "http-${HTTP_CODE}"
+          asaki_health_session_idle
           ;;
         *)
           ACTION="failed"
@@ -874,6 +1033,8 @@ ${CORRECTION_SIGNAL_LINES}
             401|403) REASON="http-${HTTP_CODE}; check ASAKI_MEMORY_API_KEY" ;;
             *) REASON="http-${HTTP_CODE}" ;;
           esac
+          asaki_health_record failure "http-${HTTP_CODE}"
+          asaki_health_session_idle
           ;;
       esac
       if [ -n "$TAIL_LINES" ] && [ "$ACTION" != "failed" ]; then
@@ -884,7 +1045,15 @@ ${CORRECTION_SIGNAL_LINES}
       if [ "$CLASSIFIER_OK" -eq 1 ]; then
         echo "$TOTAL" >"$STATE_FILE"
         [ -n "$TAIL_LINES" ] && printf '%s' "$TAIL_LINES" >"$TAIL_FILE"
+        # A well-formed flag=false is the classifier WORKING — it just had nothing to save. That
+        # is why the idle counter exists as a separate signal: the 2026 empty-delta regression
+        # produced an unbroken run of exactly these.
+        asaki_health_record success
+      else
+        # No usable JSON came back: `claude -p` crashed, timed out, or answered in prose.
+        asaki_health_record failure "classifier-${CLAUDE_STATUS}"
       fi
+      asaki_health_session_idle
       REASON_FIELD=$(echo "$RESP_SINGLE_LINE" | jq -r '.reason // ""' 2>/dev/null)
       FINAL_JSON=$(jq -cn --arg reason "$REASON_FIELD" '{action: "skipped", memory: "", reason: $reason}')
     fi

@@ -231,6 +231,12 @@ const matrix = [
   { label: 'no-project', state: { userId: 'asaki', project: 'unknown', memories: '0', pendingReviews: '0', classifier: 'on model=m', standingRules: null, projectDigest: null } },
   { label: 'setup-required', state: { userId: 'asaki', project: 'proj', auth: 'none', classifier: 'on model=m' } },
   { label: 'setup-required-no-classifier', state: { userId: 'asaki', project: 'proj', auth: 'none', classifier: null } },
+  // Classifier health ledger (research report §4, P1-A). Both fields are omitted whole below
+  // their thresholds; these rows pin where they sit relative to classifier= and the blocks.
+  { label: 'health-failing', state: { userId: 'asaki', project: 'proj', memories: '90', pendingReviews: '3', classifier: 'on model=m', healthFailing: '3 since=2026-08-25', standingRules: '25/25', projectDigest: '10/65' } },
+  { label: 'health-idle', state: { userId: 'asaki', project: 'proj', memories: '90', pendingReviews: '3', classifier: 'on model=m', healthIdle: '15sessions', standingRules: '25/25', projectDigest: '10/65' } },
+  { label: 'health-both', state: { userId: 'asaki', project: 'proj', memories: '90', pendingReviews: '3', classifier: 'on model=m', healthFailing: '7 since=2026-08-20', healthIdle: '22sessions', standingRules: null, projectDigest: null } },
+  { label: 'health-quiet', state: { userId: 'asaki', project: 'proj', memories: '90', pendingReviews: '3', classifier: 'on model=m', healthFailing: null, healthIdle: null, standingRules: '25/25', projectDigest: '10/65' } },
 ];
 
 const matrixLines = [];
@@ -240,7 +246,7 @@ for (const row of matrix) {
   checkTrue(`matrix ${row.label}: no dangling separator (${line})`, !/\|\s*\|/.test(line) && !/\|\s*$/.test(line));
   checkTrue(`matrix ${row.label}: no autoExtract (${line})`, !line.includes('autoExtract'));
   const names = line.split(' | ').map((field) => field.split('=')[0]);
-  const expectedOrder = ['user', 'project', 'auth', 'memories', 'pendingReviews', 'classifier', 'standingRules', 'projectDigest'];
+  const expectedOrder = ['user', 'project', 'auth', 'memories', 'pendingReviews', 'classifier', '!failing', '!idle', 'standingRules', 'projectDigest'];
   const positions = names.map((name) => expectedOrder.indexOf(name));
   checkTrue(`matrix ${row.label}: fields are known and ordered (${names.join(',')})`, positions.every((position, index) => position >= 0 && (index === 0 || position > positions[index - 1])));
 }

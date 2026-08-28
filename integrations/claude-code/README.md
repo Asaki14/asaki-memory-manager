@@ -39,9 +39,10 @@ environment (never hardcoded / never committed). Set them once in
 - `session-start.sh` — SessionStart hook, fires on startup/resume/compact.
   Emits, in this order: the standing-rule block, the project-memory digest,
   then a counts-only status banner (`user=… | project=… | memories=N |
-  pendingReviews=N | classifier=on model=… | standingRules=N/M |
-  projectDigest=N/M`). Fields with no information — a disabled classifier, a
-  disabled/empty/unfetchable block — are omitted whole; `autoExtract` is not on
+  pendingReviews=N | classifier=on model=… | !failing=… | !idle=… |
+  standingRules=N/M | projectDigest=N/M`). Fields with no information — a
+  disabled classifier, a disabled/empty/unfetchable block, a healthy classifier
+  (see **Classifier health** below) — are omitted whole; `autoExtract` is not on
   the line at all, since the deprecated server-extraction path is off by
   default and `/memory status` reports it when it is not. Everything the two
   blocks did not select stays retrieval-only: the agent decides for itself when
@@ -183,6 +184,47 @@ environment (never hardcoded / never committed). Set them once in
   extraction/classifier requests background themselves so Stop does not block.
   Per-session offset/log/throttle files live under
   `${TMPDIR:-/tmp}/asaki-memory-stop-extract/`.
+
+  **Classifier health (`health.json`).** In that same directory, and
+  deliberately **not** keyed by session id, `stop-extract.sh` maintains one
+  cross-session ledger of whether the classifier is actually working. It exists
+  because the worst failure mode this pipeline has had produced no error at all:
+  a bash-3.2 string-slicing bug emptied every delta, so the classifier
+  legitimately found nothing, every turn, forever. Nothing in a per-session log
+  can show that; only a count across sessions can. Fields:
+
+  | field | meaning |
+  | --- | --- |
+  | `consecutive_failures` | turns in a row where `claude -p` returned no usable JSON or the candidate POST did not land. Any success resets it to 0. |
+  | `failing_since` | when the current run of failures started (stamped on the 0→1 transition only, so it does not creep forward). |
+  | `last_error_code` | `http-<code>` or `classifier-<exit>`; kept after recovery for diagnosis. |
+  | `last_error_at` / `last_success_at` | timestamps of the last of each. |
+  | `sessions_since_last_candidate` | counted per **session**, not per turn: a whole session that never produces a candidate adds 1; the first candidate in any session resets it to 0. |
+  | `last_rebuilt_at` | set once if the file was found corrupt and rebuilt. A file that simply does not exist yet is a normal first run and leaves this `null`. |
+
+  Writes are atomic (temp file + `mv`) and serialised with the same portable
+  `mkdir` lock the per-session state uses, so several Claude Code sessions
+  ending a turn at the same instant cannot interleave into broken JSON. A
+  missing, empty or corrupt ledger is always recoverable and never breaks
+  capture — recording health is best-effort by design.
+
+  `session-start.sh` reads it and adds up to two banner fields, both silent
+  until they have something to say:
+
+  - `!failing=N since=YYYY-MM-DD` — an **alarm**, at `consecutive_failures >= 3`
+    (`ASAKI_MEMORY_HEALTH_FAILING_THRESHOLD`). Something is genuinely broken:
+    check `last_error_code` in `health.json`.
+  - `!idle=Nsessions` — a **hint only**, at
+    `sessions_since_last_candidate >= 15` (`ASAKI_MEMORY_HEALTH_IDLE_THRESHOLD`).
+    The classifier is instructed to answer `flag=false` whenever it is unsure,
+    so long conservative stretches are normal and expected; this is here so that
+    a *silent* stoppage is at least visible, not to demand action.
+
+  Covered by `npm run eval:health-ledger` (the write side) and
+  `npm run eval:session-inject` (the banner fields, on both clients). The Pi
+  extension keeps no on-disk classifier state and therefore never fills these
+  two fields, but its banner builder carries them so the two clients stay one
+  sync set.
 - `tool-visibility.sh` — PostToolUse hook, surfaces memory tool calls in the TUI
 - `.mcp.json` — **remote** MCP server reference (`type: http`, `url:
   ${ASAKI_MEMORY_BASE_URL}/mcp`, bearer auth). The MCP server runs inside the

@@ -1260,12 +1260,22 @@ function isRealProject(ctx: unknown): boolean {
 // #region asaki-banner
 // Status-banner field builder. Field set and order are KEEP IN SYNC with the heredoc in
 // integrations/claude-code/session-start.sh: user → project → auth? → memories? →
-// pendingReviews? → classifier? → standingRules? → projectDigest?. Anything with no information
-// is omitted WHOLE rather than printed as `off`/`0/0`/`?` — a disabled classifier, a disabled or
-// empty or unfetchable standing/digest block. `autoExtract` is deliberately gone from the banner;
-// the deprecated compatibility path can still be switched on, so its diagnostic lives in
-// `/memory status` (both clients) instead of on every session's status line.
+// pendingReviews? → classifier? → !failing? → !idle? → standingRules? → projectDigest?. Anything
+// with no information is omitted WHOLE rather than printed as `off`/`0/0`/`?` — a disabled
+// classifier, a disabled or empty or unfetchable standing/digest block, a healthy or absent
+// classifier health ledger. `autoExtract` is deliberately gone from the banner; the deprecated
+// compatibility path can still be switched on, so its diagnostic lives in `/memory status` (both
+// clients) instead of on every session's status line.
 // `npm run eval:session-inject` asserts the matrix on both clients.
+//
+// The two `!`-prefixed health fields (research report §4, P1-A) report the cross-session
+// classifier health ledger: `!failing=N since=YYYY-MM-DD` is an alarm, `!idle=Nsessions` only a
+// hint (the classifier is told to answer flag=false when unsure, so quiet stretches are normal).
+// Only the Claude Code client currently FILLS them — the ledger lives in that hook's on-disk
+// state dir (`$TMPDIR/asaki-memory-stop-extract/health.json`) and this extension keeps no
+// on-disk classifier state at all, so Pi always passes them through as null. The fields exist
+// here anyway because this builder and asaki_banner_line() are one sync set: the field order and
+// the omit-whole discipline have to match byte for byte on every state the matrix renders.
 type SessionBannerState = {
   userId: string;
   project: string;
@@ -1273,6 +1283,8 @@ type SessionBannerState = {
   memories?: string;
   pendingReviews?: string;
   classifier: string | null;
+  healthFailing?: string | null;
+  healthIdle?: string | null;
   standingRules?: string | null;
   projectDigest?: string | null;
 };
@@ -1288,6 +1300,8 @@ function buildSessionBannerLine(state: SessionBannerState): string {
   if (state.memories != null) fields.push(`memories=${state.memories}`);
   if (state.pendingReviews != null) fields.push(`pendingReviews=${state.pendingReviews}`);
   if (state.classifier) fields.push(`classifier=${state.classifier}`);
+  if (state.healthFailing) fields.push(`!failing=${state.healthFailing}`);
+  if (state.healthIdle) fields.push(`!idle=${state.healthIdle}`);
   if (state.standingRules) fields.push(`standingRules=${state.standingRules}`);
   if (state.projectDigest) fields.push(`projectDigest=${state.projectDigest}`);
   return fields.join(" | ");
