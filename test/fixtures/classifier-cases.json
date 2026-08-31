@@ -118,7 +118,7 @@
   },
   {
     "name": "pos: machine-local fish secret path is project-scoped",
-    "text": "Assistant: 用户偏好：环境变量/API密钥统一存放在 ~/.config/fish/conf.d/api_keys.local.fish（该文件已 gitignore，用 set -x / set -gx 语法）。不要写入 ~/.config/fish/config.fish 或 ~/.zshrc（用户用 fish shell，非 zsh/bash）。以后任何需要给 shell 加密钥/环境变量的场景，都应写入这个文件。",
+    "text": "Assistant: 以后需要给 shell 加密钥或环境变量时，一律写入 ~/.config/fish/conf.d/api_keys.local.fish（已 gitignore，用 set -x / set -gx 语法），不要写 ~/.config/fish/config.fish 或 ~/.zshrc —— 用户用的是 fish，不是 zsh/bash。",
     "expectFlag": true,
     "expectScope": "project",
     "expectMaxTextLength": 300,
@@ -128,7 +128,7 @@
   },
   {
     "name": "pos: cross-project scratchpad preference stays concise and global",
-    "text": "Assistant: 用户偏好：周会汇报等一次性使用的文档产物不要写入项目仓库目录，放 scratchpad/临时目录即可；项目目录只留正式产出与治理文档。",
+    "text": "User: 以后周会汇报这类一次性用的文档产物别写进项目仓库目录了，放 scratchpad 或临时目录；项目仓库只留正式产出和治理文档。",
     "expectFlag": true,
     "expectScope": "global",
     "expectMaxTextLength": 160,
@@ -138,18 +138,18 @@
   },
   {
     "name": "pos: concrete dotfiles layout outcome is project-scoped",
-    "text": "Assistant: 修复：paneru四边padding 4→10，配对齐sketchybar左侧10px边距。",
+    "text": "Assistant: paneru 的四边 padding 必须与 sketchybar 左侧 10px 边距取同一个值，否则缩放时两栏基线会错位；已统一为 10 并验证不再复现。",
     "expectFlag": true,
     "expectScope": "project",
     "expectMaxTextLength": 160,
     "expectTextIncludes": [
-      "10"
+      "padding"
     ],
     "expectMaxImportance": 0.5
   },
   {
     "name": "pos: overlong app implementation is compressed and project-scoped",
-    "text": "Assistant: In ~/.config sketchybar config, WiFi and volume clicks were changed to SketchyBar custom popups backed by sketchybar/plugins/status_popup.sh. WiFi popup lists preferred/saved networks and uses networksetup -setairportnetwork to switch; Bluetooth popup lists devices from system_profiler and toggles paired device connections via an inline Swift IOBluetooth call. macOS 26 may redact current/nearby SSIDs, so the popup falls back to '已连接（SSID 被系统隐藏）' when link is active but SSID is unavailable.",
+    "text": "Assistant: In ~/.config sketchybar config, macOS 26 redacts the current and nearby SSIDs, so an active WiFi link reported an empty network name and the popup rendered blank. The fix lives in sketchybar/plugins/status_popup.sh: that plugin now falls back to '已连接（SSID 被系统隐藏）' whenever the link is up but the SSID is unavailable, and any future WiFi popup work has to go through sketchybar/plugins/status_popup.sh for the same reason.",
     "expectFlag": true,
     "expectScope": "project",
     "expectMaxTextLength": 300,
@@ -175,7 +175,7 @@
   },
   {
     "name": "pos: mentor-specific reporting conventions are project-scoped",
-    "text": "Assistant: 周会每项目 3–5 行，与豪哥日报区分；临时汇报放 scratchpad。",
+    "text": "Assistant: 周会汇报从这次起改成每项目 3–5 行，与豪哥日报区分；临时汇报放 scratchpad。",
     "expectFlag": true,
     "expectScope": "project",
     "expectMaxTextLength": 160,
@@ -425,11 +425,11 @@
     "name": "competition: stated preference plus a correction (en)",
     "correction": true,
     "competition": true,
-    "text": "Assistant: Noted that you prefer pnpm for new projects. I also opened a PR for this change.\n\nUser: never open a PR without asking me first",
+    "text": "Assistant: Noted that you prefer pnpm for new projects. I also ran gh pr create for this change.\n\nUser: never run gh pr create without asking me first",
     "expectFlag": true,
     "expectSignal": "correction",
     "expectRuleIncludes": [
-      "ask"
+      "gh pr create"
     ],
     "expectRuleExcludes": [
       "pnpm"
@@ -544,7 +544,7 @@
   },
   {
     "name": "proj: a genuinely host-owned change may resolve to the host",
-    "text": "Assistant: firstmate 的 crew-dispatch 配置已改为每条任务只允许一个 worktree，已验证生效。",
+    "text": "Assistant: firstmate 的 crew 收件箱改成按数字顺序消费、处理完必须移入 handled/，解决了同一条指令被反复重发的问题，已验证生效。",
     "expectFlag": true,
     "expectScope": "project",
     "projectContext": {
@@ -570,7 +570,7 @@
   },
   {
     "name": "proj: ambiguous multi-repository delta writes nothing",
-    "text": "Assistant: sport-live 与 logseq-d2 两个仓库的构建缓存都已统一打开，已验证生效。",
+    "text": "Assistant: sport-live 与 logseq-d2 两个仓库都改成构建前先清 dist 再打包，解决了增量构建残留旧产物导致的偶发白屏，已验证生效。",
     "projectContext": {
       "hostProject": "firstmate",
       "orchestratorHost": true,
@@ -599,7 +599,7 @@
   },
   {
     "name": "proj: no attributable target writes nothing",
-    "text": "Assistant: sport-live 的构建脚本已改成先跑 typecheck 再打包，已验证生效。",
+    "text": "Assistant: sport-live 的构建脚本改成先跑 typecheck 再打包，解决了类型错误一路带到线上才暴露的问题，已验证生效。",
     "projectContext": {
       "hostProject": "firstmate",
       "orchestratorHost": true,
@@ -617,7 +617,7 @@
   },
   {
     "name": "proj: two repositories sharing a basename write nothing",
-    "text": "Assistant: logseq-d2 的导出格式已固定为 SVG，已验证生效。",
+    "text": "Assistant: logseq-d2 的导出改用 SVG 而不是 PNG，解决了缩放后节点文字发虚、导出图里搜不到文字的问题，已验证生效。",
     "projectContext": {
       "hostProject": "firstmate",
       "orchestratorHost": true,
@@ -646,7 +646,7 @@
   },
   {
     "name": "proj: a repository outside the known list is refused",
-    "text": "Assistant: thesis-partner 的引用解析已改用官方 API，已验证生效。",
+    "text": "Assistant: thesis-partner 的引用解析改用官方 API 而不是抓页面，解决了对方页面改版就静默漏引用的问题，已验证生效。",
     "projectContext": {
       "hostProject": "firstmate",
       "orchestratorHost": true,
@@ -699,7 +699,7 @@
   },
   {
     "name": "proj: ordinary single-repository session is unchanged (proven path)",
-    "text": "Assistant: sport-live 的比分轮询间隔已统一改成 15 秒，已验证生效。",
+    "text": "Assistant: sport-live 的比分轮询改成只在页面可见时才发请求，解决了后台标签页把接口打到限流的问题，已验证生效。",
     "expectFlag": true,
     "expectScope": "project",
     "projectContext": {
@@ -866,5 +866,175 @@
     "expectRuleIncludes": [
       "完成通知"
     ]
+  },
+  {
+    "name": "attr: personal work-hours fact captured in a dotfiles session stays global",
+    "text": "Assistant: 我按 13:00-22:00 每天 9 小时算了你的时薪。\nUser: 时薪有问题，我的工作时间是 9:00-18:30，12:00-13:00 午休，公司包餐，加班费另算",
+    "expectFlag": true,
+    "expectScope": "global",
+    "projectContext": {
+      "hostProject": ".config",
+      "orchestratorHost": false,
+      "knownProjects": [
+        {
+          "id": ".config",
+          "root": "/repos/.config",
+          "source": "host"
+        }
+      ],
+      "targetProject": ".config",
+      "ambiguity": "",
+      "allowlist": [
+        ".config"
+      ],
+      "defaultProject": ".config",
+      "explicit": null
+    },
+    "expectProjectId": "",
+    "correction": true
+  },
+  {
+    "name": "attr: market-rate trivia captured in a dotfiles session is not a dotfiles memory",
+    "text": "Assistant: 查下来秋招应届生薪资实际 18-25K，26K+ 多为 3-5 年工作经验。",
+    "expectFlag": false,
+    "projectContext": {
+      "hostProject": ".config",
+      "orchestratorHost": false,
+      "knownProjects": [
+        {
+          "id": ".config",
+          "root": "/repos/.config",
+          "source": "host"
+        }
+      ],
+      "targetProject": ".config",
+      "ambiguity": "",
+      "allowlist": [
+        ".config"
+      ],
+      "defaultProject": ".config",
+      "explicit": null
+    }
+  },
+  {
+    "name": "attr: a dotfiles bug fix keeps the dotfiles repo, not the firstmate host",
+    "text": "Assistant: SketchyBar 弹层改用分段独立行槽而不是共享范围，修好了一段行数减少时另一段被挤到分割线上方的问题，已验证生效。",
+    "expectFlag": true,
+    "expectScope": "project",
+    "projectContext": {
+      "hostProject": "firstmate",
+      "orchestratorHost": true,
+      "knownProjects": [
+        {
+          "id": ".config",
+          "root": "/repos/.config",
+          "source": "task"
+        }
+      ],
+      "targetProject": ".config",
+      "ambiguity": "",
+      "allowlist": [
+        "firstmate",
+        ".config"
+      ],
+      "defaultProject": null,
+      "explicit": null
+    },
+    "expectProjectId": ".config"
+  },
+  {
+    "name": "attr: crew-orchestration procedure is not a memory of the PM repo the session ran in",
+    "text": "Assistant: 工人已经在最后一步做真 Chrome 逐态校验，进度正常。\nUser: 我打开看了，lavish 页面根本没动，你是照抄工人自己说的进度。以后向我汇报工人进度前，先自己核实工人的实际产出，不要直接转述工人的自述。",
+    "expectFlag": true,
+    "correction": true,
+    "expectSignal": "correction",
+    "projectContext": {
+      "hostProject": "back-to-school",
+      "orchestratorHost": false,
+      "knownProjects": [
+        {
+          "id": "back-to-school",
+          "root": "/repos/back-to-school",
+          "source": "host"
+        }
+      ],
+      "targetProject": "back-to-school",
+      "ambiguity": "",
+      "allowlist": [
+        "back-to-school"
+      ],
+      "defaultProject": "back-to-school",
+      "explicit": null
+    },
+    "expectProjectId": ""
+  },
+  {
+    "name": "neg: multi-fact completion log of this round of dotfiles edits",
+    "text": "Assistant: 已修复工作区3终端图标、bar 左右对称（630px）、天气源改用 Open-Meteo 显示武侯区、新增 AI 用量面板、删除 weather.sh 死代码、禁用 alt-5 工作区绑定。",
+    "expectFlag": false,
+    "projectContext": {
+      "hostProject": ".config",
+      "orchestratorHost": false,
+      "knownProjects": [
+        {
+          "id": ".config",
+          "root": "/repos/.config",
+          "source": "host"
+        }
+      ],
+      "targetProject": ".config",
+      "ambiguity": "",
+      "allowlist": [
+        ".config"
+      ],
+      "defaultProject": ".config",
+      "explicit": null
+    }
+  },
+  {
+    "name": "neg: a newly added script is a one-off completion log",
+    "text": "Assistant: 新增了 publish.sh，跑一条命令就能完成打包和发布，已经试跑通过。",
+    "expectFlag": false,
+    "projectContext": {
+      "hostProject": ".config",
+      "orchestratorHost": false,
+      "knownProjects": [
+        {
+          "id": ".config",
+          "root": "/repos/.config",
+          "source": "host"
+        }
+      ],
+      "targetProject": ".config",
+      "ambiguity": "",
+      "allowlist": [
+        ".config"
+      ],
+      "defaultProject": ".config",
+      "explicit": null
+    }
+  },
+  {
+    "name": "neg: literal popup style values whose source of truth is the file just edited",
+    "text": "Assistant: sketchybar 所有弹层（datetime、volume、wifi、weather）已统一为 SURFACE 0x80 半透、圆角 18px、边距 20px。",
+    "expectFlag": false,
+    "projectContext": {
+      "hostProject": ".config",
+      "orchestratorHost": false,
+      "knownProjects": [
+        {
+          "id": ".config",
+          "root": "/repos/.config",
+          "source": "host"
+        }
+      ],
+      "targetProject": ".config",
+      "ambiguity": "",
+      "allowlist": [
+        ".config"
+      ],
+      "defaultProject": ".config",
+      "explicit": null
+    }
   }
 ]
