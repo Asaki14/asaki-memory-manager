@@ -1048,6 +1048,7 @@
     "name": "attr: a business metric definition for an unlisted repo is never filed under the orchestrator",
     "text": "Assistant: 分期看板的「在途」我先按实时试用人数算。\nUser: 不对，在途 = 总试用 − 已到期，不要用实时试用人数，以后这个看板都按这个口径",
     "expectFlag": true,
+    "correction": true,
     "projectContext": {
       "hostProject": "firstmate",
       "orchestratorHost": true,
@@ -1103,7 +1104,7 @@
   },
   {
     "name": "attr: several targets in flight still let the named target repo win",
-    "text": "Assistant: logseq-d2 的 D2 代码块改成保存时才渲染，解决了每次按键都重排的卡顿。\nUser: 好，就这样",
+    "text": "Assistant: logseq-d2 的 D2 代码块改成保存时才渲染，解决了每次按键都重排的卡顿，已验证。",
     "expectFlag": true,
     "expectScope": "project",
     "projectContext": {
