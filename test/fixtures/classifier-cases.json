@@ -534,16 +534,16 @@
       "targetProject": "logseq-d2",
       "ambiguity": "",
       "allowlist": [
-        "firstmate",
         "logseq-d2"
       ],
       "defaultProject": null,
-      "explicit": null
+      "explicit": null,
+      "hostClaimToken": "host:firstmate"
     },
     "expectProjectId": "logseq-d2"
   },
   {
-    "name": "proj: a genuinely host-owned change may resolve to the host",
+    "name": "proj: a genuinely host-owned change resolves through the host claim token",
     "text": "Assistant: firstmate 的 crew 收件箱改成按数字顺序消费、处理完必须移入 handled/，解决了同一条指令被反复重发的问题，已验证生效。",
     "expectFlag": true,
     "expectScope": "project",
@@ -560,11 +560,11 @@
       "targetProject": "logseq-d2",
       "ambiguity": "",
       "allowlist": [
-        "firstmate",
         "logseq-d2"
       ],
       "defaultProject": null,
-      "explicit": null
+      "explicit": null,
+      "hostClaimToken": "host:firstmate"
     },
     "expectProjectId": "firstmate"
   },
@@ -589,10 +589,12 @@
       "targetProject": null,
       "ambiguity": "multiple-targets",
       "allowlist": [
-        "firstmate"
+        "logseq-d2",
+        "sport-live"
       ],
       "defaultProject": null,
-      "explicit": null
+      "explicit": null,
+      "hostClaimToken": "host:firstmate"
     },
     "expectProjectId": "",
     "expectFlag": true
@@ -606,11 +608,10 @@
       "knownProjects": [],
       "targetProject": null,
       "ambiguity": "no-target",
-      "allowlist": [
-        "firstmate"
-      ],
+      "allowlist": [],
       "defaultProject": null,
-      "explicit": null
+      "explicit": null,
+      "hostClaimToken": "host:firstmate"
     },
     "expectProjectId": "",
     "expectFlag": true
@@ -635,11 +636,10 @@
       ],
       "targetProject": null,
       "ambiguity": "identity-conflict",
-      "allowlist": [
-        "firstmate"
-      ],
+      "allowlist": [],
       "defaultProject": null,
-      "explicit": null
+      "explicit": null,
+      "hostClaimToken": "host:firstmate"
     },
     "expectProjectId": "",
     "expectFlag": true
@@ -660,11 +660,11 @@
       "targetProject": "logseq-d2",
       "ambiguity": "",
       "allowlist": [
-        "firstmate",
         "logseq-d2"
       ],
       "defaultProject": null,
-      "explicit": null
+      "explicit": null,
+      "hostClaimToken": "host:firstmate"
     },
     "expectProjectId": "",
     "expectFlag": true
@@ -689,11 +689,11 @@
       "targetProject": "logseq-d2",
       "ambiguity": "",
       "allowlist": [
-        "firstmate",
         "logseq-d2"
       ],
       "defaultProject": null,
-      "explicit": null
+      "explicit": null,
+      "hostClaimToken": "host:firstmate"
     },
     "expectProjectId": "logseq-d2"
   },
@@ -718,7 +718,8 @@
         "sport-live"
       ],
       "defaultProject": "sport-live",
-      "explicit": null
+      "explicit": null,
+      "hostClaimToken": null
     },
     "expectProjectId": "sport-live"
   },
@@ -740,11 +741,11 @@
       "targetProject": "logseq-d2",
       "ambiguity": "",
       "allowlist": [
-        "firstmate",
         "logseq-d2"
       ],
       "defaultProject": null,
-      "explicit": null
+      "explicit": null,
+      "hostClaimToken": "host:firstmate"
     },
     "expectProjectId": ""
   },
@@ -888,7 +889,8 @@
         ".config"
       ],
       "defaultProject": ".config",
-      "explicit": null
+      "explicit": null,
+      "hostClaimToken": null
     },
     "expectProjectId": "",
     "correction": true
@@ -913,7 +915,8 @@
         ".config"
       ],
       "defaultProject": ".config",
-      "explicit": null
+      "explicit": null,
+      "hostClaimToken": null
     }
   },
   {
@@ -934,11 +937,11 @@
       "targetProject": ".config",
       "ambiguity": "",
       "allowlist": [
-        "firstmate",
         ".config"
       ],
       "defaultProject": null,
-      "explicit": null
+      "explicit": null,
+      "hostClaimToken": "host:firstmate"
     },
     "expectProjectId": ".config"
   },
@@ -964,7 +967,8 @@
         "back-to-school"
       ],
       "defaultProject": "back-to-school",
-      "explicit": null
+      "explicit": null,
+      "hostClaimToken": null
     },
     "expectProjectId": ""
   },
@@ -988,7 +992,8 @@
         ".config"
       ],
       "defaultProject": ".config",
-      "explicit": null
+      "explicit": null,
+      "hostClaimToken": null
     }
   },
   {
@@ -1011,7 +1016,8 @@
         ".config"
       ],
       "defaultProject": ".config",
-      "explicit": null
+      "explicit": null,
+      "hostClaimToken": null
     }
   },
   {
@@ -1034,7 +1040,194 @@
         ".config"
       ],
       "defaultProject": ".config",
-      "explicit": null
+      "explicit": null,
+      "hostClaimToken": null
+    }
+  },
+  {
+    "name": "attr: a business metric definition for an unlisted repo is never filed under the orchestrator",
+    "text": "Assistant: 分期看板的「在途」我先按实时试用人数算。\nUser: 不对，在途 = 总试用 − 已到期，不要用实时试用人数，以后这个看板都按这个口径",
+    "expectFlag": true,
+    "projectContext": {
+      "hostProject": "firstmate",
+      "orchestratorHost": true,
+      "knownProjects": [
+        {
+          "id": "asaki-memory-manager",
+          "root": "/repos/asaki-memory-manager",
+          "source": "task"
+        },
+        {
+          "id": "logseq-d2",
+          "root": "/repos/logseq-d2",
+          "source": "task"
+        }
+      ],
+      "targetProject": null,
+      "ambiguity": "multiple-targets",
+      "allowlist": [
+        "asaki-memory-manager",
+        "logseq-d2"
+      ],
+      "defaultProject": null,
+      "explicit": null,
+      "hostClaimToken": "host:firstmate"
+    },
+    "expectProjectId": ""
+  },
+  {
+    "name": "attr: an explicitly cross-project rule said on an orchestrator host is global, never the host",
+    "text": "User: 以后提速取数一律不许削减数据口径或缩短时间范围，要提速就改调度——错峰、拆班、并行取数；这条对所有项目都适用",
+    "expectFlag": true,
+    "expectScope": "global",
+    "projectContext": {
+      "hostProject": "firstmate",
+      "orchestratorHost": true,
+      "knownProjects": [
+        {
+          "id": "asaki-memory-manager",
+          "root": "/repos/asaki-memory-manager",
+          "source": "task"
+        }
+      ],
+      "targetProject": "asaki-memory-manager",
+      "ambiguity": "",
+      "allowlist": [
+        "asaki-memory-manager"
+      ],
+      "defaultProject": null,
+      "explicit": null,
+      "hostClaimToken": "host:firstmate"
+    },
+    "expectProjectId": ""
+  },
+  {
+    "name": "attr: several targets in flight still let the named target repo win",
+    "text": "Assistant: logseq-d2 的 D2 代码块改成保存时才渲染，解决了每次按键都重排的卡顿。\nUser: 好，就这样",
+    "expectFlag": true,
+    "expectScope": "project",
+    "projectContext": {
+      "hostProject": "firstmate",
+      "orchestratorHost": true,
+      "knownProjects": [
+        {
+          "id": "asaki-memory-manager",
+          "root": "/repos/asaki-memory-manager",
+          "source": "task"
+        },
+        {
+          "id": "logseq-d2",
+          "root": "/repos/logseq-d2",
+          "source": "task"
+        }
+      ],
+      "targetProject": null,
+      "ambiguity": "multiple-targets",
+      "allowlist": [
+        "asaki-memory-manager",
+        "logseq-d2"
+      ],
+      "defaultProject": null,
+      "explicit": null,
+      "hostClaimToken": "host:firstmate"
+    },
+    "expectProjectId": "logseq-d2"
+  },
+  {
+    "name": "neg: one-off dashboard tab layout directive",
+    "text": "Assistant: 页面级做一个「全局引导/付费引导」切换，购买成功分叉树显示月套餐、一次性年付、分期三个选项，只删卡片保留进组数据用于告警。\nUser: tab改为总体/全局引导/付费引导，放在国家切换tab旁边，默认显示总体；分叉不仅要看购买成功，还要看后续各个链路；卡片和进组数据都删",
+    "expectFlag": false
+  },
+  {
+    "name": "neg: one-off scope verdict on a page feature",
+    "text": "Assistant: 等 AU 转化分析完成之后再做 Data 页的联动。\nUser: data页不做联动",
+    "expectFlag": false
+  },
+  {
+    "name": "neg: one-off chart merge verdict",
+    "text": "Assistant: 只改总体效果那张图，全局引导和付费引导两节的 LTV 图不动。\nUser: 全局引导和付费引导内容都是一样的，所以直接做成全局可切换的tab就行",
+    "expectFlag": false
+  },
+  {
+    "name": "neg: body of an injected global output standard (消融原则)",
+    "text": "Assistant: 按全局规范「产物」一节，交付前我对每个元素做一次消融——删掉它，读者理解结论、作出决策、执行动作或审计结果都不受影响的就删；过程流水账、重复信息、套话前言默认删除。\nUser: 嗯",
+    "expectFlag": false
+  },
+  {
+    "name": "neg: body of an injected global delivery rule (删减表达元素)",
+    "text": "Assistant: 我的全局提示词里写着交付前先删减不影响理解、决策、执行或审计的表达元素，所以这份报告压到了一屏。\nUser: 好",
+    "expectFlag": false
+  },
+  {
+    "name": "neg: current key binding state in a dotfiles repository",
+    "text": "Assistant: 现在 Super+H 和 Super+L 在 aerospace 里是左右切换工作区。\nUser: 知道了",
+    "expectFlag": false,
+    "projectContext": {
+      "hostProject": ".config",
+      "orchestratorHost": false,
+      "knownProjects": [
+        {
+          "id": ".config",
+          "root": "/home/u/.config",
+          "source": "host"
+        }
+      ],
+      "targetProject": ".config",
+      "ambiguity": "",
+      "allowlist": [
+        ".config"
+      ],
+      "defaultProject": ".config",
+      "explicit": null,
+      "hostClaimToken": null
+    }
+  },
+  {
+    "name": "neg: current status bar layout in a dotfiles repository",
+    "text": "Assistant: 顶栏现在的排列是左边工作区、中间歌词、右边 WiFi、音量、电池，都在 bar-items.conf 里配。\nUser: 好",
+    "expectFlag": false,
+    "projectContext": {
+      "hostProject": ".config",
+      "orchestratorHost": false,
+      "knownProjects": [
+        {
+          "id": ".config",
+          "root": "/home/u/.config",
+          "source": "host"
+        }
+      ],
+      "targetProject": ".config",
+      "ambiguity": "",
+      "allowlist": [
+        ".config"
+      ],
+      "defaultProject": ".config",
+      "explicit": null,
+      "hostClaimToken": null
+    }
+  },
+  {
+    "name": "neg: current Super+Enter behaviour is configuration state",
+    "text": "Assistant: Super+Enter 现在打开一个新的 ghostty 窗口，不是新建 tab。\nUser: 明白",
+    "expectFlag": false,
+    "projectContext": {
+      "hostProject": ".config",
+      "orchestratorHost": false,
+      "knownProjects": [
+        {
+          "id": ".config",
+          "root": "/home/u/.config",
+          "source": "host"
+        }
+      ],
+      "targetProject": ".config",
+      "ambiguity": "",
+      "allowlist": [
+        ".config"
+      ],
+      "defaultProject": ".config",
+      "explicit": null,
+      "hostClaimToken": null
     }
   }
 ]
