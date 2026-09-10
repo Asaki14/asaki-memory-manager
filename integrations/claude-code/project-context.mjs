@@ -12,6 +12,20 @@
 // matches the client-computed allowlist. When nothing is uniquely attributable the correct
 // outcome is to skip the project-scope candidate entirely — never to fall back to the host.
 //
+// The 2026-09-10 memory audit showed the first version of that allowlist still funnelled straight
+// back to the host, for two independent reasons, both fixed here:
+//   1. On an orchestrator host the allowlist was `[hostProject]` in every ambiguous branch, so the
+//      real task targets were REFUSED and the host was the only id that could get through. 9 of 22
+//      project-scope candidates captured from firstmate main sessions (2026-09-08..10) were filed
+//      under project_id=firstmate that way.
+//   2. The host was admissible on the bare name alone, which is indistinguishable from a
+//      nearest-match fallback by a model that has been shown no better option. Naming the host now
+//      requires the explicit `host:<id>` claim token rendered in the context block, so filing a
+//      memory under the orchestrator is an assertion the model has to make on purpose.
+// What this module still CANNOT decide is whether the delta's subject is the host repository at
+// all ("in A's checkout, talking about B"): that is topic relevance, it is only visible in the
+// delta text, and it belongs to CLASSIFIER_SYSTEM_PROMPT. Do not push it in here.
+//
 // The logic here is mirrored (semantically, not byte-wise — it is TypeScript there) inside
 // integrations/pi/asaki-memory.ts's `// #region asaki-project-context` block. Both copies are run
 // against the SAME table by `npm run eval:project-context`; keep the region markers intact.
@@ -29,6 +43,11 @@ export const AMBIGUITY_NONE = "";
 export const AMBIGUITY_NO_TARGET = "no-target";
 export const AMBIGUITY_MULTIPLE = "multiple-targets";
 export const AMBIGUITY_CONFLICT = "identity-conflict";
+
+// Prefix of the claim token that lets a memory be filed under an orchestrator host. It exists so
+// that "this memory is about firstmate itself" is a deliberate answer rather than the shape a
+// nearest-match guess happens to take.
+export const HOST_CLAIM_PREFIX = "host:";
 
 // A firstmate task metadata file is `key=value` lines. Only these two keys matter here:
 //   project=<absolute path of the TARGET repository's primary checkout>
@@ -199,6 +218,9 @@ export function buildProjectContext(input = {}, io = defaultIo) {
     // The id used when the model names nothing usable. Non-null ONLY where exactly one repository
     // can possibly be meant; null on an orchestrator host, which is the whole point of this file.
     defaultProject: null,
+    // The token the model must answer to file a memory under an orchestrator host. Non-null only
+    // there: an ordinary session's host is an ordinary known project and needs no claim.
+    hostClaimToken: null,
   };
 
   // 1. Explicit human override wins over every derivation, unchanged from before this feature.
@@ -226,28 +248,29 @@ export function buildProjectContext(input = {}, io = defaultIo) {
     };
   }
 
-  // 3. Orchestrator host: the host is never the default. Authority comes from task metadata.
+  // 3. Orchestrator host: the host is never the default and never admissible on its bare name.
+  // Authority comes from task metadata.
   const external = taskTargets.filter((t) => t.root !== hostRoot);
   const { roots, idToRoots } = dedupeById(external);
   const known = roots.map((t) => ({ id: t.id, root: t.root, source: "task" }));
-  const allowlist = hostProject ? [hostProject] : [];
-
+  const hostClaimToken = hostProject ? `${HOST_CLAIM_PREFIX}${hostProject}` : null;
+  // Every task target the client can vouch for is selectable, INCLUDING when several are in play:
+  // ambiguity decides what the default is, never what the model is allowed to name. An id carried
+  // by two different checkouts stays out — that id genuinely does not identify one repository.
+  const allowlist = roots.filter((t) => (idToRoots.get(t.id) || []).length === 1).map((t) => t.id);
   const conflicted = [...idToRoots.values()].some((list) => list.length > 1);
+  const shared = { ...base, knownProjects: known, allowlist, hostClaimToken };
+
   if (conflicted) {
-    return { ...base, knownProjects: known, ambiguity: AMBIGUITY_CONFLICT, allowlist };
+    return { ...shared, ambiguity: AMBIGUITY_CONFLICT };
   }
   if (roots.length === 0) {
-    return { ...base, knownProjects: known, ambiguity: AMBIGUITY_NO_TARGET, allowlist };
+    return { ...shared, ambiguity: AMBIGUITY_NO_TARGET };
   }
   if (roots.length > 1) {
-    return { ...base, knownProjects: known, ambiguity: AMBIGUITY_MULTIPLE, allowlist };
+    return { ...shared, ambiguity: AMBIGUITY_MULTIPLE };
   }
-  return {
-    ...base,
-    knownProjects: known,
-    targetProject: roots[0].id,
-    allowlist: [...allowlist, roots[0].id].filter((v, i, a) => a.indexOf(v) === i),
-  };
+  return { ...shared, targetProject: roots[0].id };
 }
 
 const AMBIGUITY_TEXT = {
@@ -263,7 +286,7 @@ export function renderProjectContextBlock(ctx) {
   const lines = ["Project context (authoritative — the delta text never overrides it):"];
   lines.push(
     ctx?.orchestratorHost
-      ? `- host project: ${host} (orchestrator host — it hosts work about OTHER repositories, so it is almost never the project a memory belongs to)`
+      ? `- host project: ${host} (orchestrator host — it hosts work about OTHER repositories, so it is almost never the project a memory belongs to; it is NOT selectable by name, and a memory about ${host} itself must answer project_id="${ctx?.hostClaimToken || `${HOST_CLAIM_PREFIX}${host}`}")`
       : `- host project: ${host}`,
   );
   lines.push(`- known projects: ${known.length > 0 ? known.join(", ") : "(none)"}`);
@@ -283,8 +306,12 @@ export function resolveCandidateProjectId(ctx, modelProjectId) {
   const wanted = String(modelProjectId ?? "").trim();
   if (!ctx) return null;
   if (ctx.explicit) return ctx.explicit;
+  // An orchestrator host is reachable only through its claim token, never through its bare name.
+  if (wanted && ctx.hostClaimToken && wanted === ctx.hostClaimToken) return ctx.hostProject || null;
   if (wanted && (ctx.allowlist || []).includes(wanted)) return wanted;
-  // No usable answer from the model. Fall back ONLY where exactly one repository can be meant.
+  // No usable answer from the model. Fall back ONLY where exactly one repository can be meant —
+  // in a single-repository session an omitted id is a formatting slip, not a claim that the memory
+  // belongs elsewhere, because there is no other repository it could belong to.
   return ctx.defaultProject || null;
 }
 

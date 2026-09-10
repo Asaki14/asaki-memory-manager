@@ -700,12 +700,18 @@ type ProjectContext = {
   ambiguity: string;
   allowlist: string[];
   defaultProject: string | null;
+  hostClaimToken: string | null;
 };
 
 const AMBIGUITY_NONE = "";
 const AMBIGUITY_NO_TARGET = "no-target";
 const AMBIGUITY_MULTIPLE = "multiple-targets";
 const AMBIGUITY_CONFLICT = "identity-conflict";
+
+// Prefix of the claim token that lets a memory be filed under an orchestrator host. It exists so
+// that "this memory is about firstmate itself" is a deliberate answer rather than the shape a
+// nearest-match guess happens to take.
+const HOST_CLAIM_PREFIX = "host:";
 
 // A firstmate task metadata file is `key=value` lines. Only these two keys matter here:
 //   project=<absolute path of the TARGET repository's primary checkout>
@@ -867,6 +873,9 @@ function buildProjectContext(
     // The id used when the model names nothing usable. Non-null ONLY where exactly one repository
     // can possibly be meant; null on an orchestrator host, which is the whole point of this code.
     defaultProject: null,
+    // The token the model must answer to file a memory under an orchestrator host. Non-null only
+    // there: an ordinary session's host is an ordinary known project and needs no claim.
+    hostClaimToken: null,
   };
 
   // 1. Explicit human override wins over every derivation, unchanged from before this feature.
@@ -892,22 +901,23 @@ function buildProjectContext(
     };
   }
 
-  // 3. Orchestrator host: the host is never the default. Authority comes from task metadata.
+  // 3. Orchestrator host: the host is never the default and never admissible on its bare name.
+  // Authority comes from task metadata.
   const external = taskTargets.filter((t) => t.root !== hostRoot);
   const { roots, idToRoots } = dedupeProjectsById(external);
   const known: KnownProject[] = roots.map((t) => ({ id: t.id, root: t.root, source: "task" }));
-  const allowlist = hostProject ? [hostProject] : [];
-
+  const hostClaimToken = hostProject ? `${HOST_CLAIM_PREFIX}${hostProject}` : null;
+  // Every task target the client can vouch for is selectable, INCLUDING when several are in play:
+  // ambiguity decides what the default is, never what the model is allowed to name. An id carried
+  // by two different checkouts stays out — that id genuinely does not identify one repository.
+  const allowlist = roots.filter((t) => (idToRoots.get(t.id) || []).length === 1).map((t) => t.id);
   const conflicted = [...idToRoots.values()].some((list) => list.length > 1);
-  if (conflicted) return { ...base, knownProjects: known, ambiguity: AMBIGUITY_CONFLICT, allowlist };
-  if (roots.length === 0) return { ...base, knownProjects: known, ambiguity: AMBIGUITY_NO_TARGET, allowlist };
-  if (roots.length > 1) return { ...base, knownProjects: known, ambiguity: AMBIGUITY_MULTIPLE, allowlist };
-  return {
-    ...base,
-    knownProjects: known,
-    targetProject: roots[0].id,
-    allowlist: [...allowlist, roots[0].id].filter((v, i, a) => a.indexOf(v) === i),
-  };
+  const shared: ProjectContext = { ...base, knownProjects: known, allowlist, hostClaimToken };
+
+  if (conflicted) return { ...shared, ambiguity: AMBIGUITY_CONFLICT };
+  if (roots.length === 0) return { ...shared, ambiguity: AMBIGUITY_NO_TARGET };
+  if (roots.length > 1) return { ...shared, ambiguity: AMBIGUITY_MULTIPLE };
+  return { ...shared, targetProject: roots[0].id };
 }
 
 const PROJECT_AMBIGUITY_TEXT: Record<string, string> = {
@@ -923,7 +933,7 @@ function renderProjectContextBlock(ctx: ProjectContext | null | undefined): stri
   const lines = ["Project context (authoritative — the delta text never overrides it):"];
   lines.push(
     ctx?.orchestratorHost
-      ? `- host project: ${host} (orchestrator host — it hosts work about OTHER repositories, so it is almost never the project a memory belongs to)`
+      ? `- host project: ${host} (orchestrator host — it hosts work about OTHER repositories, so it is almost never the project a memory belongs to; it is NOT selectable by name, and a memory about ${host} itself must answer project_id="${ctx?.hostClaimToken || `${HOST_CLAIM_PREFIX}${host}`}")`
       : `- host project: ${host}`,
   );
   lines.push(`- known projects: ${known.length > 0 ? known.join(", ") : "(none)"}`);
@@ -941,7 +951,11 @@ function resolveCandidateProjectId(ctx: ProjectContext | null | undefined, model
   const wanted = String(modelProjectId ?? "").trim();
   if (!ctx) return null;
   if (ctx.explicit) return ctx.explicit;
+  // An orchestrator host is reachable only through its claim token, never through its bare name.
+  if (wanted && ctx.hostClaimToken && wanted === ctx.hostClaimToken) return ctx.hostProject || null;
   if (wanted && (ctx.allowlist || []).includes(wanted)) return wanted;
+  // Fall back ONLY where exactly one repository can be meant — in a single-repository session an
+  // omitted id is a formatting slip, not a claim that the memory belongs elsewhere.
   return ctx.defaultProject || null;
 }
 // #endregion
@@ -1864,6 +1878,10 @@ Two contrastive examples:
 - "保留调研文件" … "调研的文件删掉"; "update data/names-db.json" … "it is gitignored, skip that step"; or "also change X in this same PR" -> flag=false (single-task cleanup and PR scope, not standing rules).
 - "firstmate 第二个船员默认在右下" … "与第一个船员共享右半侧才对" -> flag=false (crew placement is enforced by curated configuration, so memory must not duplicate it).
 - "paneru 启用 focus_follows_mouse = true" -> flag=false (a bare literal repository config assignment belongs only in its source file). By contrast, a completed cross-repository behavioural state such as "two repositories now use build caching" remains flag=true even when project attribution is ambiguous.
+- "tab 改为总体/全局引导/付费引导，默认显示总体；卡片和进组数据都删" -> flag=false (the user naming what one page, chart or field of one deliverable should look like is a build instruction for the current iteration, not a memory; it qualifies only when the user says it holds from now on, or when the correction is about a way of working rather than one screen). This covers instructions about an artefact, never completed work: an assistant report of a FIX that names a mechanism and the failure mode it removes stays flag=true even when the change is a visual one.
+- "Assistant: 等 AU 转化分析完成之后再做 Data 页的联动" … "User: data页不做联动" -> flag=false (a verdict on whether one page of one deliverable gets one feature dies with that version of the page; it is a correction, and it is still not a durable rule, so it must not be promoted to a prohibition in order to stop the feature being proposed again). This narrow test is about the CONTENT of one artefact — which page shows what — and never about how documents, code or reports are structured in general: a verdict that documents should rely on their existing heading levels instead of a table of contents stays flag=true, because it is a reusable way of writing docs that merely happened to surface on one file.
+- "产物交付前应先对每个元素应用消融原则" -> flag=false (the body of a general output standard that is already written in ~/.claude/CLAUDE.md, ~/.pi/agent/AGENTS.md or a project AGENTS.md is injected into every session already, so restating it as a memory adds nothing and only spends injection budget). Apply this only when the delta itself shows that text being quoted or paraphrased out of such a file; never withhold a candidate on a guess that some rule like it might already exist somewhere.
+- "Super+Enter 现在打开一个新的终端窗口" or "顶栏现在按 WiFi、音量、电池的顺序排" -> flag=false (in an environment or dotfiles repository, what a key binding or a status bar currently does is configuration state whose real source is the config file; record it only when the delta also carries the reasoning behind that choice).
 - "Herdr feature completed: tests and e2e passed, lint clean, docs synced" -> flag=false (shipped status without a reusable learning).
 - A candidate that writes a host, endpoint, or credential field which an existing nondisclosure rule says not to persist -> flag=false (memory cannot violate nondisclosure).
 - "Assistant: 报告 crew 仍在队列，未检查完成通知" … "User: crew 已经完成很久了，为什么你没反应？" -> flag=true, scope=project, rule_form=procedure, text must say to check the crew 完成通知 and process results before reporting queue progress (a reusable firstmate procedure failure, not one-off task scope or a global rule).
@@ -1873,9 +1891,12 @@ If flag=true, distill: compress the candidate into exactly ONE self-contained se
 Classify (only meaningful when flag=true):
 - type: preference | rule | fact | decision | task_learning | bug_fix | workflow
 - scope rule: "global" only if the statement would genuinely help in ANY unrelated project (cross-project dev preferences, communication/output style, secret-handling rules, durable personal/identity facts), and "project" for everything else, including system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs, OS-level fixes) even when it was not said inside a recognizable project. A rule about how you yourself work with the user — how you report progress, verify what a worker or tool reports, or escalate — is cross-project by nature and is "global" even when it was said while working inside one project; a rule that only holds inside one tool or app — its own UI, output, delivery or config quirks — is NOT that, and stays "project". When ambiguous, prefer "project".
-- project_id: which repository this memory belongs to. The selectable ids are the ones in the "known projects" list of the Project context block PLUS the host project named on the first line of that block; anything else is not selectable. Output "" (empty string) whenever scope is not "project", the delta is about a repository that is not one of those ids, the delta cannot be attributed to exactly one of them, or the active target project is marked unresolved. An empty project_id makes the client skip the write, and skipping is the correct outcome, never a failure to avoid — never substitute the nearest listed repository for one that is absent. The host project is a valid answer ONLY when the delta is about the code, config, docs or behaviour of that host project itself; on an orchestrator host never pick it merely because the session runs there.
+- project_id: which repository this memory belongs to. The selectable ids are exactly the ones in the "known projects" list of the Project context block; anything else is not selectable. Output "" (empty string) whenever scope is not "project", the delta is about a repository that is not one of those ids, the delta cannot be attributed to exactly one of them, or the active target project is marked unresolved. An empty project_id makes the client skip the write, and skipping is the correct outcome, never a failure to avoid — never substitute the nearest listed repository for one that is absent. When the host project line marks the host as an orchestrator host, that host is NOT selectable by name: filing a memory under it requires the exact project_id token that line quotes, and that token is correct ONLY when the delta is about the code, config, docs or workflow of the orchestrator repository itself, never because the session runs there.
 - Attribution follows the SUBJECT of the delta, never the directory the session happened to run in. A fact about the user themself (pay, working hours, schooling, housing, market rates they are researching) is scope="global" or nothing at all, never a memory of the repository that hosted the session; and a memory about repository X keeps X even when the session ran inside repository Y — when X is not selectable, the answer is "", never the session host.
-- Project context with host project firstmate and known projects logseq-d2, delta "firstmate 的 crew 状态文件改成每条任务一个 append-only 文件，解决了多 crew 并发写同一文件互相覆盖的问题" -> project_id="firstmate" (the delta is about the host project itself, and the host is always selectable even though it is not repeated in the known projects list).
+- A memory has an owning repository only when the delta is about that repository — its code, config, docs, product or workflow. A rule about a skill, a report format, a prompt file or a general output standard that lives outside every listed repository owns no repository at all: answer project_id="" instead of filing it under the repository whose checkout the session happened to sit in. This decides project_id only; scope still comes from the scope rule above, which keeps a quirk of one tool or app at "project" even when no repository owns it.
+- Project context whose host line marks firstmate as an orchestrator host quoting project_id="host:firstmate", known projects logseq-d2, delta "firstmate 的 crew 状态文件改成每条任务一个 append-only 文件，解决了多 crew 并发写同一文件互相覆盖的问题" -> project_id="host:firstmate" (the delta is about the orchestrator repository itself, so the quoted claim token is the answer; a bare "firstmate" is not selectable there).
+- The same context, delta "分期看板的试用转化率口径定为已转化除以试用已到期" -> project_id="" (the dashboard repository is not in the known projects list, and hosting that discussion is not a reason to answer "host:firstmate", which asserts the memory is about firstmate itself).
+- The same context, delta "提速取数不能靠削减数据口径或缩短时间范围，要提速就改调度——错峰、拆班、并行取数" -> project_id="" (the delta names no listed repository at all, and the one task that happens to be in flight is not evidence that a way of working belongs to it; a known project id is an answer about the SUBJECT, never about what the orchestrator is currently busy with).
 - The same context, delta "thesis-partner 的引用解析已改用官方 API" -> project_id="" (the repository the delta is about is not selectable; never fall back to the nearest listed one).
 - Project context with host project .config, delta "我的工作时间是 9:00-18:30，12:00-13:00 午休，加班费另算" -> flag=true, scope="global", project_id="" (a fact about the user is never a memory of the repository the session ran in).
 - Project context with host project firstmate and known projects .config, delta "SketchyBar 弹层改用分段独立行槽而不是共享范围，修好了一段行数减少时另一段被挤到分割线上方的问题" -> project_id=".config" (attribution follows the subject of the delta, not the host the session ran on).
@@ -2006,6 +2027,10 @@ Non-correction examples (unchanged rules):
 - "保留调研文件" … "调研的文件删掉"; "update data/names-db.json" … "it is gitignored, skip that step"; or "also change X in this same PR" -> flag=false (single-task cleanup and PR scope, not standing rules).
 - "firstmate 第二个船员默认在右下" … "与第一个船员共享右半侧才对" -> flag=false (crew placement is enforced by curated configuration, so memory must not duplicate it).
 - "paneru 启用 focus_follows_mouse = true" -> flag=false (a bare literal repository config assignment belongs only in its source file). By contrast, a completed cross-repository behavioural state such as "two repositories now use build caching" remains flag=true even when project attribution is ambiguous.
+- "tab 改为总体/全局引导/付费引导，默认显示总体；卡片和进组数据都删" -> flag=false (the user naming what one page, chart or field of one deliverable should look like is a build instruction for the current iteration, not a memory; it qualifies only when the user says it holds from now on, or when the correction is about a way of working rather than one screen). This covers instructions about an artefact, never completed work: an assistant report of a FIX that names a mechanism and the failure mode it removes stays flag=true even when the change is a visual one.
+- "Assistant: 等 AU 转化分析完成之后再做 Data 页的联动" … "User: data页不做联动" -> flag=false (a verdict on whether one page of one deliverable gets one feature dies with that version of the page; it is a correction, and it is still not a durable rule, so it must not be promoted to a prohibition in order to stop the feature being proposed again). This narrow test is about the CONTENT of one artefact — which page shows what — and never about how documents, code or reports are structured in general: a verdict that documents should rely on their existing heading levels instead of a table of contents stays flag=true, because it is a reusable way of writing docs that merely happened to surface on one file.
+- "产物交付前应先对每个元素应用消融原则" -> flag=false (the body of a general output standard that is already written in ~/.claude/CLAUDE.md, ~/.pi/agent/AGENTS.md or a project AGENTS.md is injected into every session already, so restating it as a memory adds nothing and only spends injection budget). Apply this only when the delta itself shows that text being quoted or paraphrased out of such a file; never withhold a candidate on a guess that some rule like it might already exist somewhere.
+- "Super+Enter 现在打开一个新的终端窗口" or "顶栏现在按 WiFi、音量、电池的顺序排" -> flag=false (in an environment or dotfiles repository, what a key binding or a status bar currently does is configuration state whose real source is the config file; record it only when the delta also carries the reasoning behind that choice).
 - "Herdr feature completed: tests and e2e passed, lint clean, docs synced" -> flag=false (shipped status without a reusable learning).
 - A candidate that writes a host, endpoint, or credential field which an existing nondisclosure rule says not to persist -> flag=false (memory cannot violate nondisclosure).
 - "Assistant: 报告 crew 仍在队列，未检查完成通知" … "User: crew 已经完成很久了，为什么你没反应？" -> flag=true, scope=project, rule_form=procedure, text must say to check the crew 完成通知 and process results before reporting queue progress (a reusable firstmate procedure failure, not one-off task scope or a global rule).
@@ -2015,9 +2040,12 @@ If flag=true, distill: compress the candidate into exactly ONE self-contained se
 Classify (only meaningful when flag=true):
 - type: preference | rule | fact | decision | task_learning | bug_fix | workflow. A correction is normally "rule", or "preference" for a taste-level redirect.
 - scope rule: "global" only if the statement would genuinely help in ANY unrelated project (cross-project dev preferences, communication/output style, secret-handling rules, durable personal/identity facts), and "project" for everything else, including system/tool troubleshooting (dotfiles, window manager configs, app-specific bugs, OS-level fixes) even when it was not said inside a recognizable project. A rule about how you yourself work with the user — how you report progress, verify what a worker or tool reports, or escalate — is cross-project by nature and is "global" even when it was said while working inside one project; a rule that only holds inside one tool or app — its own UI, output, delivery or config quirks — is NOT that, and stays "project". When ambiguous, prefer "project".
-- project_id: which repository this memory belongs to. The selectable ids are the ones in the "known projects" list of the Project context block PLUS the host project named on the first line of that block; anything else is not selectable. Output "" (empty string) whenever scope is not "project", the delta is about a repository that is not one of those ids, the delta cannot be attributed to exactly one of them, or the active target project is marked unresolved. An empty project_id makes the client skip the write, and skipping is the correct outcome, never a failure to avoid — never substitute the nearest listed repository for one that is absent. The host project is a valid answer ONLY when the delta is about the code, config, docs or behaviour of that host project itself; on an orchestrator host never pick it merely because the session runs there.
+- project_id: which repository this memory belongs to. The selectable ids are exactly the ones in the "known projects" list of the Project context block; anything else is not selectable. Output "" (empty string) whenever scope is not "project", the delta is about a repository that is not one of those ids, the delta cannot be attributed to exactly one of them, or the active target project is marked unresolved. An empty project_id makes the client skip the write, and skipping is the correct outcome, never a failure to avoid — never substitute the nearest listed repository for one that is absent. When the host project line marks the host as an orchestrator host, that host is NOT selectable by name: filing a memory under it requires the exact project_id token that line quotes, and that token is correct ONLY when the delta is about the code, config, docs or workflow of the orchestrator repository itself, never because the session runs there.
 - Attribution follows the SUBJECT of the delta, never the directory the session happened to run in. A fact about the user themself (pay, working hours, schooling, housing, market rates they are researching) is scope="global" or nothing at all, never a memory of the repository that hosted the session; and a memory about repository X keeps X even when the session ran inside repository Y — when X is not selectable, the answer is "", never the session host.
-- Project context with host project firstmate and known projects logseq-d2, delta "firstmate 的 crew 状态文件改成每条任务一个 append-only 文件，解决了多 crew 并发写同一文件互相覆盖的问题" -> project_id="firstmate" (the delta is about the host project itself, and the host is always selectable even though it is not repeated in the known projects list).
+- A memory has an owning repository only when the delta is about that repository — its code, config, docs, product or workflow. A rule about a skill, a report format, a prompt file or a general output standard that lives outside every listed repository owns no repository at all: answer project_id="" instead of filing it under the repository whose checkout the session happened to sit in. This decides project_id only; scope still comes from the scope rule above, which keeps a quirk of one tool or app at "project" even when no repository owns it.
+- Project context whose host line marks firstmate as an orchestrator host quoting project_id="host:firstmate", known projects logseq-d2, delta "firstmate 的 crew 状态文件改成每条任务一个 append-only 文件，解决了多 crew 并发写同一文件互相覆盖的问题" -> project_id="host:firstmate" (the delta is about the orchestrator repository itself, so the quoted claim token is the answer; a bare "firstmate" is not selectable there).
+- The same context, delta "分期看板的试用转化率口径定为已转化除以试用已到期" -> project_id="" (the dashboard repository is not in the known projects list, and hosting that discussion is not a reason to answer "host:firstmate", which asserts the memory is about firstmate itself).
+- The same context, delta "提速取数不能靠削减数据口径或缩短时间范围，要提速就改调度——错峰、拆班、并行取数" -> project_id="" (the delta names no listed repository at all, and the one task that happens to be in flight is not evidence that a way of working belongs to it; a known project id is an answer about the SUBJECT, never about what the orchestrator is currently busy with).
 - The same context, delta "thesis-partner 的引用解析已改用官方 API" -> project_id="" (the repository the delta is about is not selectable; never fall back to the nearest listed one).
 - Project context with host project .config, delta "我的工作时间是 9:00-18:30，12:00-13:00 午休，加班费另算" -> flag=true, scope="global", project_id="" (a fact about the user is never a memory of the repository the session ran in).
 - Project context with host project firstmate and known projects .config, delta "SketchyBar 弹层改用分段独立行槽而不是共享范围，修好了一段行数减少时另一段被挤到分割线上方的问题" -> project_id=".config" (attribution follows the subject of the delta, not the host the session ran on).

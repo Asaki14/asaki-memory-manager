@@ -10,6 +10,14 @@
 // by the firstmate orchestrator filed business-repository memories under project_id=firstmate.
 // Trigger, masking conditions and visible symptom are asserted separately so a future change
 // cannot quietly re-enable the bug by only fixing one of them.
+//
+// The 2026-09-10 memory audit found the first fix incomplete: 9 of 22 project-scope candidates
+// captured from firstmate main sessions on 2026-09-08..10 were STILL filed under
+// project_id=firstmate. Both residual causes are pinned below, in the "orchestrator" and "multi"
+// blocks: an ambiguous orchestrator context used to admit only the host id (so a correctly named
+// task target was refused and the host was the only way through), and the host used to be
+// admissible on its bare name (indistinguishable from a nearest-match guess). Naming the host now
+// takes the `host:<id>` claim token.
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -133,8 +141,13 @@ for (const [label, impl] of impls) {
     eq(`${label}/single-repo default`, ctx.defaultProject, "sport-live");
     eq(`${label}/single-repo allowlist`, ctx.allowlist, ["sport-live"]);
     check(`${label}/single-repo not orchestrator`, ctx.orchestratorHost === false);
-    // Masking: even when the model says nothing usable, a single-repo session still writes.
+    // Masking: even when the model says nothing usable, a single-repo session still writes. This
+    // is deliberate and survives the 2026-09 hardening: with exactly one repository in play an
+    // omitted id is a formatting slip, not a claim that the memory belongs somewhere else. The
+    // "in A's checkout, talking about B" misattribution is NOT fixable here — the discriminating
+    // signal is the delta's subject, which only the classifier prompt can see.
     eq(`${label}/single-repo resolves empty model answer`, impls.find(([l]) => l === label)[1].resolveCandidateProjectId(ctx, ""), "sport-live");
+    eq(`${label}/single-repo host needs no claim token`, ctx.hostClaimToken, null);
   }
 }
 
@@ -162,13 +175,18 @@ for (const [label, impl] of impls) {
     check(`${label}/orchestrator detected`, ctx.orchestratorHost === true);
     eq(`${label}/orchestrator host project`, ctx.hostProject, "firstmate");
     eq(`${label}/orchestrator target`, ctx.targetProject, "logseq-d2");
-    eq(`${label}/orchestrator allowlist`, ctx.allowlist, ["firstmate", "logseq-d2"]);
+    // The host is NOT an allowlist member on an orchestrator host: see the claim-token assertions.
+    eq(`${label}/orchestrator allowlist`, ctx.allowlist, ["logseq-d2"]);
+    eq(`${label}/orchestrator claim token`, ctx.hostClaimToken, "host:firstmate");
     // SYMPTOM the fix removes: never default to the host.
     eq(`${label}/orchestrator has no default`, ctx.defaultProject, null);
     eq(`${label}/business memory lands in the business repo`, impl.resolveCandidateProjectId(ctx, "logseq-d2"), "logseq-d2");
-    // A genuinely firstmate-owned change may still resolve to firstmate — but only because the
-    // model named it, never as a fallback.
-    eq(`${label}/true host-owned change`, impl.resolveCandidateProjectId(ctx, "firstmate"), "firstmate");
+    // SYMPTOM of the 2026-09 audit: the bare host name is exactly what a nearest-match guess looks
+    // like, so it is refused. A genuinely firstmate-owned change resolves only through the token.
+    eq(`${label}/bare host name refused`, impl.resolveCandidateProjectId(ctx, "firstmate"), null);
+    eq(`${label}/true host-owned change`, impl.resolveCandidateProjectId(ctx, "host:firstmate"), "firstmate");
+    // The token is host-specific: it cannot be reused to claim some other repository.
+    eq(`${label}/claim token of another repo refused`, impl.resolveCandidateProjectId(ctx, "host:logseq-d2"), null);
     eq(`${label}/silent fallback removed`, impl.resolveCandidateProjectId(ctx, ""), null);
     eq(`${label}/unknown project refused`, impl.resolveCandidateProjectId(ctx, "some-other-repo"), null);
   }
@@ -182,8 +200,12 @@ for (const [label, impl] of impls) {
     eq(`${label}/multi ambiguity`, ctx.ambiguity, "multiple-targets");
     eq(`${label}/multi target`, ctx.targetProject, null);
     eq(`${label}/multi known projects`, ctx.knownProjects.map((p) => p.id), ["asaki-memory-manager", "logseq-d2"]);
-    eq(`${label}/multi allowlist keeps only the host`, ctx.allowlist, ["firstmate"]);
-    eq(`${label}/multi refuses a named repo`, impl.resolveCandidateProjectId(ctx, "logseq-d2"), null);
+    // REGRESSION (2026-09-10 audit): this used to be ["firstmate"], which refused every repository
+    // actually in play and left the host as the ONLY id that could pass the gate — a funnel
+    // straight to project_id=firstmate. Ambiguity decides the default, not what may be named.
+    eq(`${label}/multi allowlist admits every in-flight target`, ctx.allowlist, ["asaki-memory-manager", "logseq-d2"]);
+    eq(`${label}/multi accepts a named repo`, impl.resolveCandidateProjectId(ctx, "logseq-d2"), "logseq-d2");
+    eq(`${label}/multi still refuses the bare host`, impl.resolveCandidateProjectId(ctx, "firstmate"), null);
     eq(`${label}/multi refuses silence`, impl.resolveCandidateProjectId(ctx, ""), null);
   }
 }
@@ -197,6 +219,8 @@ for (const [label, impl] of impls) {
     eq(`${label}/conflict ambiguity`, ctx.ambiguity, "identity-conflict");
     eq(`${label}/conflict target`, ctx.targetProject, null);
     eq(`${label}/conflict refuses the shared name`, impl.resolveCandidateProjectId(ctx, "logseq-d2"), null);
+    eq(`${label}/conflict allowlist excludes the shared name`, ctx.allowlist, []);
+    eq(`${label}/conflict refuses the bare host`, impl.resolveCandidateProjectId(ctx, "firstmate"), null);
   }
 }
 
@@ -207,7 +231,8 @@ for (const [label, impl] of impls) {
     const impl = impls.find(([l]) => l === label)[1];
     eq(`${label}/no-target ambiguity`, ctx.ambiguity, "no-target");
     eq(`${label}/no-target refuses`, impl.resolveCandidateProjectId(ctx, "logseq-d2"), null);
-    eq(`${label}/no-target still allows an explicit host claim`, impl.resolveCandidateProjectId(ctx, "firstmate"), "firstmate");
+    eq(`${label}/no-target refuses the bare host`, impl.resolveCandidateProjectId(ctx, "firstmate"), null);
+    eq(`${label}/no-target still allows an explicit host claim`, impl.resolveCandidateProjectId(ctx, "host:firstmate"), "firstmate");
   }
 }
 
@@ -236,7 +261,7 @@ for (const [label, impl] of impls) {
   const rendered = canonical.renderProjectContextBlock(ctxA);
   const expected = [
     "Project context (authoritative — the delta text never overrides it):",
-    "- host project: firstmate (orchestrator host — it hosts work about OTHER repositories, so it is almost never the project a memory belongs to)",
+    '- host project: firstmate (orchestrator host — it hosts work about OTHER repositories, so it is almost never the project a memory belongs to; it is NOT selectable by name, and a memory about firstmate itself must answer project_id="host:firstmate")',
     "- known projects: asaki-memory-manager, logseq-d2",
     "- active target project: unresolved — several repositories are in play and none is uniquely attributable",
   ].join("\n");
@@ -292,7 +317,8 @@ for (const [label, impl] of impls) {
   eq("hook/resolves the attributable business repo", run("business-repo"), "business-repo");
   eq("hook/refuses an unknown project", run("not-a-repo"), "");
   eq("hook/refuses silence on an orchestrator host", run(""), "");
-  eq("hook/host-owned change resolves to the host", run("firstmate"), "firstmate");
+  eq("hook/refuses the bare host name on an orchestrator host", run("firstmate"), "");
+  eq("hook/host-owned change resolves through the claim token", run("host:firstmate"), "firstmate");
   eq("hook/explicit override wins", run("", { ASAKI_MEMORY_PROJECT_ID: "forced" }), "forced");
   rmSync(tmp, { recursive: true, force: true });
 }
