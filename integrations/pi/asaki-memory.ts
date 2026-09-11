@@ -2293,7 +2293,12 @@ export default function (pi: ExtensionAPI) {
     return new Text(`${theme.fg("toolTitle", "Asaki Memory")} ${firstLine}`, 0, 0);
   });
 
-  pi.registerEntryRenderer("asaki-memory-banner", (entry, _options, theme) => {
+  // Pi renders custom session entries through registerEntryRenderer. omp's extension host has no
+  // such method (it exposes registerMessageRenderer only), and an unguarded call throws there
+  // before any registerTool runs — the whole extension, tools included, then fails to load. The
+  // optional call keeps the styled banner on Pi and falls back to the host's default entry
+  // rendering elsewhere; the banner entry itself is still appended on both hosts.
+  pi.registerEntryRenderer?.("asaki-memory-banner", (entry, _options, theme) => {
     const content = typeof entry.data === "string" ? entry.data : String(entry.data ?? "");
     const [, ...details] = content.split("\n");
     return new Text(`${theme.fg("mdHeading", "[Memory]")}\n${theme.fg("dim", `  ${details.join(" ")}`)}`, 0, 0);
@@ -2323,7 +2328,12 @@ export default function (pi: ExtensionAPI) {
       loadStandingRules(ctx, ctx.signal),
       loadProjectDigest(ctx, ctx.signal),
     ]);
-    const systemPrompt = [event.systemPrompt, memoryPrecheckInstruction(event.prompt), standingRules?.text, projectDigest?.text]
+    // Pi passes `systemPrompt` as a single string; omp passes the rendered block ARRAY. The value
+    // returned here REPLACES the provider system prompt on both hosts, so normalise before the
+    // typeof-string filter — an array would otherwise be dropped and the host would lose its own
+    // base prompt entirely.
+    const basePrompt = Array.isArray(event.systemPrompt) ? event.systemPrompt : [event.systemPrompt];
+    const systemPrompt = [...basePrompt, memoryPrecheckInstruction(event.prompt), standingRules?.text, projectDigest?.text]
       .filter((part) => typeof part === "string" && part.length > 0)
       .join("\n\n");
 

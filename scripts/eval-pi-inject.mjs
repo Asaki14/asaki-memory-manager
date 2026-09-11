@@ -13,6 +13,9 @@
 //  5. the banner field/omission matrix, on the pure builder from `// #region asaki-banner`;
 //  6. the auto-inject display boundaries (8 short results vs one oversized first result) and that
 //     the request carries the validated top_k AND min_score.
+//  7. the file still loads, and still registers every tool, on a host that exposes no
+//     registerEntryRenderer and passes `systemPrompt` as a rendered block array (omp's shape),
+//     without swallowing that host's own base prompt.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -99,11 +102,13 @@ const extension = await import(pathToFileURL(extensionPath).href);
 
 const handlers = new Map();
 const entries = [];
+const tools = [];
+const entryRenderers = [];
 const pi = {
   registerMessageRenderer: () => {},
-  registerEntryRenderer: () => {},
+  registerEntryRenderer: (type) => entryRenderers.push(type),
   registerCommand: () => {},
-  registerTool: () => {},
+  registerTool: (tool) => tools.push(tool.name),
   on: (name, handler) => handlers.set(name, handler),
   appendEntry: (type, data) => entries.push({ type, data }),
 };
@@ -112,6 +117,7 @@ extension.default(pi);
 for (const name of ['session_start', 'before_agent_start', 'session_before_switch']) {
   checkTrue(`extension registers the ${name} handler`, handlers.has(name));
 }
+checkTrue('a host WITH registerEntryRenderer still gets the banner renderer', entryRenderers.includes('asaki-memory-banner'));
 
 const ctx = { cwd: process.cwd(), hasUI: true, signal: undefined, ui: { notify: () => {} }, isIdle: () => true };
 
@@ -200,6 +206,39 @@ checkTrue('STANDING_RULES_KINDS=rule moves preference into the digest', standing
 checkTrue('the digest still excludes the configured standing kind', !standingOff.systemPrompt.includes('- [global/rule] 规则一'));
 delete process.env.ASAKI_MEMORY_STANDING_RULES;
 delete process.env.ASAKI_MEMORY_STANDING_RULES_KINDS;
+
+// --- 7: host-API tolerance ------------------------------------------------------------------
+// omp's extension host has registerMessageRenderer but no registerEntryRenderer, and hands
+// `before_agent_start` the rendered system-prompt BLOCK ARRAY rather than one string. An
+// unguarded renderer call aborts the factory before any registerTool (no memory tools at all);
+// an unnormalised array base prompt is dropped by the typeof-string filter and the returned
+// value then REPLACES the host's whole system prompt with just our blocks.
+const ompHandlers = new Map();
+const ompTools = [];
+const ompPi = {
+  registerMessageRenderer: () => {},
+  registerCommand: () => {},
+  registerTool: (tool) => ompTools.push(tool.name),
+  on: (name, handler) => ompHandlers.set(name, handler),
+  appendEntry: () => {},
+};
+let ompLoadError = null;
+try {
+  extension.default(ompPi);
+} catch (error) {
+  ompLoadError = error;
+}
+checkTrue(`a host without registerEntryRenderer still loads (${ompLoadError?.message ?? 'ok'})`, ompLoadError === null);
+checkTrue('such a host registers the same tool set', tools.length > 0 && ompTools.join(',') === tools.join(','));
+checkTrue('such a host still gets the search tool', ompTools.includes('asaki_memory_search'));
+
+await freshSession();
+const arrayBase = await ompHandlers.get('before_agent_start')({ prompt: '请继续之前的决策', systemPrompt: ['BLOCK_ONE', 'BLOCK_TWO'] }, ctx);
+checkTrue('an array systemPrompt keeps every base block', arrayBase.systemPrompt.startsWith('BLOCK_ONE\n\nBLOCK_TWO'));
+checkTrue(
+  'an array systemPrompt still carries both injected blocks',
+  arrayBase.systemPrompt.includes('## Asaki Standing Rules') && arrayBase.systemPrompt.includes('## Asaki Project Memory'),
+);
 
 // --- list failure degrades both blocks, banner keeps its fallbacks --------------------------
 await freshSession();
