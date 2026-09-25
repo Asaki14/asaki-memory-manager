@@ -560,7 +560,7 @@ server.tool(
 
 server.tool(
   "asaki_memory_review_resolve",
-  "Resolve a pending Asaki memory review as add, merge, update, delete, or ignore. update = overwrite with candidate text unless content is given; for a merge, pass the merged text via content. update/delete/merge require memory_id. Only call after explicit user approval.",
+  "Resolve a pending Asaki memory review as add, merge, update, delete, or ignore. update = overwrite with candidate text unless content is given; merge auto-appends the candidate to the target and ignores content; for an exact merged text use update with memory_id + content. update/delete/merge require memory_id. Only call after explicit user approval.",
   {
     id: z.string(),
     action: z.enum(["add", "merge", "update", "delete", "ignore"]),
