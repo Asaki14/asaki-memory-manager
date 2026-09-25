@@ -234,7 +234,7 @@ The classifier model can also be set via `classifierModel` in `~/.pi/agent/asaki
 
 </details>
 
-The extension exposes `asaki_memory_search`, `asaki_memory_add`, `asaki_memory_list`, `asaki_memory_update`, `asaki_memory_delete`, `asaki_memory_review_create`, `asaki_memory_review_list`, `asaki_memory_review_resolve`, and the `/memory` command.
+The extension exposes `asaki_memory_search`, `asaki_memory_add`, `asaki_memory_list`, `asaki_memory_update`, `asaki_memory_delete`, `asaki_memory_review_create`, `asaki_memory_review_list`, `asaki_memory_review_resolve`, and the audit command under two names, `/memory` and `/memory-audit` (same handler: `status` checks connectivity, any other args are the audit focus).
 
 ### omp
 
@@ -250,7 +250,9 @@ extensions:
   - ~/.pi/agent/npm/node_modules/@asaki14/pi-memory/asaki-memory.ts
 ```
 
-Configuration carries over untouched: the extension resolves its agent directory as `PI_CODING_AGENT_DIR || ~/.pi/agent`, so under omp it keeps reading `~/.pi/agent/asaki-memory.json` and the same `ASAKI_MEMORY_*` environment as Pi. All the tools, the `/memory` command, the standing-rule block and the project digest behave identically.
+Configuration carries over untouched: the extension resolves its agent directory as `PI_CODING_AGENT_DIR || ~/.pi/agent`, so under omp it keeps reading `~/.pi/agent/asaki-memory.json` and the same `ASAKI_MEMORY_*` environment as Pi. All the tools, the standing-rule block and the project digest behave identically.
+
+The audit command does not keep its `/memory` name: omp has a built-in `/memory` and skips any extension command that collides with a built-in (it logs `Extension command 'memory' … conflicts with built-in commands. Skipping.` at startup). Run the audit as `/memory-audit` instead — same handler and arguments, and it works on Pi too. The alias ships in the release after `@asaki14/pi-memory` 0.4.1; until then a package install under omp has no audit command.
 
 One cosmetic difference: omp's extension host has no `registerEntryRenderer`, so the `[Memory]` startup banner is appended as a plain session entry and rendered by omp's default instead of the styled `[Memory]` block. omp also surfaces extension tools as `xd://<tool>` devices rather than named tools; that is omp's convention, not a defect.
 
