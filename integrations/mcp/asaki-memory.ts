@@ -21,7 +21,7 @@ const SOURCE_TAG = process.env.ASAKI_MEMORY_SOURCE || "mcp";
 // Caps how much text a single tool call can inject into the agent's context, independent of
 // how many memories/reviews are returned (a memory's content can be up to 8000 chars, and
 // search/list can return up to 50/100 items). KEEP IN SYNC with the same constant in
-// integrations/pi/asaki-memory.ts and integrations/claude-code/user-prompt.sh.
+// integrations/omp/asaki-memory.ts and integrations/claude-code/user-prompt.sh.
 const MAX_TOOL_OUTPUT_CHARS = 6000;
 // asaki_memory_get exists to return UNTRUNCATED content, so it gets its own, larger budget: 20 ids
 // of a few hundred characters each would otherwise hit the shared 6000-char cap. KEEP IN SYNC.
@@ -36,7 +36,7 @@ type ConfigFile = Record<string, unknown>;
 
 // Local hard gate before any network request — server-side src/utils/sensitiveContent.ts already
 // rejects these with a 400, but that's after the text has already left the machine. This is the
-// same pattern independently maintained in integrations/pi/asaki-memory.ts's SENSITIVE_RE_LIST and
+// same pattern independently maintained in integrations/omp/asaki-memory.ts's SENSITIVE_RE_LIST and
 // integrations/claude-code/stop-extract.sh's SENSITIVE_PATTERN — keep them in sync. sk-/sk-proj-/
 // sk-ant- use a hyphen (not an underscore) to actually match real OpenAI/Anthropic keys; also
 // covers Slack xox- tokens, Google AIza- keys, JWTs, and user:pass@host credential URLs.

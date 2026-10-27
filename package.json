@@ -6,7 +6,7 @@
     "dev": "wrangler dev --local",
     "start": "wrangler dev --local",
     "typecheck": "tsc --noEmit",
-    "typecheck:pi": "tsc --noEmit -p tsconfig.pi.json",
+    "typecheck:omp": "tsc --noEmit -p tsconfig.omp.json",
     "eval:candidates": "node --experimental-strip-types scripts/eval-candidates.ts",
     "eval:candidate-fields": "node --experimental-strip-types scripts/eval-candidate-fields.ts",
     "eval:purge-scrub": "node --experimental-strip-types scripts/eval-purge-scrub.ts",
@@ -19,6 +19,7 @@
     "eval:extraction": "bash scripts/eval-extraction.sh",
     "eval:extraction-guardrails": "node --experimental-strip-types scripts/eval-extraction-guardrails.ts",
     "eval:classifier": "bash scripts/eval-classifier.sh",
+    "eval:omp-inject": "node --experimental-strip-types scripts/eval-omp-inject.mjs",
     "eval:project-context": "node scripts/eval-project-context.mjs",
     "eval:prompt-sync": "node scripts/eval-prompt-sync.mjs",
     "eval:correction-signal": "bash scripts/eval-correction-signal.sh",
@@ -45,16 +46,10 @@
     "check:mcp-bundle": "node scripts/build-mcp.mjs --check",
     "build:plugin": "npm run build:mcp",
     "hooks:install": "node scripts/install-git-hooks.mjs",
-    "prepare": "node scripts/install-git-hooks.mjs",
-    "build:pi": "node --experimental-strip-types scripts/build-pi-package.ts"
+    "prepare": "node scripts/install-git-hooks.mjs"
   },
   "dependencies": {
     "hono": "^4.10.7"
-  },
-  "pi": {
-    "extensions": [
-      "./integrations/pi/asaki-memory.ts"
-    ]
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20251224.0",
@@ -65,7 +60,7 @@
     "wrangler": "^4.105.0",
     "zod": "^3.25.76"
   },
-  "description": "Cloudflare-native personal memory layer for AI agents: D1, Vectorize, Workers AI, REST, and Pi integration.",
+  "description": "Cloudflare-native personal memory layer for AI agents: D1, Vectorize, Workers AI, REST, and OMP integration.",
   "license": "MIT",
   "keywords": [
     "ai-memory",

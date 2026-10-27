@@ -4,7 +4,7 @@
  * Three assertions, no network and no Worker needed:
  *  1. the canonical TS (src/services/standingRules.ts) matches the fixture expectations;
  *  2. the jq copy (integrations/claude-code/standing-rules.jq) renders byte-identical blocks;
- *  3. the Pi copy (integrations/pi/asaki-memory.ts) is byte-identical to the canonical region.
+ *  3. the OMP copy (integrations/omp/asaki-memory.ts) is byte-identical to the canonical region.
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -29,7 +29,7 @@ type Case = {
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const canonicalPath = resolve(root, 'src/services/standingRules.ts');
-const piPath = resolve(root, 'integrations/pi/asaki-memory.ts');
+const ompPath = resolve(root, 'integrations/omp/asaki-memory.ts');
 const jqPath = resolve(root, 'integrations/claude-code/standing-rules.jq');
 const cases = JSON.parse(readFileSync(resolve(root, 'test/fixtures/standing-rules-cases.json'), 'utf8')) as Case[];
 
@@ -93,13 +93,13 @@ for (const item of cases) {
 }
 
 const canonicalRegion = region(canonicalPath);
-const piRegion = region(piPath);
+const ompRegion = region(ompPath);
 if (!canonicalRegion) {
   failures.push('src/services/standingRules.ts: standing-rules markers not found');
-} else if (!piRegion) {
-  failures.push('integrations/pi/asaki-memory.ts: standing-rules markers not found (the shared region must be copied verbatim)');
-} else if (canonicalRegion !== piRegion) {
-  failures.push('integrations/pi/asaki-memory.ts: standing-rules region drifted from src/services/standingRules.ts');
+} else if (!ompRegion) {
+  failures.push('integrations/omp/asaki-memory.ts: standing-rules markers not found (the shared region must be copied verbatim)');
+} else if (canonicalRegion !== ompRegion) {
+  failures.push('integrations/omp/asaki-memory.ts: standing-rules region drifted from src/services/standingRules.ts');
 }
 
 console.log(`standing-rules eval: ${cases.length - new Set(failures.map((f) => f.split(':')[0])).size}/${cases.length} cases passed, copies checked`);

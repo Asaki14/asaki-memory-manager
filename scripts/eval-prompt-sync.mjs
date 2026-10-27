@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Drift guard for the classifier prompt copies.
 //
-// The same two system prompts exist in three places each — the Claude Code hook, the Pi
-// extension, and the eval harness that is supposed to be testing what production runs. AGENTS.md
+// The same system prompts exist in three places each — the Claude Code hook, the OMP
+// extension, and the eval harness that tests what production runs. This makes drift a CI failure.
 // has always said they must stay in sync; nothing enforced it, so "in sync" meant "whoever edited
 // last remembered all three". This makes drift a CI failure instead.
 //
@@ -12,7 +12,7 @@
 //                               which names the client that will execute the write and therefore
 //                               legitimately differs per client.
 //   The JSON schemas          — identical between the hook and the eval harness, and both must
-//                               declare project_id (the Pi client parses, it does not constrain).
+//                               declare project_id (the OMP client parses, it does not constrain).
 // Host-language escaping is normalised first: the same text is a bash single-quoted string in two
 // copies and a TypeScript template literal in the third.
 import { readFileSync } from "node:fs";
@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const HOOK = join(ROOT, "integrations/claude-code/stop-extract.sh");
 const EVAL = join(ROOT, "scripts/eval-classifier.sh");
-const PI = join(ROOT, "integrations/pi/asaki-memory.ts");
+const OMP = join(ROOT, "integrations/omp/asaki-memory.ts");
 
 const failures = [];
 let pass = 0;
@@ -102,14 +102,14 @@ function comparePrompt(label, copies, { ignoreFirstLine = false } = {}) {
 const correction = [
   ["stop-extract.sh", bashString(HOOK, "CORRECTION_SYSTEM_PROMPT")],
   ["eval-classifier.sh", bashString(EVAL, "CORRECTION_SYSTEM_PROMPT")],
-  ["pi/asaki-memory.ts", tsTemplate(PI, "CORRECTION_SYSTEM_PROMPT")],
+  ["omp/asaki-memory.ts", tsTemplate(OMP, "CORRECTION_SYSTEM_PROMPT")],
 ];
 comparePrompt("CORRECTION_SYSTEM_PROMPT", correction);
 
 const legacy = [
   ["stop-extract.sh", bashString(HOOK, "CLASSIFIER_SYSTEM_PROMPT")],
   ["eval-classifier.sh", bashString(EVAL, "LEGACY_SYSTEM_PROMPT")],
-  ["pi/asaki-memory.ts", tsTemplate(PI, "CLASSIFIER_SYSTEM_PROMPT")],
+  ["omp/asaki-memory.ts", tsTemplate(OMP, "CLASSIFIER_SYSTEM_PROMPT")],
 ];
 comparePrompt("CLASSIFIER_SYSTEM_PROMPT", legacy, { ignoreFirstLine: true });
 

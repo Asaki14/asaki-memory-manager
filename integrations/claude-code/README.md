@@ -46,8 +46,7 @@ environment (never hardcoded / never committed). Set them once in
   the line at all, since the deprecated server-extraction path is off by
   default and `/memory status` reports it when it is not. Everything the two
   blocks did not select stays retrieval-only: the agent decides for itself when
-  to search. Field set and order are KEEP IN SYNC with
-  `buildSessionBannerLine()` in `../pi/asaki-memory.ts`
+  `buildSessionBannerLine()` in `../omp/asaki-memory.ts`
   (`npm run eval:session-inject`).
 - `standing-rules.jq` — selection and rendering for the standing-rule block
   `session-start.sh` emits ahead of the banner: ACTIVE `rule`/`preference`
@@ -59,8 +58,7 @@ environment (never hardcoded / never committed). Set them once in
   rules have to survive compaction. Set `ASAKI_MEMORY_STANDING_RULES=0` to
   disable, `ASAKI_MEMORY_STANDING_RULES_KINDS=rule` to drop preferences.
   KEEP IN SYNC with `src/services/standingRules.ts` (canonical) and its
-  verbatim copy in `../pi/asaki-memory.ts`; `npm run eval:standing-rules`
-  enforces it.
+  verbatim copy in `../omp/asaki-memory.ts`; `npm run eval:standing-rules`
 - `project-digest.jq` — selection and rendering for the project-memory digest
   `session-start.sh` emits between the standing rules and the banner: the ACTIVE
   memories of every OTHER known kind (the dynamic complement of
@@ -80,14 +78,14 @@ environment (never hardcoded / never committed). Set them once in
   it costs no extra request, and it IS re-emitted on compact. On by default —
   set `ASAKI_MEMORY_PROJECT_DIGEST=0` to disable. KEEP IN SYNC with
   `src/services/projectDigest.ts` (canonical) and its verbatim copy in
-  `../pi/asaki-memory.ts`; `npm run eval:project-digest` enforces it.
+  `../omp/asaki-memory.ts`; `npm run eval:project-digest` enforces it.
 - `user-prompt.sh` — UserPromptSubmit hook. Unconditionally injects one fixed
   instruction every turn: the agent itself reads user intent and decides
   whether `asaki_memory_search` is needed, and if so picks its own
-  query/scope/top_k — same as the Pi extension's
-  `memoryPrecheckInstruction()` (`../pi/asaki-memory.ts`). Additionally, when
-  `ASAKI_MEMORY_AUTO_INJECT=1` (default off), it mirrors the Pi extension's
-  `before_agent_start`/`autoInjectMemory()`: on turns whose prompt matches a
+  query/scope/top_k — same as the OMP extension's
+  `memoryPrecheckInstruction()` (`../omp/asaki-memory.ts`). Additionally, when
+  `ASAKI_MEMORY_AUTO_INJECT=1` (default off), it mirrors the OMP extension's
+  `before_agent_start`/`autoInjectMemory()`:
   memory-related keyword regex (or unconditionally with
   `ASAKI_MEMORY_AUTO_INJECT_ALWAYS=1`) and isn't flagged as containing
   secrets, it runs one `/v1/memories/search` call with
@@ -173,7 +171,7 @@ environment (never hardcoded / never committed). Set them once in
   - It affects only this local delta build for this turn. It does **not** delete
     or retract anything already stored — use `asaki_memory_delete` (plus a purge)
     for that.
-  - It does **not** touch Claude Code's own transcript file, Pi's session
+  - It does **not** touch Claude Code's own transcript file, OMP's session
     history, or anything the main conversation model already saw; only the
     background classifier/extraction path is affected.
   - It does **not** apply to the `UserPromptSubmit` auto-inject path, which sends
@@ -202,9 +200,9 @@ environment (never hardcoded / never committed). Set them once in
   turn's text is not dropped, it's carried into the next Stop event's (larger)
   increment. A delta matching a private-key/bearer-token/API-key/AWS-key/
   secret-assignment pattern is never sent to either the Worker or classifier
-  (offset is consumed instead, matching the Pi extension's
+  (offset is consumed instead, matching the OMP extension's
   `containsSensitiveText()` gate — see `SENSITIVE_RE_LIST` in
-  `../pi/asaki-memory.ts`). In Worker extraction mode, extracted candidates are
+  `../omp/asaki-memory.ts`). In Worker extraction mode, extracted candidates are
   capped at 2 per call; project-scope candidates with importance ≥ 0.6 are
   auto-added (same dedup pipeline as `asaki_memory_add`), and everything else
   (global scope, or importance < 0.6) is queued to `/v1/memories/reviews` for
@@ -250,7 +248,7 @@ environment (never hardcoded / never committed). Set them once in
     a *silent* stoppage is at least visible, not to demand action.
 
   Covered by `npm run eval:health-ledger` (the write side) and
-  `npm run eval:session-inject` (the banner fields, on both clients). The Pi
+  `npm run eval:session-inject` (the banner fields, on both clients). The OMP
   extension keeps no on-disk classifier state and therefore never fills these
   two fields, but its banner builder carries them so the two clients stay one
   sync set.
@@ -269,8 +267,8 @@ environment (never hardcoded / never committed). Set them once in
   backend connectivity only; any other args (or none) run a full audit:
   list pending reviews + global/project memories, propose
   REVIEW_RESOLVE/DELETE/UPDATE/MERGE/ADD/KEEP changes, confirm with the user,
-  then execute. Same workflow as the Pi extension's `/memory` command
-  (`registerCommand("memory", ...)` in `../pi/asaki-memory.ts`).
+  then execute. Same workflow as the OMP extension's `/memory` command
+  (`registerCommand("memory", ...)` in `../omp/asaki-memory.ts`).
 
 Restart Claude Code (new session) after install/update for hooks + MCP tools +
 commands to load.

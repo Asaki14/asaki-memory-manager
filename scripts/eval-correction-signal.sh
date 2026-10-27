@@ -12,7 +12,7 @@
 #
 # Both copies are exercised and must agree per case: CORRECTION_SIGNAL_PATTERN in
 # integrations/claude-code/stop-extract.sh (sourced through its library guard) and
-# CORRECTION_SIGNAL_RE in integrations/pi/asaki-memory.ts. No network, no model, no Worker.
+ # CORRECTION_SIGNAL_RE in integrations/omp/asaki-memory.ts. No network, no model, no Worker.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -24,18 +24,18 @@ export ASAKI_MEMORY_STOP_EXTRACT_LIB
 # shellcheck source=../integrations/claude-code/stop-extract.sh
 . "$ROOT/integrations/claude-code/stop-extract.sh"
 
-# Pi verdicts, one per fixture case, in fixture order.
-PI_VERDICTS=$(cd "$ROOT" && node --experimental-strip-types --no-warnings -e '
+# OMP verdicts, one per fixture case, in fixture order.
+OMP_VERDICTS=$(cd "$ROOT" && node --experimental-strip-types --no-warnings -e '
 import { readFileSync } from "node:fs";
-const { loadPiTraceBuilder } = await import("./scripts/pi-trace-region.mjs");
-const { module: pi, dispose } = await loadPiTraceBuilder();
+const { loadOmpTraceBuilder } = await import("./scripts/omp-trace-region.mjs");
+const { module: omp, dispose } = await loadOmpTraceBuilder();
 const cases = JSON.parse(readFileSync("test/fixtures/correction-signal-cases.json", "utf8"));
-for (const item of cases) console.log(pi.CORRECTION_SIGNAL_RE.test(item.text) ? "true" : "false");
+for (const item of cases) console.log(omp.CORRECTION_SIGNAL_RE.test(item.text) ? "true" : "false");
 dispose();
 ')
 
-if [ -z "$PI_VERDICTS" ]; then
-  echo "failed to evaluate CORRECTION_SIGNAL_RE from the Pi extension (see errors above)." >&2
+if [ -z "$OMP_VERDICTS" ]; then
+  echo "failed to evaluate CORRECTION_SIGNAL_RE from the OMP extension (see errors above)." >&2
   exit 1
 fi
 
@@ -60,7 +60,7 @@ for i in $(seq 0 $((CASE_COUNT - 1))); do
   else
     SHELL_MATCH=false
   fi
-  PI_MATCH=$(echo "$PI_VERDICTS" | sed -n "$((i + 1))p")
+  OMP_MATCH=$(echo "$OMP_VERDICTS" | sed -n "$((i + 1))p")
 
   if [ "$IS_CORRECTION" = "true" ]; then
     CORRECTION_TOTAL=$((CORRECTION_TOTAL + 1))
@@ -70,11 +70,11 @@ for i in $(seq 0 $((CASE_COUNT - 1))); do
     [ "$SHELL_MATCH" = "true" ] && FALSE_TRIGGERS=$((FALSE_TRIGGERS + 1))
   fi
 
-  if [ "$SHELL_MATCH" = "$EXPECT" ] && [ "$PI_MATCH" = "$EXPECT" ]; then
+  if [ "$SHELL_MATCH" = "$EXPECT" ] && [ "$OMP_MATCH" = "$EXPECT" ]; then
     PASS=$((PASS + 1))
   else
     FAIL=$((FAIL + 1))
-    FAILURES+=("$NAME: expected match=$EXPECT, got stop-extract=$SHELL_MATCH pi=$PI_MATCH")
+    FAILURES+=("$NAME: expected match=$EXPECT, got stop-extract=$SHELL_MATCH omp=$OMP_MATCH")
   fi
 done
 

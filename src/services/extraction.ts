@@ -13,10 +13,9 @@ export interface ExtractedCandidate {
 }
 
 // The scope-classification rule below is a condensed copy of the "Global scope discipline" text
-// in commands/memory.md and integrations/pi/asaki-memory.ts's /memory command — keep all three in
+// in commands/memory.md and integrations/omp/asaki-memory.ts's /memory command — keep all three in
 // sync. Those two apply the rule at audit time (after the fact); this applies it at extraction
 // time (before a memory is even created), so a candidate shouldn't need a later RESCOPE at all.
-//
 // Modeled on mem0's fact-retrieval prompt design (role-scoped extraction + few-shot examples
 // instead of prose-only rules — an 8B model follows worked examples far more reliably than
 // abstract instructions). Unlike mem0's user-only rule, both roles remain eligible here because
@@ -84,9 +83,8 @@ Output: {"candidates":[]}
 Input: Assistant: 点点数据的 App 详情页是 JS SPA，WebFetch 抓不到价格，后续改用官方 API。
 Output: {"candidates":[{"content":"点点数据的 App 详情页无法通过 WebFetch 获取价格，相关任务改用官方 API。","kind":"task_learning","importance":0.5,"scope":"project"}]}
 
-Input: Assistant: 已从 Pi 配置中彻底移除 Ponytail 包、extension、skills 和配置引用，并通过 TypeScript 检查。
-Output: {"candidates":[{"content":"Pi 配置已彻底移除 Ponytail 包、extension、skills 和配置引用，并通过 TypeScript 检查。","kind":"bug_fix","importance":0.6,"scope":"project"}]}
-
+Input: Assistant: 已从 OMP 配置中彻底移除 Ponytail 包、extension、skills 和配置引用，并通过 TypeScript 检查。
+Output: {"candidates":[{"content":"OMP 配置已彻底移除 Ponytail 包、extension、skills 和配置引用，并通过 TypeScript 检查。","kind":"bug_fix","importance":0.6,"scope":"project"}]}
 Input: Assistant: type: fix
 Output: {"candidates":[]}
 

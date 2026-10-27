@@ -1,10 +1,9 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import { Text } from "@oh-my-pi/pi-tui";
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { Type } from "typebox";
 
 const API_BASE = "https://asaki-memory-manager.YOUR_SUBDOMAIN.workers.dev";
 const DEFAULT_USER_ID = "asaki";
@@ -80,17 +79,15 @@ const TRACE_SENSITIVE_RE_LIST = [
   /(?:^|[\s"'=:])[^\s"']*(?:token|secret)[^\s"']*\.(?:json|txt|yaml|yml|conf)\b/i,
 ];
 
-// Pi's own tool whitelist (plan §3.3), verified against the installed package: lowercase names,
-// `path` rather than `file_path`, and `find` where Claude Code has `Glob`. Anything not listed
-// emits the tool name alone. This is a per-client table, NOT one shared literal — KEEP the
-// BEHAVIOUR in sync with CLAUDE_TRACE_TOOLS in integrations/claude-code/build-delta.mjs.
-const PI_TRACE_TOOLS: Record<string, { arg: string; shape: "command" | "path" | "text" }> = {
+// OMP tool names and argument shapes are client-specific; never trace free-form tool arguments.
+// Keep this table in sync with CLAUDE_TRACE_TOOLS in integrations/claude-code/build-delta.mjs.
+const OMP_TRACE_TOOLS: Record<string, { arg: string; shape: "command" | "path" | "text" | "edit" }> = {
   bash: { arg: "command", shape: "command" },
-  edit: { arg: "path", shape: "path" },
+  edit: { arg: "input", shape: "edit" },
+  apply_patch: { arg: "input", shape: "edit" },
   write: { arg: "path", shape: "path" },
   read: { arg: "path", shape: "path" },
-  ls: { arg: "path", shape: "path" },
-  find: { arg: "pattern", shape: "text" },
+  glob: { arg: "path", shape: "path" },
   grep: { arg: "pattern", shape: "text" },
 };
 
@@ -163,7 +160,7 @@ function parseUnitScoreEnv(raw: unknown, def: number): number {
 }
 // #endregion
 
-// --- standing-rules:begin (KEEP IN SYNC: src/services/standingRules.ts <-> integrations/pi/asaki-memory.ts) ---
+// --- standing-rules:begin (KEEP IN SYNC: src/services/standingRules.ts <-> integrations/omp/asaki-memory.ts) ---
 export const STANDING_RULES_DEFAULT_KINDS = ['rule', 'preference'] as const;
 export const STANDING_RULES_DEFAULT_MAX = 20;
 export const STANDING_RULES_MAX_CHARS = 4000;
@@ -304,7 +301,7 @@ export function renderStandingRulesBlock(items: StandingRuleItem[], options: Sta
 
 // Session-start project digest — the non-directive complement of the standing-rule block
 // above (see src/services/projectDigest.ts for the full contract).
-// --- project-digest:begin (KEEP IN SYNC: src/services/projectDigest.ts <-> integrations/pi/asaki-memory.ts) ---
+// --- project-digest:begin (KEEP IN SYNC: src/services/projectDigest.ts <-> integrations/omp/asaki-memory.ts) ---
 export const PROJECT_DIGEST_KNOWN_KINDS = [
   'preference',
   'rule',
@@ -548,7 +545,7 @@ function memoryConfig() {
     // Both default ON (plan §11.1). Correction mode gates the correction prompt/schema, the
     // extra POST fields, the prior-context block, the prior-candidate line and the throttle
     // override; action trace gates only the `Tool:` lines inside the delta. Set either to 0 (env or
-    // ~/.pi/agent/asaki-memory.json) to fall back: with correction mode off the prompt, the schema,
+    // ~/.omp/agent/asaki-memory.json) to fall back: with correction mode off the prompt, the schema,
     // the POST body and the call frequency are what they were before, and the input text is
     // byte-identical ONLY when action trace is off too. Action trace sends one redacted
     // `Tool: <name> <arg>` line per tool call off-machine; paths/URIs/hosts are rewritten but
@@ -592,14 +589,15 @@ function memoryConfig() {
     ),
     classifierModel:
       process.env.ASAKI_MEMORY_CLASSIFIER_MODEL ||
-      process.env.PI_ATOMIC_COMMIT_MESSAGE_MODEL ||
       stringConfig(fileConfig, "classifierModel", "classifier_model") ||
       DEFAULT_CLASSIFIER_MODEL,
   };
 }
 
 function agentDir() {
-  return process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+  const configRoot = join(homedir(), ".omp");
+  const profile = process.env.OMP_PROFILE?.trim();
+  return profile && profile !== "default" ? join(configRoot, "profiles", profile, "agent") : join(configRoot, "agent");
 }
 
 function memoryConfigPath() {
@@ -674,9 +672,9 @@ function resolveProjectId(ctx: unknown, explicit?: string): string | undefined {
 
 // #region asaki-project-context
 // Canonical project-context resolution — MIRROR of integrations/claude-code/project-context.mjs.
-// Both copies are executed against the same table by `npm run eval:project-context`, which loads
-// this region through scripts/pi-trace-region.mjs, so keep the region markers intact and keep the
-// behaviour (not the syntax) identical to the .mjs original. Rationale for the whole mechanism is
+// Both copies are executed against the same table by `npm run eval:project-context`,
+// which loads this region through scripts/omp-extension-regions.mjs. Keep the region markers intact
+// and keep the behaviour (not the syntax) identical to the .mjs original. Rationale for the whole
 // documented at the top of that file: project_id used to be the session cwd's git-root basename,
 // which files every memory of an orchestrator-hosted session under the orchestrator repository.
 type ProjectContextIo = {
@@ -993,7 +991,7 @@ async function memoryRequest(path: string, body: unknown, signal?: AbortSignal, 
   assertSafeBaseUrl(baseUrl);
   if (!apiKey) {
     throw new Error(
-      "ASAKI_MEMORY_API_KEY is not set. Set it to the same value as the Cloudflare Worker ADMIN_API_KEY secret before starting pi.",
+      "ASAKI_MEMORY_API_KEY is not set. Set it to the same value as the Cloudflare Worker ADMIN_API_KEY secret before starting omp.",
     );
   }
 
@@ -1314,7 +1312,7 @@ async function autoInjectMemory(prompt: string, ctx: unknown, signal?: AbortSign
         user_id: config.userId,
         project_id: resolveProjectId(ctx),
         session_id: config.sessionId || undefined,
-        // top_k is read per call (never frozen at import time, so a new Pi process picks up a
+        // top_k is read per call (never frozen at import time, so a new OMP session picks up a
         // changed env), and the SAME value goes to the request and to the formatter below.
         top_k: config.autoInjectTopK,
         // The client already drops sub-threshold results; sending the validated score lets the
@@ -1357,7 +1355,7 @@ function isRealProject(ctx: unknown): boolean {
 // hint (the classifier is told to answer flag=false when unsure, so quiet stretches are normal).
 // Only the Claude Code client currently FILLS them — the ledger lives in that hook's on-disk
 // state dir (`$TMPDIR/asaki-memory-stop-extract/health.json`) and this extension keeps no
-// on-disk classifier state at all, so Pi always passes them through as null. The fields exist
+// on-disk classifier state at all, so OMP always passes them through as null. The fields exist
 // here anyway because this builder and asaki_banner_line() are one sync set: the field order and
 // the omit-whole discipline have to match byte for byte on every state the matrix renders.
 type SessionBannerState = {
@@ -1397,12 +1395,12 @@ function classifierBannerField(config: ReturnType<typeof memoryConfig>): string 
 }
 
 // Session-start memory loader. The banner's memory count and BOTH injected blocks (standing
-// rules, project digest) come from one /v1/memories/list call: Pi rebuilds the system prompt on
+// rules, project digest) come from one /v1/memories/list call: OMP rebuilds the system prompt on
 // every agent run, and `session_start` can overlap `before_agent_start`, so the RAW memory list
 // is cached per process — including the in-flight promise, so two overlapping misses share a
 // single request instead of firing two. Only the raw list is cached; every block is re-rendered
 // from the CURRENT config, so flipping a switch or a cap never replays a stale block. The key
-// covers the backend identity too, so pointing Pi at another baseUrl mid-process refetches
+// covers the backend identity too, so pointing OMP at another baseUrl mid-process refetches
 // rather than serving the previous backend's memories; every session boundary clears it.
 const SESSION_MEMORIES_CACHE_MS = 10 * 60 * 1000;
 let sessionMemoriesCache: { key: string; expiresAt: number; memories: StandingRuleItem[] } | null = null;
@@ -1549,7 +1547,7 @@ function cleanMemoryText(text: string): string {
 // case-insensitive, multi-line, any number of blocks; an UNCLOSED `<private>` strips to the end of
 // that segment; an orphan `</private>` drops the tag text only. Independent of the credential gate
 // — both stay on. It only affects THIS local delta build: it retracts nothing already stored (that
-// is asaki_memory_delete) and does not touch Pi's own session history.
+// is asaki_memory_delete) and does not touch OMP's own session history.
 const PRIVATE_BLOCK_RE = /<private\s*>[\s\S]*?<\/private\s*>/gi;
 const PRIVATE_OPEN_RE = /<private\s*>[\s\S]*$/i;
 const PRIVATE_CLOSE_RE = /<\/private\s*>/gi;
@@ -1628,20 +1626,46 @@ function redactTraceCommand(command: string, repoRoot: string): string {
     .join(" ");
 }
 
-// One Pi ToolCall → one trace line, or null when the whole line must be dropped. The gate runs
+// One OMP tool call → one trace line, or null when the whole line must be dropped. The gate runs
 // on the ORIGINAL argument (step 1) because redaction would rewrite `ssh -i /home/a/.ssh/id_x`
 // into `ssh -i <path>`, which no longer matches the `.ssh/` rule; truncation runs last (step 3)
 // so it can neither bisect a credential nor cut away a token the gate was about to catch.
+function editPathsFromInput(args: Record<string, unknown>, repoRoot: string): string[] {
+  const candidates: string[] = [];
+  if (typeof args.path === "string") candidates.push(args.path);
+  if (typeof args.input === "string") {
+    for (const match of args.input.matchAll(/^\[([^\]\r\n]+)\]$/gm)) {
+      candidates.push(match[1].replace(/#[0-9A-F]{4}$/, ""));
+    }
+    for (const match of args.input.matchAll(/^\*\*\* (?:Add|Delete|Update) File: ([^\r\n]+)$/gm)) candidates.push(match[1].trim());
+    for (const match of args.input.matchAll(/^\*\*\* Edit File: ([^\r\n]+)$/gm)) candidates.push(match[1].trim());
+    for (const match of args.input.matchAll(/^\*\*\* Move to: ([^\r\n]+)$/gm)) candidates.push(match[1].trim());
+  }
+  return [...new Set(candidates.flatMap((path) => {
+    const safePath = repoRelativeOrNull(path, repoRoot);
+    return safePath ? [safePath] : [];
+  }))];
+}
+
 function traceLineForToolCall(call: unknown, repoRoot: string): string | null {
   const toolCall = call as { name?: unknown; arguments?: Record<string, unknown> } | null;
   const name = typeof toolCall?.name === "string" ? toolCall.name.trim() : "";
   if (!name) return null;
   const label = `Tool: ${name.toLowerCase()}`;
-
-  const entry = PI_TRACE_TOOLS[name.toLowerCase()];
+  const entry = OMP_TRACE_TOOLS[name.toLowerCase()];
   if (!entry) return label;
+  const args = toolCall?.arguments && typeof toolCall.arguments === "object" ? toolCall.arguments : {};
 
-  const raw = toolCall?.arguments && typeof toolCall.arguments === "object" ? toolCall.arguments[entry.arg] : undefined;
+  if (entry.shape === "edit") {
+    const raw = typeof args.input === "string" ? args.input : typeof args.path === "string" ? args.path : "";
+    if (!raw.trim()) return label;
+    if (containsTraceSensitiveText(raw) || containsSensitiveText(raw)) return null;
+    const paths = editPathsFromInput(args, repoRoot);
+    const arg = paths.join(", ").slice(0, TRACE_ARG_MAX_CHARS);
+    return arg ? `${label} ${arg}` : label;
+  }
+
+  const raw = args[entry.arg];
   if (typeof raw !== "string" || !raw.trim()) return label;
   if (containsTraceSensitiveText(raw) || containsSensitiveText(raw)) return null;
 
@@ -1683,9 +1707,9 @@ export interface ExtractionTextOptions {
   priorCandidate?: string;
 }
 
-// Pi has no cross-delta tail file (unlike Claude Code it sees the whole message list every
-// agent_end), so the equivalent of the tail carry-over is marking where the current turn starts:
-// everything from the last `role: "user"` message onward is the current delta, everything above
+// OMP has no cross-delta tail file (it re-reads the whole message list every agent_end), so the
+// equivalent of the tail carry-over is marking where the current turn starts:
+// everything from the last `role: "user"` message onward is the current delta, and everything above
 // it is already-processed antecedent context. Nothing is collapsed, deduplicated or reordered —
 // the trace line format carries no timestamp, so order is the only temporal signal.
 function buildExtractionText(messages: unknown, options: ExtractionTextOptions = {}): string {
@@ -1715,7 +1739,7 @@ function buildExtractionText(messages: unknown, options: ExtractionTextOptions =
     }
   }
 
-  // Pi keeps no cross-delta offset (it re-reads the whole message list every agent_end), so
+  // OMP keeps no cross-delta offset (it re-reads the whole message list every agent_end), so
   // "skip and advance the cursor" collapses to returning an empty delta — autoExtractMemory()
   // already short-circuits on `!text.trim()`.
   if (lastUserSawPrivate && !lastUserSurvived) return "";
@@ -1776,7 +1800,7 @@ function resetSessionScopedState(): void {
   resetSessionMemoriesCache();
 }
 
-// Pi's copy of the throttle state machine (plan §4.5), identical in rules to `throttle_decision`
+// The OMP throttle state machine (plan §4.5), identical in rules to `throttle_decision`
 // in integrations/claude-code/stop-extract.sh: an override never moves the window anchor, so a
 // correction storm cannot replenish its own override budget. At most 2 calls per fixed window.
 type ThrottleDecision = "normal" | "override" | "skip";
@@ -1793,7 +1817,7 @@ function throttleDecision(now: number, intervalMs: number, signal: boolean): Thr
   return "skip";
 }
 
-// Offset consumption has no analogue here (Pi re-reads the whole message list every turn), so
+// Offset consumption has no analogue here (OMP re-reads the whole message list every turn), so
 // this only decides whether a failure is worth reporting as retryable. KEEP the classes in sync
 // with `outcome_for_status` in integrations/claude-code/stop-extract.sh (plan §9.3).
 function outcomeForStatus(status: number): "advance" | "hold" {
@@ -1853,7 +1877,7 @@ Two contrastive examples:
 - "已将变更推送至 origin/main，提交为 8df25dd" -> flag=false (one-off delivery status, not durable memory).
 - "Node.js new URL().hostname 对 IPv6 loopback 返回 [::1]" -> flag=false (generic technical trivia, not a user/project memory).
 - "点点数据的 App 详情页是 JS SPA，WebFetch 抓不到价格，后续改用官方 API" -> flag=true, scope=project (tool/site-specific learning never belongs in global scope).
-- "已从 Pi 配置中彻底移除 Ponytail 包、extension、skills 和配置引用" -> flag=true, scope=project (durable current configuration state).
+- "已从 OMP 配置中彻底移除 Ponytail 包、extension、skills 和配置引用" -> flag=true, scope=project (durable current configuration state).
 - "type: fix" -> flag=false (vague commit fragment with no self-contained durable fact).
 - "Music playing now" -> flag=false (transient UI/runtime status).
 - "先强制使用 Chafa；后续确认已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp" -> flag=true, scope=project, but distill only the final Kgp state (superseded intermediate states must not become separate memories).
@@ -1872,7 +1896,7 @@ Two contrastive examples:
 - "已把审计流程的第 4 步补写进 commands/memory.md 的 workflow 段落" -> flag=false (a completed one-off edit to a data or doc file is already recorded by that file; only the durable configuration or behaviour state it leaves behind would qualify).
 - "复核了一遍现有规则，push 前检查明文密钥这条依然有效，本轮没有新增或修改任何规则" -> flag=false (restating an already-recorded rule adds nothing; flag only when the delta establishes or changes it).
 - "修复 asaki-memory 记忆提取全线失效的 bash 3.2 负偏移 bug，已推送 e07ac92 并验证部署" -> flag=false (a short release/hash recap of a fix already captured in the project is a duplicate, not a second durable memory).
-- "Removed large memory injection at Pi session start, now only shows compact status banner" -> flag=false (an intermediate rollout snapshot that was superseded by the current session-start design is not stable memory).
+- "Removed large memory injection at OMP session start, now only shows compact status banner" -> flag=false (an intermediate rollout snapshot that was superseded by the current session-start design is not stable memory).
 - When the user correction is another adjustment to the same visual value (colour, opacity, padding, radius, or offset) during an active tuning loop, and its antecedent is an earlier candidate or agent proposal from that session -> flag=false. Intermediate visual tuning states are expected to be superseded; only an explicitly reported converged final state may qualify.
 - "Prior memory candidate: 虚拟工作区高亮改用半透明" … "User: 不要颜色了，只加边框" -> flag=false (another visual-tuning redirect is an intermediate state, even when it rejects a prior candidate).
 - "保留调研文件" … "调研的文件删掉"; "update data/names-db.json" … "it is gitignored, skip that step"; or "also change X in this same PR" -> flag=false (single-task cleanup and PR scope, not standing rules).
@@ -1880,7 +1904,7 @@ Two contrastive examples:
 - "paneru 启用 focus_follows_mouse = true" -> flag=false (a bare literal repository config assignment belongs only in its source file). By contrast, a completed cross-repository behavioural state such as "two repositories now use build caching" remains flag=true even when project attribution is ambiguous.
 - "tab 改为总体/全局引导/付费引导，默认显示总体；卡片和进组数据都删" -> flag=false (the user naming what one page, chart or field of one deliverable should look like is a build instruction for the current iteration, not a memory; it qualifies only when the user says it holds from now on, or when the correction is about a way of working rather than one screen). This covers instructions about an artefact, never completed work: an assistant report of a FIX that names a mechanism and the failure mode it removes stays flag=true even when the change is a visual one.
 - "Assistant: 等 AU 转化分析完成之后再做 Data 页的联动" … "User: data页不做联动" -> flag=false (a verdict on whether one page of one deliverable gets one feature dies with that version of the page; it is a correction, and it is still not a durable rule, so it must not be promoted to a prohibition in order to stop the feature being proposed again). This narrow test is about the CONTENT of one artefact — which page shows what — and never about how documents, code or reports are structured in general: a verdict that documents should rely on their existing heading levels instead of a table of contents stays flag=true, because it is a reusable way of writing docs that merely happened to surface on one file.
-- "产物交付前应先对每个元素应用消融原则" -> flag=false (the body of a general output standard that is already written in ~/.claude/CLAUDE.md, ~/.pi/agent/AGENTS.md or a project AGENTS.md is injected into every session already, so restating it as a memory adds nothing and only spends injection budget). Apply this only when the delta itself shows that text being quoted or paraphrased out of such a file; never withhold a candidate on a guess that some rule like it might already exist somewhere.
+- "产物交付前应先对每个元素应用消融原则" -> flag=false (the body of a general output standard that is already written in ~/.claude/CLAUDE.md, ~/.omp/agent/AGENTS.md or a project AGENTS.md is injected into every session already, so restating it as a memory adds nothing and only spends injection budget). Apply this only when the delta itself shows that text being quoted or paraphrased out of such a file; never withhold a candidate on a guess that some rule like it might already exist somewhere.
 - "Super+Enter 现在打开一个新的终端窗口" or "顶栏现在按 WiFi、音量、电池的顺序排" -> flag=false (in an environment or dotfiles repository, what a key binding or a status bar currently does is configuration state whose real source is the config file; record it only when the delta also carries the reasoning behind that choice).
 - "Herdr feature completed: tests and e2e passed, lint clean, docs synced" -> flag=false (shipped status without a reusable learning).
 - A candidate that writes a host, endpoint, or credential field which an existing nondisclosure rule says not to persist -> flag=false (memory cannot violate nondisclosure).
@@ -2002,7 +2026,7 @@ Non-correction examples (unchanged rules):
 - "已将变更推送至 origin/main，提交为 8df25dd" -> flag=false (one-off delivery status, not durable memory).
 - "Node.js new URL().hostname 对 IPv6 loopback 返回 [::1]" -> flag=false (generic technical trivia, not a user/project memory).
 - "点点数据的 App 详情页是 JS SPA，WebFetch 抓不到价格，后续改用官方 API" -> flag=true, scope=project (tool/site-specific learning never belongs in global scope).
-- "已从 Pi 配置中彻底移除 Ponytail 包、extension、skills 和配置引用" -> flag=true, scope=project (durable current configuration state).
+- "已从 OMP 配置中彻底移除 Ponytail 包、extension、skills 和配置引用" -> flag=true, scope=project (durable current configuration state).
 - "type: fix" -> flag=false (vague commit fragment with no self-contained durable fact).
 - "Music playing now" -> flag=false (transient UI/runtime status).
 - "先强制使用 Chafa；后续确认已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp" -> flag=true, scope=project, but distill only the final Kgp state (superseded intermediate states must not become separate memories).
@@ -2021,7 +2045,7 @@ Non-correction examples (unchanged rules):
 - "已把审计流程的第 4 步补写进 commands/memory.md 的 workflow 段落" -> flag=false (a completed one-off edit to a data or doc file is already recorded by that file; only the durable configuration or behaviour state it leaves behind would qualify).
 - "复核了一遍现有规则，push 前检查明文密钥这条依然有效，本轮没有新增或修改任何规则" -> flag=false (restating an already-recorded rule adds nothing; flag only when the delta establishes or changes it).
 - "修复 asaki-memory 记忆提取全线失效的 bash 3.2 负偏移 bug，已推送 e07ac92 并验证部署" -> flag=false (a short release/hash recap of a fix already captured in the project is a duplicate, not a second durable memory).
-- "Removed large memory injection at Pi session start, now only shows compact status banner" -> flag=false (an intermediate rollout snapshot that was superseded by the current session-start design is not stable memory).
+- "Removed large memory injection at OMP session start, now only shows compact status banner" -> flag=false (an intermediate rollout snapshot that was superseded by the current session-start design is not stable memory).
 - When the user correction is another adjustment to the same visual value (colour, opacity, padding, radius, or offset) during an active tuning loop, and its antecedent is an earlier candidate or agent proposal from that session -> flag=false. Intermediate visual tuning states are expected to be superseded; only an explicitly reported converged final state may qualify.
 - "Prior memory candidate: 虚拟工作区高亮改用半透明" … "User: 不要颜色了，只加边框" -> flag=false (another visual-tuning redirect is an intermediate state, even when it rejects a prior candidate).
 - "保留调研文件" … "调研的文件删掉"; "update data/names-db.json" … "it is gitignored, skip that step"; or "also change X in this same PR" -> flag=false (single-task cleanup and PR scope, not standing rules).
@@ -2029,7 +2053,7 @@ Non-correction examples (unchanged rules):
 - "paneru 启用 focus_follows_mouse = true" -> flag=false (a bare literal repository config assignment belongs only in its source file). By contrast, a completed cross-repository behavioural state such as "two repositories now use build caching" remains flag=true even when project attribution is ambiguous.
 - "tab 改为总体/全局引导/付费引导，默认显示总体；卡片和进组数据都删" -> flag=false (the user naming what one page, chart or field of one deliverable should look like is a build instruction for the current iteration, not a memory; it qualifies only when the user says it holds from now on, or when the correction is about a way of working rather than one screen). This covers instructions about an artefact, never completed work: an assistant report of a FIX that names a mechanism and the failure mode it removes stays flag=true even when the change is a visual one.
 - "Assistant: 等 AU 转化分析完成之后再做 Data 页的联动" … "User: data页不做联动" -> flag=false (a verdict on whether one page of one deliverable gets one feature dies with that version of the page; it is a correction, and it is still not a durable rule, so it must not be promoted to a prohibition in order to stop the feature being proposed again). This narrow test is about the CONTENT of one artefact — which page shows what — and never about how documents, code or reports are structured in general: a verdict that documents should rely on their existing heading levels instead of a table of contents stays flag=true, because it is a reusable way of writing docs that merely happened to surface on one file.
-- "产物交付前应先对每个元素应用消融原则" -> flag=false (the body of a general output standard that is already written in ~/.claude/CLAUDE.md, ~/.pi/agent/AGENTS.md or a project AGENTS.md is injected into every session already, so restating it as a memory adds nothing and only spends injection budget). Apply this only when the delta itself shows that text being quoted or paraphrased out of such a file; never withhold a candidate on a guess that some rule like it might already exist somewhere.
+- "产物交付前应先对每个元素应用消融原则" -> flag=false (the body of a general output standard that is already written in ~/.claude/CLAUDE.md, ~/.omp/agent/AGENTS.md or a project AGENTS.md is injected into every session already, so restating it as a memory adds nothing and only spends injection budget). Apply this only when the delta itself shows that text being quoted or paraphrased out of such a file; never withhold a candidate on a guess that some rule like it might already exist somewhere.
 - "Super+Enter 现在打开一个新的终端窗口" or "顶栏现在按 WiFi、音量、电池的顺序排" -> flag=false (in an environment or dotfiles repository, what a key binding or a status bar currently does is configuration state whose real source is the config file; record it only when the delta also carries the reasoning behind that choice).
 - "Herdr feature completed: tests and e2e passed, lint clean, docs synced" -> flag=false (shipped status without a reusable learning).
 - A candidate that writes a host, endpoint, or credential field which an existing nondisclosure rule says not to persist -> flag=false (memory cannot violate nondisclosure).
@@ -2114,7 +2138,7 @@ function summarizeCandidateDecision(data: any, fallbackText: string): string | n
   return null;
 }
 
-async function classifyMemoryCandidate(text: string, ctx: unknown, pi: ExtensionAPI, correctionHint = ""): Promise<ClassifierResult | null> {
+async function classifyMemoryCandidate(text: string, ctx: unknown, omp: ExtensionAPI, correctionHint = ""): Promise<ClassifierResult | null> {
   const config = memoryConfig();
   // The project context block is deterministic client-computed state, not conversation content:
   // it goes ABOVE the delta so the model can attribute the memory to a repository instead of the
@@ -2123,32 +2147,39 @@ async function classifyMemoryCandidate(text: string, ctx: unknown, pi: Extension
 
 Delta:
 ${text}`;
-  const result = await pi
-    .exec(
-      "pi",
-      [
-        "--model",
-        config.classifierModel,
-        "--thinking",
-        "off",
-        "--mode",
-        "text",
-        "--print",
-        "--no-session",
-        "--no-tools",
-        "--no-extensions",
-        "--no-skills",
-        "--no-prompt-templates",
-        "--no-context-files",
-        "--system-prompt",
-        config.correctionMode ? CORRECTION_SYSTEM_PROMPT : CLASSIFIER_SYSTEM_PROMPT,
-        prompt,
-      ],
-      { cwd: cwdFromContext(ctx), timeout: CLASSIFIER_TIMEOUT_MS },
-    )
-    .catch(() => undefined);
-  if (result?.code !== 0 || !result.stdout.trim()) return null;
-  return parseClassifierResult(result.stdout);
+  const sessionDir = mkdtempSync(join(tmpdir(), "asaki-omp-classifier-"));
+  // Keep the headless OMP run out of the target repo so it receives only the explicit project
+  // context block above rather than loading a second copy of that repo's instructions.
+  try {
+    const result = await omp
+      .exec(
+        "omp",
+        [
+          "--model",
+          config.classifierModel,
+          "--thinking",
+          "off",
+          "--mode",
+          "text",
+          "--print",
+          "--session-dir",
+          sessionDir,
+          "--no-tools",
+          "--no-extensions",
+          "--no-skills",
+          "--no-rules",
+          "--system-prompt",
+          config.correctionMode ? CORRECTION_SYSTEM_PROMPT : CLASSIFIER_SYSTEM_PROMPT,
+          prompt,
+        ],
+        { cwd: sessionDir, timeout: CLASSIFIER_TIMEOUT_MS },
+      )
+      .catch(() => undefined);
+    if (result?.code !== 0 || !result.stdout.trim()) return null;
+    return parseClassifierResult(result.stdout);
+  } finally {
+    rmSync(sessionDir, { recursive: true, force: true });
+  }
 }
 
 async function writeClassifiedMemory(candidate: ClassifierResult, ctx: unknown): Promise<string | null> {
@@ -2178,7 +2209,7 @@ async function writeClassifiedMemory(candidate: ClassifierResult, ctx: unknown):
     : {};
   const body: Record<string, unknown> = {
     user_id: config.userId,
-    source: "pi:agent-end-classifier",
+    source: "omp:agent-end-classifier",
     candidates: [
       {
         content: candidate.text,
@@ -2203,8 +2234,7 @@ async function writeClassifiedMemory(candidate: ClassifierResult, ctx: unknown):
   try {
     data = await memoryRequest("/v1/memories/candidates", body, timeoutSignal(AUTO_EXTRACT_TIMEOUT_MS));
   } catch (error) {
-    // Classify the failure the same way the Claude Code hook does (plan §9.3). Pi has no
-    // transcript offset, so "terminal" only decides how the failure is described: a deterministic
+    // OMP has no transcript offset, so "terminal" only decides how the failure is described: a deterministic
     // body rejection will never be accepted, everything else is worth another turn.
     if (error instanceof MemoryApiError) {
       const repairable = error.status === 401 || error.status === 403 ? "; check ASAKI_MEMORY_API_KEY" : "";
@@ -2263,7 +2293,7 @@ async function autoExtractMemory(messages: unknown, ctx: unknown, pi: ExtensionA
       text,
       user_id: config.userId,
       project_id: resolveProjectId(ctx),
-      source: "pi:auto-extract",
+      source: "omp:auto-extract",
     };
     if (config.sessionId) body.session_id = config.sessionId;
 
@@ -2273,7 +2303,7 @@ async function autoExtractMemory(messages: unknown, ctx: unknown, pi: ExtensionA
 
   if (!config.autoClassifier) return null;
 
-  // Cloud auto-extract is off by default. Pi can still run a local headless classifier using
+  // Cloud auto-extract is off by default. OMP can still run a local headless classifier using
   // the same model-selection pattern as the atomic-commit extension, then write the pre-distilled
   // candidate via the same HTTP candidate endpoint as asaki_memory_add.
   lastAutoExtractAt = now;
@@ -2287,21 +2317,11 @@ async function autoExtractMemory(messages: unknown, ctx: unknown, pi: ExtensionA
 }
 
 export default function (pi: ExtensionAPI) {
+  const z = pi.zod;
   pi.registerMessageRenderer("asaki-memory-context", (message, _options, theme) => {
     const content = typeof message.content === "string" ? message.content : String(message.content ?? "");
     const [firstLine] = content.split("\n");
     return new Text(`${theme.fg("toolTitle", "Asaki Memory")} ${firstLine}`, 0, 0);
-  });
-
-  // Pi renders custom session entries through registerEntryRenderer. omp's extension host has no
-  // such method (it exposes registerMessageRenderer only), and an unguarded call throws there
-  // before any registerTool runs — the whole extension, tools included, then fails to load. The
-  // optional call keeps the styled banner on Pi and falls back to the host's default entry
-  // rendering elsewhere; the banner entry itself is still appended on both hosts.
-  pi.registerEntryRenderer?.("asaki-memory-banner", (entry, _options, theme) => {
-    const content = typeof entry.data === "string" ? entry.data : String(entry.data ?? "");
-    const [, ...details] = content.split("\n");
-    return new Text(`${theme.fg("mdHeading", "[Memory]")}\n${theme.fg("dim", `  ${details.join(" ")}`)}`, 0, 0);
   });
 
   // Every session boundary (startup | reload | new | resume | fork) invalidates the prior
@@ -2328,10 +2348,8 @@ export default function (pi: ExtensionAPI) {
       loadStandingRules(ctx, ctx.signal),
       loadProjectDigest(ctx, ctx.signal),
     ]);
-    // Pi passes `systemPrompt` as a single string; omp passes the rendered block ARRAY. The value
-    // returned here REPLACES the provider system prompt on both hosts, so normalise before the
-    // typeof-string filter — an array would otherwise be dropped and the host would lose its own
-    // base prompt entirely.
+    // OMP supplies `systemPrompt` as rendered blocks. The returned value replaces the whole
+    // provider prompt, so preserve its full base before appending Asaki's memory blocks.
     const basePrompt = Array.isArray(event.systemPrompt) ? event.systemPrompt : [event.systemPrompt];
     const systemPrompt = [...basePrompt, memoryPrecheckInstruction(event.prompt), standingRules?.text, projectDigest?.text]
       .filter((part) => typeof part === "string" && part.length > 0)
@@ -2452,37 +2470,13 @@ Safety:
       "Use asaki_memory_search only when the task depends on remembered preferences, prior project decisions, conventions, task learnings, or explicitly requested past context.",
       "asaki_memory_search searches global memories plus current project memories by default; set scope only when intentionally narrowing results.",
     ],
-    parameters: Type.Object({
-      query: Type.String({
-        description: "Natural-language query for relevant memories.",
-      }),
-      top_k: Type.Optional(
-        Type.Integer({
-          description: "Maximum number of memories to return.",
-          minimum: 1,
-          maximum: 50,
-        }),
-      ),
-      scope: Type.Optional(
-        Type.Union([Type.Literal("global"), Type.Literal("project"), Type.Literal("session")], {
-          description: "Optional scope filter. Omit to search global plus current project/session memories.",
-        }),
-      ),
-      project_id: Type.Optional(
-        Type.String({
-          description: "Optional project id override. Defaults to ASAKI_MEMORY_PROJECT_ID or git repo basename.",
-        }),
-      ),
-      session_id: Type.Optional(
-        Type.String({
-          description: "Optional session id override.",
-        }),
-      ),
-      debug: Type.Optional(
-        Type.Boolean({
-          description: "Include score_details (semantic/keyword/entity/metadata breakdown) per result. Default off.",
-        }),
-      ),
+    parameters: z.object({
+      query: z.string().describe("Natural-language query for relevant memories."),
+      top_k: z.number().int().min(1).max(50).describe("Maximum number of memories to return.").optional(),
+      scope: z.enum(["global", "project", "session"]).describe("Optional scope filter. Omit to search global plus current project/session memories.").optional(),
+      project_id: z.string().describe("Optional project id override. Defaults to ASAKI_MEMORY_PROJECT_ID or git repo basename.").optional(),
+      session_id: z.string().describe("Optional session id override.").optional(),
+      debug: z.boolean().describe("Include score_details (semantic/keyword/metadata breakdown) per result. Default off.").optional(),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const config = memoryConfig();
@@ -2553,45 +2547,14 @@ Safety:
       "Do not store secrets, raw credentials, private tokens, or sensitive transient data with asaki_memory_add.",
       "For asaki_memory_add, use scope=global only for user-wide preferences/rules useful in ANY unrelated project (cross-project preferences, communication style, secret-handling rules); use scope=project for everything else, including project-specific tooling/bugs, conventions, decisions, workflows, task learnings, and bug fixes AND product/business decisions (metric definitions, customer-facing features) even when they feel foundational — importance and scope are independent. When genuinely ambiguous, default to scope=project; rescoping later is cheap, a wrongly-global memory pollutes every future project's context immediately.",
     ],
-    parameters: Type.Object({
-      text: Type.String({
-        description:
-          "Concise, self-contained memory text to store. Preference/rule: roughly 40-160 chars. Decision/workflow/bug_fix/task_learning: 1-2 sentences, at most roughly 200-300 chars. Summarize the durable takeaway only.",
-      }),
-      type: Type.Optional(
-        Type.String({
-          description: "Memory kind: preference, rule, fact, decision, task_learning, bug_fix, workflow. Legacy fixed/learned are accepted.",
-        }),
-      ),
-      scope: Type.Optional(
-        Type.Union([Type.Literal("global"), Type.Literal("project"), Type.Literal("session")], {
-          description: "Memory scope. Defaults to project.",
-        }),
-      ),
-      project_id: Type.Optional(
-        Type.String({
-          description: "Optional project id override. Defaults to ASAKI_MEMORY_PROJECT_ID or git repo basename.",
-        }),
-      ),
-      session_id: Type.Optional(
-        Type.String({
-          description: "Optional session id override.",
-        }),
-      ),
-      importance: Type.Optional(
-        Type.Number({
-          description: "Importance score between 0 and 1. Defaults to 0.6.",
-          minimum: 0,
-          maximum: 1,
-        }),
-      ),
-      confidence: Type.Optional(
-        Type.Number({
-          description: "Confidence score between 0 and 1. Defaults to 0.9.",
-          minimum: 0,
-          maximum: 1,
-        }),
-      ),
+    parameters: z.object({
+      text: z.string().describe("Concise, self-contained memory text to store. Preference/rule: roughly 40-160 chars. Decision/workflow/bug_fix/task_learning: 1-2 sentences, at most roughly 200-300 chars. Summarize the durable takeaway only."),
+      type: z.string().describe("Memory kind: preference, rule, fact, decision, task_learning, bug_fix, workflow. Legacy fixed/learned are accepted.").optional(),
+      scope: z.enum(["global", "project", "session"]).describe("Memory scope. Defaults to project.").optional(),
+      project_id: z.string().describe("Optional project id override. Defaults to ASAKI_MEMORY_PROJECT_ID or git repo basename.").optional(),
+      session_id: z.string().describe("Optional session id override.").optional(),
+      importance: z.number().min(0).max(1).describe("Importance score between 0 and 1. Defaults to 0.6.").optional(),
+      confidence: z.number().min(0).max(1).describe("Confidence score between 0 and 1. Defaults to 0.9.").optional(),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       // Local gate before any network call — the server rejects this too, but only after the
@@ -2612,7 +2575,7 @@ Safety:
           kind: normalizeKind(params.type),
           importance: params.importance ?? 0.6,
           confidence: params.confidence ?? 0.9,
-          source: "pi",
+          source: "omp",
         };
         if (scope === "project") candidate.project_id = projectId;
         if (scope === "session") candidate.session_id = sessionId;
@@ -2624,7 +2587,7 @@ Safety:
 
         const requestBody: Record<string, unknown> = {
           user_id: config.userId,
-          source: "pi",
+          source: "omp",
           candidates: [candidate],
         };
         if (scope === "project") requestBody.project_id = projectId;
@@ -2673,18 +2636,14 @@ Safety:
       "Use asaki_memory_list only during explicit memory audit or management tasks (e.g., /memory command).",
       "With scope omitted, visibility is global plus only the supplied/current project and session; use asaki_memory_project_list to discover every project.",
     ],
-    parameters: Type.Object({
-      scope: Type.Optional(
-        Type.Union([Type.Literal("global"), Type.Literal("project"), Type.Literal("session")], {
-          description: "Optional scope filter.",
-        }),
-      ),
-      project_id: Type.Optional(Type.String({ description: "Project id override." })),
-      session_id: Type.Optional(Type.String({ description: "Session id override." })),
-      kind: Type.Optional(Type.String({ description: "Filter by kind: preference, rule, fact, decision, task_learning, bug_fix, workflow." })),
-      status: Type.Optional(Type.String({ description: "Filter by status: active (default), archived, deleted, all." })),
-      limit: Type.Optional(Type.Integer({ description: "Max memories to return (1-100, default 50).", minimum: 1, maximum: 100 })),
-      offset: Type.Optional(Type.Integer({ description: "Pagination offset (default 0).", minimum: 0 })),
+    parameters: z.object({
+      scope: z.enum(["global", "project", "session"]).describe("Optional scope filter.").optional(),
+      project_id: z.string().describe("Project id override.").optional(),
+      session_id: z.string().describe("Session id override.").optional(),
+      kind: z.string().describe("Filter by kind: preference, rule, fact, decision, task_learning, bug_fix, workflow.").optional(),
+      status: z.string().describe("Filter by status: active (default), archived, deleted, all.").optional(),
+      limit: z.number().int().min(1).max(100).describe("Max memories to return (1-100, default 50).").optional(),
+      offset: z.number().int().min(0).describe("Pagination offset (default 0).").optional(),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const config = memoryConfig();
@@ -2737,8 +2696,8 @@ Safety:
       "Ids come from the session-start project-memory index lines, from asaki_memory_search / asaki_memory_list output, or from a review suggestion.",
       "Use asaki_memory_get whenever an excerpt is not enough: search truncates content and list only pages by recency, so this is the only way to read a memory whole.",
     ],
-    parameters: Type.Object({
-      ids: Type.Array(Type.String(), { description: "Memory ids to read (at most 20).", minItems: 1, maxItems: 20 }),
+    parameters: z.object({
+      ids: z.array(z.string()).min(1).max(20).describe("Memory ids to read (at most 20)."),
     }),
     async execute(_toolCallId, params, signal, onUpdate) {
       const config = memoryConfig();
@@ -2785,9 +2744,9 @@ Safety:
       "Use asaki_memory_project_list during whole-store memory audits so unregistered projects are not hidden.",
       "Page with limit and offset until no projects remain.",
     ],
-    parameters: Type.Object({
-      limit: Type.Optional(Type.Integer({ description: "Max projects to return (1-100, default 50).", minimum: 1, maximum: 100 })),
-      offset: Type.Optional(Type.Integer({ description: "Pagination offset (default 0).", minimum: 0 })),
+    parameters: z.object({
+      limit: z.number().int().min(1).max(100).describe("Max projects to return (1-100, default 50).").optional(),
+      offset: z.number().int().min(0).describe("Pagination offset (default 0).").optional(),
     }),
     async execute(_toolCallId, params, signal, onUpdate) {
       const config = memoryConfig();
@@ -2821,10 +2780,10 @@ Safety:
       "Use asaki_memory_lifecycle during an explicit /memory audit; it is read-only and never changes a memory.",
       "Long-idle standing rules are for the user to judge keep/retire — never propose auto-deleting them, and never demote them out of session injection.",
     ],
-    parameters: Type.Object({
-      project_id: Type.Optional(Type.String({ description: "Project id override; includes that project's rules alongside global ones." })),
-      idle_days: Type.Optional(Type.Integer({ description: "Idle threshold in days (1-3650, default 30 ≈ two 14-day audit cadences).", minimum: 1, maximum: 3650 })),
-      limit: Type.Optional(Type.Integer({ description: "Max rows per section (1-100, default 20).", minimum: 1, maximum: 100 })),
+    parameters: z.object({
+      project_id: z.string().describe("Project id override; includes that project's rules alongside global ones.").optional(),
+      idle_days: z.number().int().min(1).max(3650).describe("Idle threshold in days (1-3650, default 30 ≈ two 14-day audit cadences).").optional(),
+      limit: z.number().int().min(1).max(100).describe("Max rows per section (1-100, default 20).").optional(),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const config = memoryConfig();
@@ -2867,18 +2826,14 @@ Safety:
       "Use asaki_memory_review_create instead of asaki_memory_add for high-risk memories, global rules/preferences, low confidence candidates, or uncertain merges.",
       "Do not store secrets, raw credentials, private tokens, or sensitive transient data.",
     ],
-    parameters: Type.Object({
-      text: Type.String({ description: "Concise, self-contained memory candidate text." }),
-      type: Type.Optional(Type.String({ description: "Memory kind: preference, rule, fact, decision, task_learning, bug_fix, workflow." })),
-      scope: Type.Optional(
-        Type.Union([Type.Literal("global"), Type.Literal("project"), Type.Literal("session")], {
-          description: "Memory scope. Defaults to project.",
-        }),
-      ),
-      project_id: Type.Optional(Type.String({ description: "Optional project id override." })),
-      session_id: Type.Optional(Type.String({ description: "Optional session id override." })),
-      importance: Type.Optional(Type.Number({ description: "Importance score between 0 and 1. Defaults to 0.6.", minimum: 0, maximum: 1 })),
-      confidence: Type.Optional(Type.Number({ description: "Confidence score between 0 and 1. Defaults to 0.8.", minimum: 0, maximum: 1 })),
+    parameters: z.object({
+      text: z.string().describe("Concise, self-contained memory candidate text."),
+      type: z.string().describe("Memory kind: preference, rule, fact, decision, task_learning, bug_fix, workflow.").optional(),
+      scope: z.enum(["global", "project", "session"]).describe("Memory scope. Defaults to project.").optional(),
+      project_id: z.string().describe("Optional project id override.").optional(),
+      session_id: z.string().describe("Optional session id override.").optional(),
+      importance: z.number().min(0).max(1).describe("Importance score between 0 and 1. Defaults to 0.6.").optional(),
+      confidence: z.number().min(0).max(1).describe("Confidence score between 0 and 1. Defaults to 0.8.").optional(),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       // Local gate before any network call — mirrors integrations/mcp/asaki-memory.ts.
@@ -2896,7 +2851,7 @@ Safety:
         kind: normalizeKind(params.type),
         importance: params.importance ?? 0.6,
         confidence: params.confidence ?? 0.8,
-        source: "pi:review",
+        source: "omp:review",
       };
       if (scope === "project") candidate.project_id = projectId;
       if (scope === "session") candidate.session_id = sessionId;
@@ -2907,7 +2862,7 @@ Safety:
       });
 
       try {
-        const body: Record<string, unknown> = { user_id: config.userId, source: "pi:review", candidates: [candidate] };
+        const body: Record<string, unknown> = { user_id: config.userId, source: "omp:review", candidates: [candidate] };
         if (scope === "project") body.project_id = projectId;
         if (scope === "session") body.session_id = sessionId;
         const data = await memoryRequest("/v1/memories/reviews", body, signal);
@@ -2929,19 +2884,15 @@ Safety:
     description: "List pending or resolved reviews. pending_count always means all pending rows for the user across every scope/project, independent of page filters.",
     promptSnippet: "List pending Asaki memory reviews during memory audit or review workflow.",
     promptGuidelines: ["Use asaki_memory_review_list during /memory audits before modifying memories.", "With include_suggestions=true, set limit <= 12 and page with offset."],
-    parameters: Type.Object({
-      status: Type.Optional(Type.String({ description: "Filter by status: pending (default), resolved, all." })),
-      project_id: Type.Optional(Type.String({ description: "Project id override." })),
-      session_id: Type.Optional(Type.String({ description: "Session id override." })),
-      source: Type.Optional(Type.String({ description: "Source filter." })),
-      signal: Type.Optional(
-        Type.String({ description: "Filter by candidate signal: correction, preference, outcome, none. Corrections sort first regardless; use correction to see only them during an audit." }),
-      ),
-      limit: Type.Optional(Type.Integer({ description: "Max reviews to return (1-100, default 50).", minimum: 1, maximum: 100 })),
-      offset: Type.Optional(Type.Integer({ description: "Pagination offset (default 0).", minimum: 0 })),
-      include_suggestions: Type.Optional(
-        Type.Boolean({ description: "Attach similarity-based hints. Expensive mode requires limit <= 12; page with offset. Default off." }),
-      ),
+    parameters: z.object({
+      status: z.string().describe("Filter by status: pending (default), resolved, all.").optional(),
+      project_id: z.string().describe("Project id override.").optional(),
+      session_id: z.string().describe("Session id override.").optional(),
+      source: z.string().describe("Source filter.").optional(),
+      signal: z.string().describe("Filter by candidate signal: correction, preference, outcome, none. Corrections sort first regardless; use correction to see only them during an audit.").optional(),
+      limit: z.number().int().min(1).max(100).describe("Max reviews to return (1-100, default 50).").optional(),
+      offset: z.number().int().min(0).describe("Pagination offset (default 0).").optional(),
+      include_suggestions: z.boolean().describe("Attach similarity-based hints. Expensive mode requires limit <= 12; page with offset. Default off.").optional(),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const config = memoryConfig();
@@ -2981,24 +2932,16 @@ Safety:
       "Only call asaki_memory_review_resolve after the user has explicitly approved the action.",
       "Use action=merge/update/delete only with a target memory_id. update = overwrite with candidate text unless content is given; for a merge, pass the merged text via content. delete removes the target memory.",
     ],
-    parameters: Type.Object({
-      id: Type.String({ description: "Review id to resolve." }),
-      action: Type.Union(
-        [Type.Literal("add"), Type.Literal("merge"), Type.Literal("update"), Type.Literal("delete"), Type.Literal("ignore")],
-        { description: "Resolution action." },
-      ),
-      memory_id: Type.Optional(Type.String({ description: "Target memory id. Required when action is merge, update, or delete." })),
-      reason: Type.Optional(Type.String({ description: "Short resolution reason." })),
-      content: Type.Optional(Type.String({ description: "Exact resulting text for action=update. Without it, the candidate text overwrites the target." })),
-      kind: Type.Optional(Type.Union(KINDS.map((kind) => Type.Literal(kind)), { description: "Optional resulting kind for action=update. Omit to preserve the target kind when content is given." })),
-      importance: Type.Optional(Type.Number({ description: "Optional resulting importance for action=update. Omit to preserve the target importance when content is given.", minimum: 0, maximum: 1 })),
-      confidence: Type.Optional(Type.Number({ description: "Optional resulting confidence for action=update. Omit to preserve the target confidence when content is given.", minimum: 0, maximum: 1 })),
-
-      promote_to_global: Type.Optional(
-        Type.Boolean({
-          description: 'Accept the row\'s "⤷ promote:" suggestion: store the candidate as scope=global instead of project. Only valid with action=add, and only after the user approved promotion.',
-        }),
-      ),
+    parameters: z.object({
+      id: z.string().describe("Review id to resolve."),
+      action: z.enum(["add", "merge", "update", "delete", "ignore"]).describe("Resolution action."),
+      memory_id: z.string().describe("Target memory id. Required when action is merge, update, or delete.").optional(),
+      reason: z.string().describe("Short resolution reason.").optional(),
+      content: z.string().describe("Exact resulting text for action=update. Without it, the candidate text overwrites the target.").optional(),
+      kind: z.enum(KINDS).describe("Optional resulting kind for action=update. Omit to preserve the target kind when content is given.").optional(),
+      importance: z.number().min(0).max(1).describe("Optional resulting importance for action=update. Omit to preserve the target importance when content is given.").optional(),
+      confidence: z.number().min(0).max(1).describe("Optional resulting confidence for action=update. Omit to preserve the target confidence when content is given.").optional(),
+      promote_to_global: z.boolean().describe('Accept the row\'s "⤷ promote:" suggestion: store the candidate as scope=global instead of project. Only valid with action=add, and only after the user approved promotion.').optional(),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
       const config = memoryConfig();
@@ -3038,24 +2981,16 @@ Safety:
       "Only call asaki_memory_update after the user has explicitly approved the change.",
       "Supply only the fields that need to change; omit unchanged fields.",
     ],
-    parameters: Type.Object({
-      id: Type.String({ description: "Memory id to update." }),
-      content: Type.Optional(Type.String({ description: "New memory content." })),
-      scope: Type.Optional(
-        Type.Union([Type.Literal("global"), Type.Literal("project"), Type.Literal("session")], {
-          description: "New scope.",
-        }),
-      ),
-      project_id: Type.Optional(Type.String({ description: "New project id (required when changing scope to project)." })),
-      session_id: Type.Optional(Type.String({ description: "New session id (required when changing scope to session)." })),
-      kind: Type.Optional(Type.String({ description: "New kind." })),
-      importance: Type.Optional(Type.Number({ description: "New importance (0-1).", minimum: 0, maximum: 1 })),
-      confidence: Type.Optional(Type.Number({ description: "New confidence (0-1).", minimum: 0, maximum: 1 })),
-      status: Type.Optional(
-        Type.Union([Type.Literal("active"), Type.Literal("archived"), Type.Literal("deleted")], {
-          description: "New status.",
-        }),
-      ),
+    parameters: z.object({
+      id: z.string().describe("Memory id to update."),
+      content: z.string().describe("New memory content.").optional(),
+      scope: z.enum(["global", "project", "session"]).describe("New scope.").optional(),
+      project_id: z.string().describe("New project id (required when changing scope to project).").optional(),
+      session_id: z.string().describe("New session id (required when changing scope to session).").optional(),
+      kind: z.string().describe("New kind.").optional(),
+      importance: z.number().min(0).max(1).describe("New importance (0-1).").optional(),
+      confidence: z.number().min(0).max(1).describe("New confidence (0-1).").optional(),
+      status: z.enum(["active", "archived", "deleted"]).describe("New status.").optional(),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
       // Local gate before any network call — mirrors integrations/mcp/asaki-memory.ts.
@@ -3098,8 +3033,8 @@ Safety:
       "Only call asaki_memory_delete after the user has explicitly approved the deletion.",
       "Deletion is a soft delete (status set to deleted); data is not permanently removed immediately.",
     ],
-    parameters: Type.Object({
-      id: Type.String({ description: "Memory id to delete." }),
+    parameters: z.object({
+      id: z.string().describe("Memory id to delete."),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
       const config = memoryConfig();

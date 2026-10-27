@@ -4,18 +4,18 @@
 # Two things happen on every turn:
 # 1. Unconditionally inject one instruction: the agent decides for itself
 #    whether asaki_memory_search is needed this turn, choosing its own
-#    query/scope/top_k — mirrors the Pi extension's memoryPrecheckInstruction().
+#    query/scope/top_k — mirrors the OMP extension's memoryPrecheckInstruction().
 # 2. Optionally auto-inject a small batch of memory search results before the
-#    agent starts working — mirrors the Pi extension's
-#    before_agent_start/autoInjectMemory(). Off by default; opt in with
+#    agent starts working — mirrors the OMP extension's
+#    `before_agent_start`/`autoInjectMemory()`. Off by default; opt in with
 #    ASAKI_MEMORY_AUTO_INJECT=1 (and ASAKI_MEMORY_AUTO_INJECT_ALWAYS=1 to skip
 #    the keyword gate). The only unbounded step is `git rev-parse`, which is
 #    wrapped with its own watchdog below so a hang there can't also swallow
 #    the always-on PRECHECK instruction past the hook's own timeout.
 #
 # KEEP IN SYNC with AUTO_INJECT_TOP_K_DEFAULT/_CAP, DEFAULT_AUTO_MIN_SCORE, MEMORY_NEEDED_RE,
-# and SENSITIVE_RE_LIST in integrations/pi/asaki-memory.ts, and
-# MAX_TOOL_OUTPUT_CHARS in integrations/pi/asaki-memory.ts /
+# and SENSITIVE_RE_LIST in integrations/omp/asaki-memory.ts, and
+# MAX_TOOL_OUTPUT_CHARS in integrations/omp/asaki-memory.ts /
 # integrations/mcp/asaki-memory.ts.
 set -uo pipefail
 
@@ -30,7 +30,7 @@ set -uo pipefail
 # trim → digits only or fall back → strip leading zeros → all-zero falls back (0 is not positive)
 # → compare with the cap by digit count, then lexicographically at equal length. Only a value
 # already known to be <= cap ever reaches jq's --argjson.
-# KEEP IN SYNC with parsePositiveIntEnv() in integrations/pi/asaki-memory.ts and the copy in
+# KEEP IN SYNC with parsePositiveIntEnv() in integrations/omp/asaki-memory.ts and the copy in
 # integrations/claude-code/session-start.sh; `npm run eval:inject-env` runs one table over all.
 asaki_parse_positive_int() {
   local raw="${1-}" def="$2" cap="$3" value
@@ -59,7 +59,7 @@ asaki_parse_positive_int() {
 # normalizes it to valid JSON (`.67` → `0.67`), so a malformed or out-of-range value can neither
 # break `jq --argjson` nor reach the server, which 400s on min_score outside [0, 1] and would
 # take the whole auto-inject down with it.
-# KEEP IN SYNC with parseUnitScoreEnv() in integrations/pi/asaki-memory.ts.
+# KEEP IN SYNC with parseUnitScoreEnv() in integrations/omp/asaki-memory.ts.
 asaki_parse_unit_score() {
   local raw="${1-}" def="$2" value int frac
   value="${raw#"${raw%%[![:space:]]*}"}"
@@ -116,7 +116,7 @@ DEFAULT_AUTO_MIN_SCORE=0.67
 MEMORY_NEEDED_RE='记忆|记得|回忆|想起|以前|之前|上次|过往|历史|偏好|习惯|约定|惯例|决策|背景|上下文|继续|延续|remember|recall|memory|previous|before|last time|preference|convention|decision|context|continue'
 # Requires an actual 8+ char value after the label (not just the bare label) and adds the
 # fish `set -gx *KEY|TOKEN|SECRET|PASSWORD* value` exporter pattern — keep both in parity
-# with the 11-entry SENSITIVE_RE_LIST in integrations/pi/asaki-memory.ts. sk-/sk-proj-/sk-ant-
+# with the 11-entry SENSITIVE_RE_LIST in integrations/omp/asaki-memory.ts. sk-/sk-proj-/sk-ant-
 # use a hyphen (not an underscore) to actually match real OpenAI/Anthropic keys, and this now
 # also covers Slack xox- tokens, Google AIza- keys, JWTs, and user:pass@host credential URLs.
 SENSITIVE_RE='-----BEGIN [A-Z ]*PRIVATE KEY-----|Bearer [A-Za-z0-9._~+/=-]{16,}|sk-[A-Za-z0-9-]{10,}|(ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{16,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|://[^/[:space:]:]+:[^/[:space:]@]{6,}@|(api[_-]?key|token|secret|password|passwd|authorization)[[:space:]]*[:=][[:space:]]*[^[:space:]]{8,}|set[[:space:]]+-gx[[:space:]]+[A-Za-z0-9_]*(KEY|TOKEN|SECRET|PASSWORD)[A-Za-z0-9_]*[[:space:]]+[^$[:space:]][^[:space:]]{8,}'

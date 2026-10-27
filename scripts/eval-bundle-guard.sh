@@ -5,7 +5,7 @@
 #          straight out of .githooks/pre-commit via its library guard (ASAKI_BUNDLE_GUARD_LIB), so
 #          this tests the shipped hook rather than a copy of it. The point of the table is the
 #          boundary: everything that can change the bundle bytes must trip the guard, and ordinary
-#          Worker/Pi/doc edits must not (a guard that fires on every commit gets bypassed).
+#          Worker/OMP/doc edits must not (a guard that fires on every commit gets bypassed).
 #
 # Part 2 — the deterministic build's two preflights (scripts/build-mcp.mjs): a nested
 #          node_modules shadowing the root install must fail loudly (that was the 2026-07-21
@@ -48,7 +48,7 @@ check_path ".githooks/pre-commit" guard
 # --- not bundle inputs: the stdio bundle embeds none of these ----------------------------------
 check_path "src/mcp.ts" ignore
 check_path "src/services/memories.ts" ignore
-check_path "integrations/pi/asaki-memory.ts" ignore
+check_path "integrations/omp/asaki-memory.ts" ignore
 check_path "integrations/claude-code/stop-extract.sh" ignore
 check_path "dist/mcp-server.mjs" ignore
 check_path "AGENTS.md" ignore

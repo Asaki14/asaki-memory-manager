@@ -13,8 +13,8 @@
  * Same deterministic total order: importance desc → recency desc → id desc.
  *
  * The region between the `project-digest:begin` / `project-digest:end` markers below is the
- * source of truth and is copied VERBATIM into `integrations/pi/asaki-memory.ts` (Pi ships a
- * single self-contained extension file, so it cannot import this module).
+ * source of truth and is copied VERBATIM into `integrations/omp/asaki-memory.ts`
+ * (the OMP native extension is a single self-contained file, so it cannot import this module).
  * `integrations/claude-code/project-digest.jq` is the jq re-implementation for the Claude
  * Code SessionStart hook. `scripts/eval-project-digest.ts` asserts all three agree: it
  * byte-compares the two TS copies and diffs the jq output against this one.
@@ -27,7 +27,7 @@
  * close it. Monitor the `memories=` banner count.
  */
 
-// --- project-digest:begin (KEEP IN SYNC: src/services/projectDigest.ts <-> integrations/pi/asaki-memory.ts) ---
+// --- project-digest:begin (KEEP IN SYNC: src/services/projectDigest.ts <-> integrations/omp/asaki-memory.ts) ---
 export const PROJECT_DIGEST_KNOWN_KINDS = [
   'preference',
   'rule',

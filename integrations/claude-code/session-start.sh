@@ -3,7 +3,7 @@
 #
 # Injects a compact Asaki Memory status banner (counts only, no memory content) into Claude
 # Code's session context, preceded by two bounded content blocks. Fires on startup, resume, and
-# compact. The banner itself mirrors the Pi extension's buildSessionBanner(): numbers only, the
+# compact. The banner itself mirrors the OMP extension's buildSessionBannerLine(): numbers only, the
 # agent decides for itself when to search for anything beyond the two blocks below.
 #
 # 1. The standing-rule block: ACTIVE `rule`/`preference` memories are directives the agent must
@@ -22,8 +22,8 @@
 # Both blocks reuse the one memory-list response this hook already fetches (no extra request) and
 # both ARE re-emitted on compact on purpose — session-opening context has to survive compaction.
 #
-# The direct-writer durable-memory checklist below is KEEP IN SYNC with the Pi
-# extension's asaki_memory_add promptGuidelines. The local classifier has its own
+# The direct-writer durable-memory checklist below is KEEP IN SYNC with the OMP
+# extension's asaki_memory_add promptGuidelines.
 # stricter prompt and only queues candidates for human review; server extraction is deprecated.
 #
 # Output: plain text injected into the system context.
@@ -43,7 +43,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # trim → digits only or fall back → strip leading zeros → all-zero falls back (0 is not positive)
 # → compare with the cap by digit count, then lexicographically at equal length. Only a value
 # already known to be <= cap ever reaches jq's --argjson.
-# KEEP IN SYNC with parsePositiveIntEnv() in integrations/pi/asaki-memory.ts and the copy in
+# KEEP IN SYNC with parsePositiveIntEnv() in integrations/omp/asaki-memory.ts and the copy in
 # integrations/claude-code/user-prompt.sh; `npm run eval:inject-env` runs one table over all.
 asaki_parse_positive_int() {
   local raw="${1-}" def="$2" cap="$3" value
@@ -69,7 +69,7 @@ asaki_parse_positive_int() {
 }
 
 # Status-banner line builder. Field set and order are KEEP IN SYNC with buildSessionBannerLine()
-# in integrations/pi/asaki-memory.ts: user → project → auth? → memories? → pendingReviews? →
+# in integrations/omp/asaki-memory.ts: user → project → auth? → memories? → pendingReviews? →
 # classifier? → !failing? → !idle? → standingRules? → projectDigest?. A field with no information
 # is omitted WHOLE (no `off`, no `0/0`, no `?` for the optional ones) and never leaves a dangling
 # `|`. `autoExtract` deliberately no longer appears: the deprecated compatibility path can still
@@ -154,15 +154,14 @@ AUTO_EXTRACT_STATE="off"
 [ "${ASAKI_MEMORY_AUTO_EXTRACT:-0}" = "1" ] && AUTO_EXTRACT_STATE="on"
 
 # Classifier runs in the AUTO_EXTRACT=0 branch of stop-extract.sh (the default); mirror the
-# Pi banner's `classifier=on model=X` field. Off (only reachable here via AUTO_EXTRACT=1, where
-# Pi additionally has ASAKI_MEMORY_AUTO_CLASSIFIER=0) means the field is omitted entirely.
+# OMP extension's `classifier=on model=X` field. Off means the field is omitted entirely.
 if [ "$AUTO_EXTRACT_STATE" = "on" ]; then
   CLASSIFIER_STATE=""
 else
   CLASSIFIER_STATE="on model=${ASAKI_MEMORY_CLASSIFIER_MODEL:-claude-haiku-4-5-20251001}"
 fi
 
-# Standing-rule injection is on by default; mirror the Pi extension's envFlagEnabled().
+# Standing-rule injection is on by default; mirror the OMP extension's envFlagEnabled().
 STANDING_RULES_STATE="on"
 case "$(printf '%s' "${ASAKI_MEMORY_STANDING_RULES:-1}" | tr '[:upper:]' '[:lower:]')" in
   0|false|off|no) STANDING_RULES_STATE="off" ;;
@@ -281,7 +280,7 @@ fi
 cat <<BANNER
 ## Asaki Memory Active
 
-Open your first reply with exactly these two lines, matching the Pi startup resource banner style:
+Open your first reply with exactly these two lines, matching the OMP startup resource banner style:
 \`[Memory]\`
 \`  $(asaki_banner_line "$ASAKI_USER" "$ASAKI_PROJECT" "" "$MEMORY_COUNT" "$PENDING_REVIEWS" "$CLASSIFIER_STATE" "$HEALTH_FAILING" "$HEALTH_IDLE" "$STANDING_RULES_STATUS" "$PROJECT_DIGEST_STATUS")\`
 Always include \`user_id: "${ASAKI_USER}"\` in every \`asaki_memory_search\` and \`asaki_memory_add\` call.

@@ -1,6 +1,6 @@
 // Server-side secret gate: rejects content before it ever reaches Workers AI (embeddings,
 // extraction) or gets persisted to D1/Vectorize/memory_events. This is the canonical, corrected
-// pattern list — the client-side copies in integrations/pi/asaki-memory.ts,
+// pattern list — the client-side copies in integrations/omp/asaki-memory.ts,
 // integrations/claude-code/stop-extract.sh, and scripts/shadow-run-extraction.ts are a separate,
 // known-stale set (miss sk-/sk-proj-/sk-ant-/xoxb-/AIza) that predates this file and still needs
 // its own fix; this list intentionally does not try to stay byte-for-byte identical to them.

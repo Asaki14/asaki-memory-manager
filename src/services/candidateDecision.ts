@@ -202,15 +202,19 @@ export function isAutoAddEligible(candidate: ProcessMemoryCandidateInput): boole
 }
 
 // Unsupervised background classifiers (no human/agent judgment in the loop before the write —
-// Pi's agent_end classifier, Claude Code's Stop-hook classifier) must never auto-add, merge,
-// update, or delete an active memory directly: their candidates always go to the review queue,
-// regardless of scope/importance. KEEP IN SYNC with the source strings used in
-// integrations/pi/asaki-memory.ts (writeClassifiedMemory) and
+// OMP's agent_end classifier, historical Pi rows, Claude Code's Stop-hook classifier) must never
+// auto-add, merge, update, or delete an active memory directly: their candidates always go to the
+// review queue, regardless of scope/importance. KEEP IN SYNC with the source strings used in
+// integrations/omp/asaki-memory.ts, historical Pi data, and
 // integrations/claude-code/stop-extract.sh (the classifier write branch).
-const UNSUPERVISED_CANDIDATE_SOURCES = new Set(['pi:agent-end-classifier', 'claude-code:stop-classifier']);
+const UNSUPERVISED_CANDIDATE_SOURCES: Record<string, true> = {
+  'omp:agent-end-classifier': true,
+  'pi:agent-end-classifier': true,
+  'claude-code:stop-classifier': true,
+};
 
 export function isUnsupervisedSource(source: string | null | undefined): boolean {
-  return typeof source === 'string' && UNSUPERVISED_CANDIDATE_SOURCES.has(source);
+  return typeof source === 'string' && Object.hasOwn(UNSUPERVISED_CANDIDATE_SOURCES, source);
 }
 
 // Plural sibling of bestUsableMatch(): same usableMatch() gate (normalized equality, token

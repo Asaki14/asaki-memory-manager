@@ -27,7 +27,7 @@
 // delta text, and it belongs to CLASSIFIER_SYSTEM_PROMPT. Do not push it in here.
 //
 // The logic here is mirrored (semantically, not byte-wise — it is TypeScript there) inside
-// integrations/pi/asaki-memory.ts's `// #region asaki-project-context` block. Both copies are run
+// integrations/omp/asaki-memory.ts's `// #region asaki-project-context` block. Both copies are run
 // against the SAME table by `npm run eval:project-context`; keep the region markers intact.
 //
 // CLI (used by integrations/claude-code/stop-extract.sh):

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bestUsableMatch, heuristicDecision, needsLlmDecision, usableMatches, type CandidateAction, type ProcessMemoryCandidateInput } from '../src/services/candidateDecision.ts';
+import { bestUsableMatch, heuristicDecision, isUnsupervisedSource, needsLlmDecision, usableMatches, type CandidateAction, type ProcessMemoryCandidateInput } from '../src/services/candidateDecision.ts';
 import type { MemoryKind, MemoryScope, SearchResult } from '../src/types.ts';
 
 type MemoryFixture = {
@@ -113,8 +113,21 @@ cases.forEach((item, index) => {
     }
   }
 });
+const sourceCases: Array<[name: string, source: string | null, expected: boolean]> = [
+  ["OMP agent-end classifier stays review-only", "omp:agent-end-classifier", true],
+  ["historical Pi classifier rows stay review-only", "pi:agent-end-classifier", true],
+  ["Claude stop classifier stays review-only", "claude-code:stop-classifier", true],
+  ["manual OMP source is not classified as unsupervised", "omp", false],
+  ["missing source is not classified as unsupervised", null, false],
+];
+for (const [name, source, expected] of sourceCases) {
+  const actual = isUnsupervisedSource(source);
+  if (actual !== expected) failures.push({ name, detail: `expected ${expected}, got ${actual}` });
+}
 
-console.log(`candidate eval: ${cases.length - failures.length}/${cases.length} passed`);
+
+const total = cases.length + sourceCases.length;
+console.log(`candidate eval: ${total - failures.length}/${total} passed`);
 
 if (failures.length > 0) {
   console.log('fail:');

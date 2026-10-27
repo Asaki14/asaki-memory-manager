@@ -3,7 +3,7 @@
 //
 // Three layers, one table:
 //   1. the canonical module            integrations/claude-code/project-context.mjs
-//   2. the Pi copy                     integrations/pi/asaki-memory.ts `// #region asaki-project-context`
+//   2. the OMP copy                     integrations/omp/asaki-memory.ts `// #region asaki-project-context`
 //   3. the Claude Code hook wrapper    integrations/claude-code/stop-extract.sh library region
 //
 // The end-user reproduction this pins (see REPRODUCTION below) is: background extraction hosted
@@ -29,8 +29,8 @@ const MODULE_PATH = join(ROOT, "integrations/claude-code/project-context.mjs");
 const HOOK_PATH = join(ROOT, "integrations/claude-code/stop-extract.sh");
 
 const canonical = await import(MODULE_PATH);
-const { loadPiProjectContext } = await import(join(ROOT, "scripts/pi-trace-region.mjs"));
-const pi = await loadPiProjectContext();
+const { loadOmpProjectContext } = await import(join(ROOT, "scripts/omp-trace-region.mjs"));
+const omp = await loadOmpProjectContext();
 
 let pass = 0;
 const failures = [];
@@ -91,10 +91,10 @@ const GIT_ROOTS = {
   "/home/u/.treehouse/pool/5/asaki-memory-manager": "/home/u/Desktop/project/asaki-memory-manager",
 };
 
-// Run the same table against both implementations so the Pi copy cannot drift semantically.
+// Run the same table against both implementations so the OMP copy cannot drift semantically.
 const impls = [
   ["canonical", canonical],
-  ["pi", pi],
+  ["omp", omp],
 ];
 
 function buildBoth(input, io) {
@@ -267,7 +267,7 @@ for (const [label, impl] of impls) {
   ].join("\n");
   eq("render/pinned block", rendered, expected);
   eq("render/deterministic", canonical.renderProjectContextBlock(ctxA), rendered);
-  eq("render/pi copy is byte-identical", pi.renderProjectContextBlock(ctxB), rendered);
+  eq("render/OMP copy is byte-identical", omp.renderProjectContextBlock(ctxB), rendered);
   // Ordering must not depend on the order the metadata files happened to be read in.
   const reversed = world({ metas: { "z.meta": META_LOGSEQ, "a.meta": META_ASAKI }, gitRoots: GIT_ROOTS });
   const ctxReversed = canonical.buildProjectContext({ cwd: FM_HOME, gitRoot: FM_HOME, orchestratorHome: FM_HOME }, reversed);
@@ -325,7 +325,7 @@ for (const [label, impl] of impls) {
 
 // The invariant that matters operationally: an unresolved project scope must skip the write
 // BEFORE any HTTP request. Assert structurally that the candidate POST in the hook is inside the
-// resolved-project guard, and that the Pi client returns its skip string without a request.
+// resolved-project guard, and that the OMP client returns its skip string without a request.
 {
   const hook = execFileSync("cat", [HOOK_PATH], { encoding: "utf8" });
   const guardAt = hook.indexOf('RESOLVED_PROJECT_ID=$(resolve_candidate_project');

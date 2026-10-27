@@ -4,7 +4,7 @@
  * Four assertions, no network and no Worker needed (mirrors scripts/eval-standing-rules.ts):
  *  1. the canonical TS (src/services/projectDigest.ts) matches the fixture expectations;
  *  2. the jq copy (integrations/claude-code/project-digest.jq) renders byte-identical blocks;
- *  3. the Pi copy (integrations/pi/asaki-memory.ts) is byte-identical to the canonical region;
+ *  3. the OMP copy (integrations/omp/asaki-memory.ts) is byte-identical to the canonical region;
  *  4. for the same memory list, the standing-rule block and the digest never share an item —
  *     under the default kinds AND under a narrowed ASAKI_MEMORY_STANDING_RULES_KINDS.
  */
@@ -47,7 +47,7 @@ type Case = {
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const canonicalPath = resolve(root, 'src/services/projectDigest.ts');
-const piPath = resolve(root, 'integrations/pi/asaki-memory.ts');
+const ompPath = resolve(root, 'integrations/omp/asaki-memory.ts');
 const jqPath = resolve(root, 'integrations/claude-code/project-digest.jq');
 const cases = JSON.parse(readFileSync(resolve(root, 'test/fixtures/project-digest-cases.json'), 'utf8')) as Case[];
 
@@ -156,13 +156,13 @@ for (const standingKinds of [[...PROJECT_DIGEST_DEFAULT_STANDING_KINDS], ['rule'
 }
 
 const canonicalRegion = region(canonicalPath);
-const piRegion = region(piPath);
+const ompRegion = region(ompPath);
 if (!canonicalRegion) {
   failures.push('src/services/projectDigest.ts: project-digest markers not found');
-} else if (!piRegion) {
-  failures.push('integrations/pi/asaki-memory.ts: project-digest markers not found (the shared region must be copied verbatim)');
-} else if (canonicalRegion !== piRegion) {
-  failures.push('integrations/pi/asaki-memory.ts: project-digest region drifted from src/services/projectDigest.ts');
+} else if (!ompRegion) {
+  failures.push('integrations/omp/asaki-memory.ts: project-digest markers not found (the shared region must be copied verbatim)');
+} else if (canonicalRegion !== ompRegion) {
+  failures.push('integrations/omp/asaki-memory.ts: project-digest region drifted from src/services/projectDigest.ts');
 }
 
 console.log(`project-digest eval: ${cases.length - new Set(failures.map((f) => f.split(':')[0])).size}/${cases.length} cases passed, copies + partition checked`);

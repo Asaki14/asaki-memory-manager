@@ -23,8 +23,8 @@
 //   3. truncate to 120 chars last, so truncation can neither bisect a credential into a
 //      non-matching prefix nor cut away a token the gate was about to catch.
 //
-// KEEP IN SYNC with the Pi copies in integrations/pi/asaki-memory.ts (marked
-// `#region asaki-trace-builder`): PI_TRACE_TOOLS, TRACE_SENSITIVE_RE_LIST and the R1–R5
+// KEEP IN SYNC with the OMP copy in integrations/omp/asaki-memory.ts (marked
+// `#region asaki-trace-builder`): OMP_TRACE_TOOLS, TRACE_SENSITIVE_RE_LIST and the R1–R5
 // redaction rules must stay behaviourally identical across both clients.
 import { homedir } from 'node:os';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
@@ -80,7 +80,7 @@ export const TRACE_SENSITIVE_PATTERNS = [
 ];
 
 // Per-client whitelist (plan §3.1/§3.3): tool name → the ONE argument that may be emitted.
-// Claude Code spelling; Pi's table is lowercase, uses `path`, and has `find` where Claude has
+// Claude Code spelling; OMP's table is lowercase, uses `path`, and has `find` where Claude has
 // `Glob`. Anything not listed emits the tool name alone.
 export const CLAUDE_TRACE_TOOLS = {
   Bash: { arg: 'command', shape: 'command' },
@@ -243,7 +243,7 @@ export function buildDeltaResult(lines, options = {}) {
       }
     } else if (j.type === 'assistant' && j.message && Array.isArray(j.message.content)) {
       // An assistant-side marker strips that text but never drops the delta: only the USER can
-      // exclude a turn (mirrors Pi's lastUserSawPrivate).
+      // exclude a turn (mirrors the OMP extension's user-turn exclusion).
       const text = stripPrivate(
         j.message.content
           .filter((c) => c.type === 'text')

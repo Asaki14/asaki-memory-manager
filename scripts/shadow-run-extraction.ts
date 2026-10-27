@@ -7,7 +7,7 @@ import type { MemoryRow } from '../src/types.ts';
 // /v1/memories/extract handler) and diffs the cloud candidates against memories the agent
 // actually added directly (asaki_memory_add, not the extraction pipeline) in the same window.
 // Deliberately skips the signal-word gate the Stop hook applies (see EXTRACT_SIGNAL_RE in
-// integrations/pi/asaki-memory.ts) so this sees the LLM's full recall, not just what already
+// integrations/omp/asaki-memory.ts) so this sees the LLM's full recall, not just what already
 // slipped past the gate in production — that's the point of the comparison.
 //
 // Usage:
@@ -17,7 +17,7 @@ import type { MemoryRow } from '../src/types.ts';
 //     --since-hours <n>  how far back to look for real agent-added memories to diff against (default 24)
 //     --create-reviews   push cloud candidates the agent missed into the review queue (default: report only)
 
-// KEEP IN SYNC with SENSITIVE_RE_LIST in integrations/pi/asaki-memory.ts and SENSITIVE_PATTERN in
+// KEEP IN SYNC with SENSITIVE_RE_LIST in integrations/omp/asaki-memory.ts and SENSITIVE_PATTERN in
 // integrations/claude-code/stop-extract.sh — never send a transcript slice containing a secret
 // off-machine, even for a calibration run. sk-/sk-proj-/sk-ant- use a hyphen (not an underscore)
 // to actually match real OpenAI/Anthropic keys, and this now also covers Slack xox- tokens,

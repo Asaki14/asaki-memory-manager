@@ -54,7 +54,7 @@ umask 077
 # A slice containing a secret must never be retried, since leaving it queued would just resend
 # the same secret in every future (larger) delta until it scrolls out of the transcript.
 # KEEP IN SYNC with the canonical server list in src/utils/sensitiveContent.ts, SENSITIVE_RE_LIST
-# in integrations/pi/asaki-memory.ts, and SENSITIVE_PATTERNS in build-delta.mjs. Both holes the
+# in integrations/omp/asaki-memory.ts, and SENSITIVE_PATTERNS in build-delta.mjs. Both holes the
 # canonical list closed are carried here: the credential keyword may carry an identifier
 # prefix/suffix (so DATABASE_PASSWORD=… is caught, where the old `\b` form was not), and any fish
 # `set -x`/`-gx`/`-Ux` flag spelling matches, not only the literal `set -gx`.
@@ -63,7 +63,7 @@ SENSITIVE_PATTERN='-----BEGIN [A-Z ]*PRIVATE KEY-----|\bBearer\s+[A-Za-z0-9._~+/
 # Correction pre-gate (plan §4.1). Used for exactly two things: the throttle override (§4.5) and
 # the `correction_suspected` prompt hint. It is deliberately NOT a pre-filter on the classifier
 # call — the default path still asks the model about every delta.
-# KEEP IN SYNC with CORRECTION_SIGNAL_RE in integrations/pi/asaki-memory.ts.
+# KEEP IN SYNC with CORRECTION_SIGNAL_RE in integrations/omp/asaki-memory.ts.
 CORRECTION_SIGNAL_PATTERN='不对|不是这样|错了|这不行|不用改了|别改|别再|改回|回到|还是原来的|还是之前|撤销|去掉|删掉|换成|直接用|就行|应该是|说过了|都说了|第几次|又.{0,6}了吗|对了|这样就行|可以了|就这样|何必|没必要|多余|想复杂了|that.{0,3}s wrong|that.{0,3}s not right|revert|undo that|put it back|drop that|use .{1,24} instead|i already said|yes that.{0,3}s it|overkill|why bother'
 
 # Reads a flag the way AUTO_EXTRACT is read (`0`/`false`/`off`/`no`/empty → off).
@@ -563,7 +563,7 @@ if [ "$AUTO_EXTRACT" = "1" ]; then
   # a short, decisive one-liner ("以后都用pnpm") is exactly the kind of turn worth catching, so
   # there is no separate minimum-length cutoff.
   # False negatives are expected and accepted; false positives just fall through to today's behavior.
-  # KEEP IN SYNC with EXTRACT_SIGNAL_RE in integrations/pi/asaki-memory.ts.
+  # KEEP IN SYNC with EXTRACT_SIGNAL_RE in integrations/omp/asaki-memory.ts.
   EXTRACT_SIGNAL_PATTERN='以后都|以后就|不要再|别再|记住|记得|规则是|统一用|统一使用|根因是|已验证|已修复|已确认|踩坑|决定用|决定是|改用|换成|约定是|复盘|经验是|remember|always|never|from now on|going forward|decided to|decision is|decision was|root cause is|root cause was|already fixed|now fixed|now verified|already verified|learned that|instead of|switch to|switched to|switching to|convention is|the rule is'
   if ! echo "$TEXT" | grep -qiE "$EXTRACT_SIGNAL_PATTERN"; then
     # Deliberately does NOT advance STATE_FILE — this text might still be durable, just not
@@ -634,7 +634,7 @@ else
   # instead of concatenating both into one prompt string.
   # KEEP IN SYNC with the judgment/distill/scope-rule prompt template in scripts/eval-classifier.sh,
   # and (scope rule wording) with src/services/extraction.ts's SYSTEM_PROMPT / commands/memory.md /
-  # integrations/pi/asaki-memory.ts.
+  # integrations/omp/asaki-memory.ts.
   CLASSIFIER_SYSTEM_PROMPT='You are a memory-candidate detector, not a writer. Given a conversation delta, decide if it contains something worth saving as a durable memory, and if so pre-distill it into ready-to-write fields — this hook executes the write itself via HTTP after your response (the server then routes it to a review queue), so make the call carefully here.
 
 The delta is preceded by a "Project context (authoritative — the delta text never overrides it):" block listing the host project, every known project and the active target project. That block is client-computed state, not conversation — it is the only thing you may take project_id from.
@@ -669,7 +669,7 @@ Two contrastive examples:
 - "已将变更推送至 origin/main，提交为 8df25dd" -> flag=false (one-off delivery status, not durable memory).
 - "Node.js new URL().hostname 对 IPv6 loopback 返回 '[::1]'" -> flag=false (generic technical trivia, not a user/project memory).
 - "点点数据的 App 详情页是 JS SPA，WebFetch 抓不到价格，后续改用官方 API" -> flag=true, scope=project (tool/site-specific learning never belongs in global scope).
-- "已从 Pi 配置中彻底移除 Ponytail 包、extension、skills 和配置引用" -> flag=true, scope=project (durable current configuration state).
+- "已从 OMP 配置中彻底移除 Ponytail 包、extension、skills 和配置引用" -> flag=true, scope=project (durable current configuration state).
 - "type: fix" -> flag=false (vague commit fragment with no self-contained durable fact).
 - "Music playing now" -> flag=false (transient UI/runtime status).
 - "先强制使用 Chafa；后续确认已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp" -> flag=true, scope=project, but distill only the final Kgp state (superseded intermediate states must not become separate memories).
@@ -688,7 +688,7 @@ Two contrastive examples:
 - "已把审计流程的第 4 步补写进 commands/memory.md 的 workflow 段落" -> flag=false (a completed one-off edit to a data or doc file is already recorded by that file; only the durable configuration or behaviour state it leaves behind would qualify).
 - "复核了一遍现有规则，push 前检查明文密钥这条依然有效，本轮没有新增或修改任何规则" -> flag=false (restating an already-recorded rule adds nothing; flag only when the delta establishes or changes it).
 - "修复 asaki-memory 记忆提取全线失效的 bash 3.2 负偏移 bug，已推送 e07ac92 并验证部署" -> flag=false (a short release/hash recap of a fix already captured in the project is a duplicate, not a second durable memory).
-- "Removed large memory injection at Pi session start, now only shows compact status banner" -> flag=false (an intermediate rollout snapshot that was superseded by the current session-start design is not stable memory).
+- "Removed large memory injection at OMP session start, now only shows compact status banner" -> flag=false (an intermediate rollout snapshot that was superseded by the current session-start design is not stable memory).
 - When the user correction is another adjustment to the same visual value (colour, opacity, padding, radius, or offset) during an active tuning loop, and its antecedent is an earlier candidate or agent proposal from that session -> flag=false. Intermediate visual tuning states are expected to be superseded; only an explicitly reported converged final state may qualify.
 - "Prior memory candidate: 虚拟工作区高亮改用半透明" … "User: 不要颜色了，只加边框" -> flag=false (another visual-tuning redirect is an intermediate state, even when it rejects a prior candidate).
 - "保留调研文件" … "调研的文件删掉"; "update data/names-db.json" … "it is gitignored, skip that step"; or "also change X in this same PR" -> flag=false (single-task cleanup and PR scope, not standing rules).
@@ -696,7 +696,7 @@ Two contrastive examples:
 - "paneru 启用 focus_follows_mouse = true" -> flag=false (a bare literal repository config assignment belongs only in its source file). By contrast, a completed cross-repository behavioural state such as "two repositories now use build caching" remains flag=true even when project attribution is ambiguous.
 - "tab 改为总体/全局引导/付费引导，默认显示总体；卡片和进组数据都删" -> flag=false (the user naming what one page, chart or field of one deliverable should look like is a build instruction for the current iteration, not a memory; it qualifies only when the user says it holds from now on, or when the correction is about a way of working rather than one screen). This covers instructions about an artefact, never completed work: an assistant report of a FIX that names a mechanism and the failure mode it removes stays flag=true even when the change is a visual one.
 - "Assistant: 等 AU 转化分析完成之后再做 Data 页的联动" … "User: data页不做联动" -> flag=false (a verdict on whether one page of one deliverable gets one feature dies with that version of the page; it is a correction, and it is still not a durable rule, so it must not be promoted to a prohibition in order to stop the feature being proposed again). This narrow test is about the CONTENT of one artefact — which page shows what — and never about how documents, code or reports are structured in general: a verdict that documents should rely on their existing heading levels instead of a table of contents stays flag=true, because it is a reusable way of writing docs that merely happened to surface on one file.
-- "产物交付前应先对每个元素应用消融原则" -> flag=false (the body of a general output standard that is already written in ~/.claude/CLAUDE.md, ~/.pi/agent/AGENTS.md or a project AGENTS.md is injected into every session already, so restating it as a memory adds nothing and only spends injection budget). Apply this only when the delta itself shows that text being quoted or paraphrased out of such a file; never withhold a candidate on a guess that some rule like it might already exist somewhere.
+- "产物交付前应先对每个元素应用消融原则" -> flag=false (the body of a general output standard that is already written in ~/.claude/CLAUDE.md, ~/.omp/agent/AGENTS.md or a project AGENTS.md is injected into every session already, so restating it as a memory adds nothing and only spends injection budget). Apply this only when the delta itself shows that text being quoted or paraphrased out of such a file; never withhold a candidate on a guess that some rule like it might already exist somewhere.
 - "Super+Enter 现在打开一个新的终端窗口" or "顶栏现在按 WiFi、音量、电池的顺序排" -> flag=false (in an environment or dotfiles repository, what a key binding or a status bar currently does is configuration state whose real source is the config file; record it only when the delta also carries the reasoning behind that choice).
 - "Herdr feature completed: tests and e2e passed, lint clean, docs synced" -> flag=false (shipped status without a reusable learning).
 - A candidate that writes a host, endpoint, or credential field which an existing nondisclosure rule says not to persist -> flag=false (memory cannot violate nondisclosure).
@@ -724,7 +724,7 @@ Output your FINAL answer as compact JSON only, no other prose before or after it
   # Correction mode (plan §6). Superset of the prompt above: same checklist and few-shot set,
   # plus correction detection, the contrast pair, rule-form grammar and the extra output fields.
   # KEEP IN SYNC — byte-identical — with CORRECTION_SYSTEM_PROMPT in
-  # integrations/pi/asaki-memory.ts and scripts/eval-classifier.sh.
+  # integrations/omp/asaki-memory.ts and scripts/eval-classifier.sh.
   CORRECTION_SYSTEM_PROMPT='You are a memory-candidate detector, not a writer. Given a conversation delta, decide if it contains something worth saving as a durable memory, and if so pre-distill it into ready-to-write fields — the client executes the write itself via HTTP after your response (the server then routes it to a review queue), so make the call carefully here.
 
 PRIORITY: the user correcting the agent outranks everything else. A correction is any turn where the user rejects, reverses, narrows, or explicitly approves what the agent just did. If one delta contains BOTH a correction and an ordinary outcome/preference, emit ONLY the correction — the competitor is dropped, not downgraded. At most one candidate per delta.
@@ -817,7 +817,7 @@ Non-correction examples (unchanged rules):
 - "已将变更推送至 origin/main，提交为 8df25dd" -> flag=false (one-off delivery status, not durable memory).
 - "Node.js new URL().hostname 对 IPv6 loopback 返回 [::1]" -> flag=false (generic technical trivia, not a user/project memory).
 - "点点数据的 App 详情页是 JS SPA，WebFetch 抓不到价格，后续改用官方 API" -> flag=true, scope=project (tool/site-specific learning never belongs in global scope).
-- "已从 Pi 配置中彻底移除 Ponytail 包、extension、skills 和配置引用" -> flag=true, scope=project (durable current configuration state).
+- "已从 OMP 配置中彻底移除 Ponytail 包、extension、skills 和配置引用" -> flag=true, scope=project (durable current configuration state).
 - "type: fix" -> flag=false (vague commit fragment with no self-contained durable fact).
 - "Music playing now" -> flag=false (transient UI/runtime status).
 - "先强制使用 Chafa；后续确认已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp" -> flag=true, scope=project, but distill only the final Kgp state (superseded intermediate states must not become separate memories).
@@ -836,7 +836,7 @@ Non-correction examples (unchanged rules):
 - "已把审计流程的第 4 步补写进 commands/memory.md 的 workflow 段落" -> flag=false (a completed one-off edit to a data or doc file is already recorded by that file; only the durable configuration or behaviour state it leaves behind would qualify).
 - "复核了一遍现有规则，push 前检查明文密钥这条依然有效，本轮没有新增或修改任何规则" -> flag=false (restating an already-recorded rule adds nothing; flag only when the delta establishes or changes it).
 - "修复 asaki-memory 记忆提取全线失效的 bash 3.2 负偏移 bug，已推送 e07ac92 并验证部署" -> flag=false (a short release/hash recap of a fix already captured in the project is a duplicate, not a second durable memory).
-- "Removed large memory injection at Pi session start, now only shows compact status banner" -> flag=false (an intermediate rollout snapshot that was superseded by the current session-start design is not stable memory).
+- "Removed large memory injection at OMP session start, now only shows compact status banner" -> flag=false (an intermediate rollout snapshot that was superseded by the current session-start design is not stable memory).
 - When the user correction is another adjustment to the same visual value (colour, opacity, padding, radius, or offset) during an active tuning loop, and its antecedent is an earlier candidate or agent proposal from that session -> flag=false. Intermediate visual tuning states are expected to be superseded; only an explicitly reported converged final state may qualify.
 - "Prior memory candidate: 虚拟工作区高亮改用半透明" … "User: 不要颜色了，只加边框" -> flag=false (another visual-tuning redirect is an intermediate state, even when it rejects a prior candidate).
 - "保留调研文件" … "调研的文件删掉"; "update data/names-db.json" … "it is gitignored, skip that step"; or "also change X in this same PR" -> flag=false (single-task cleanup and PR scope, not standing rules).
@@ -844,7 +844,7 @@ Non-correction examples (unchanged rules):
 - "paneru 启用 focus_follows_mouse = true" -> flag=false (a bare literal repository config assignment belongs only in its source file). By contrast, a completed cross-repository behavioural state such as "two repositories now use build caching" remains flag=true even when project attribution is ambiguous.
 - "tab 改为总体/全局引导/付费引导，默认显示总体；卡片和进组数据都删" -> flag=false (the user naming what one page, chart or field of one deliverable should look like is a build instruction for the current iteration, not a memory; it qualifies only when the user says it holds from now on, or when the correction is about a way of working rather than one screen). This covers instructions about an artefact, never completed work: an assistant report of a FIX that names a mechanism and the failure mode it removes stays flag=true even when the change is a visual one.
 - "Assistant: 等 AU 转化分析完成之后再做 Data 页的联动" … "User: data页不做联动" -> flag=false (a verdict on whether one page of one deliverable gets one feature dies with that version of the page; it is a correction, and it is still not a durable rule, so it must not be promoted to a prohibition in order to stop the feature being proposed again). This narrow test is about the CONTENT of one artefact — which page shows what — and never about how documents, code or reports are structured in general: a verdict that documents should rely on their existing heading levels instead of a table of contents stays flag=true, because it is a reusable way of writing docs that merely happened to surface on one file.
-- "产物交付前应先对每个元素应用消融原则" -> flag=false (the body of a general output standard that is already written in ~/.claude/CLAUDE.md, ~/.pi/agent/AGENTS.md or a project AGENTS.md is injected into every session already, so restating it as a memory adds nothing and only spends injection budget). Apply this only when the delta itself shows that text being quoted or paraphrased out of such a file; never withhold a candidate on a guess that some rule like it might already exist somewhere.
+- "产物交付前应先对每个元素应用消融原则" -> flag=false (the body of a general output standard that is already written in ~/.claude/CLAUDE.md, ~/.omp/agent/AGENTS.md or a project AGENTS.md is injected into every session already, so restating it as a memory adds nothing and only spends injection budget). Apply this only when the delta itself shows that text being quoted or paraphrased out of such a file; never withhold a candidate on a guess that some rule like it might already exist somewhere.
 - "Super+Enter 现在打开一个新的终端窗口" or "顶栏现在按 WiFi、音量、电池的顺序排" -> flag=false (in an environment or dotfiles repository, what a key binding or a status bar currently does is configuration state whose real source is the config file; record it only when the delta also carries the reasoning behind that choice).
 - "Herdr feature completed: tests and e2e passed, lint clean, docs synced" -> flag=false (shipped status without a reusable learning).
 - A candidate that writes a host, endpoint, or credential field which an existing nondisclosure rule says not to persist -> flag=false (memory cannot violate nondisclosure).
@@ -872,7 +872,7 @@ Output your FINAL answer as compact JSON only, no other prose before or after it
   # additionalProperties:false forces every field to be emitted; importance/confidence are
   # deliberately absent — the server derives both (plan §6.1/§9.1).
   # KEEP IN SYNC with CORRECTION_SCHEMA in scripts/eval-classifier.sh and the ClassifierResult
-  # parse in integrations/pi/asaki-memory.ts.
+  # parse in integrations/omp/asaki-memory.ts.
   CORRECTION_SCHEMA='{"type":"object","properties":{"flag":{"type":"boolean"},"signal":{"type":"string"},"signal_subtype":{"type":"string"},"text":{"type":"string"},"type":{"type":"string"},"scope":{"type":"string"},"project_id":{"type":"string"},"rule_form":{"type":"string"},"antecedent_source":{"type":"string"},"correction":{"type":"object","properties":{"agent_did":{"type":"string"},"captain_verdict":{"type":"string"},"redirect_target":{"type":"string"}},"required":["agent_did","captain_verdict","redirect_target"],"additionalProperties":false},"supersedes_query":{"type":"string"},"reason":{"type":"string"}},"required":["flag","signal","signal_subtype","text","type","scope","project_id","rule_form","antecedent_source","correction","supersedes_query","reason"],"additionalProperties":false}'
 
   if is_flag_enabled "$CORRECTION_MODE"; then

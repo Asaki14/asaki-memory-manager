@@ -227,7 +227,7 @@ CONCURRENT_MATCH_COUNT=$(printf '%s' "$CONCURRENT_LIST_RESPONSE" | node -e 'let 
 [[ "$CONCURRENT_MATCH_COUNT" == "1" ]] || { echo "expected exactly 1 memory from the concurrent add-resolve race, got ${CONCURRENT_MATCH_COUNT}"; exit 1; }
 
 CLASSIFIER_CANDIDATE_BODY=$(jq -cn --arg user "$USER_ID" --arg project "$PROJECT_ID" --arg content "unsupervised classifier candidate ${CONTENT}" '
-  {user_id: $user, source: "pi:agent-end-classifier",
+  {user_id: $user, source: "omp:agent-end-classifier",
    candidates: [{content: $content, kind: "task_learning", scope: "project", project_id: $project, importance: 0.9, confidence: 0.9}]}')
 CLASSIFIER_CANDIDATE_RESPONSE=$(curl_api -X POST "$BASE_URL/v1/memories/candidates" \
   -H 'Content-Type: application/json' \

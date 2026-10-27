@@ -45,7 +45,7 @@ const MEMORY_ORIGIN_QUOTE_CHARS = 60;
 
 // Lifecycle tail for memory lines: recurrence counter and correction provenance (captain decisions 4
 // + 9), both read out of metadata_json. Absent metadata renders nothing, so pre-0006 rows and plain
-// memories keep today's line. KEEP IN SYNC with formatMemoryLine() in integrations/pi/asaki-memory.ts.
+// memories keep today's line. KEEP IN SYNC with formatMemoryLine() in integrations/omp/asaki-memory.ts.
 function lifecycleSuffix(item: Record<string, unknown>): string {
   if (typeof item.metadata_json !== 'string' || !item.metadata_json.trim()) return '';
   let meta: Record<string, any>;
@@ -108,9 +108,9 @@ const SUPERSEDE_CONTENT_CHARS = 160;
 // memory_id:<the id on that line>}`; `suggested_action: "delete"` means the rule form was `retract`.
 // Non-correction rows keep today's single line, byte-for-byte.
 //
-// KEEP the emitted text byte-identical to the copy in integrations/pi/asaki-memory.ts (marked
+// KEEP the emitted text byte-identical to the copy in integrations/omp/asaki-memory.ts (marked
 // `// #region asaki-review-format`) — `npm run eval:review-format` fails on any drift, and it also
-// pins the deliberate asymmetry on the FALLBACK line, where only the Pi copy prints
+// pins the deliberate asymmetry on the FALLBACK line, where only the OMP copy prints
 // importance/confidence. integrations/mcp/asaki-memory.ts (the stdio server for Codex) deliberately
 // does NOT carry this block: its `asaki_memory_review_list` never sends `include_suggestions`, so it
 // has no supersession data to render and keeps the plain line for every row.
@@ -205,7 +205,7 @@ export function formatReviewLine(item: Record<string, unknown>, index?: number):
 // signal), idle = standing rules with no reinforcement and no retrieval hit, which a HUMAN judges
 // keep/retire. Nothing here is actionable by the agent alone — no line proposes a delete.
 //
-// KEEP the emitted text byte-identical to the copy in integrations/pi/asaki-memory.ts (inside
+// KEEP the emitted text byte-identical to the copy in integrations/omp/asaki-memory.ts (inside
 // `// #region asaki-review-format`) — `npm run eval:review-format` fails on any drift. Self-contained
 // on purpose: that region is loaded as a standalone module with no helpers around it.
 export function formatLifecycleReport(data: Record<string, unknown>): string {

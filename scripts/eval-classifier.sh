@@ -17,7 +17,7 @@
 #
 # KEEP IN SYNC: both prompt templates below must match CLASSIFIER_SYSTEM_PROMPT and
 # CORRECTION_SYSTEM_PROMPT in integrations/claude-code/stop-extract.sh (and the same two copies
-# in integrations/pi/asaki-memory.ts). Each fixture case in test/fixtures/classifier-cases.json
+# in integrations/omp/asaki-memory.ts). Each fixture case in test/fixtures/classifier-cases.json
 # is a real or representative delta — add a new case whenever a production false
 # positive/negative turns up.
 set -uo pipefail
@@ -99,7 +99,7 @@ Two contrastive examples:
 - "已将变更推送至 origin/main，提交为 8df25dd" -> flag=false (one-off delivery status, not durable memory).
 - "Node.js new URL().hostname 对 IPv6 loopback 返回 '[::1]'" -> flag=false (generic technical trivia, not a user/project memory).
 - "点点数据的 App 详情页是 JS SPA，WebFetch 抓不到价格，后续改用官方 API" -> flag=true, scope=project (tool/site-specific learning never belongs in global scope).
-- "已从 Pi 配置中彻底移除 Ponytail 包、extension、skills 和配置引用" -> flag=true, scope=project (durable current configuration state).
+- "已从 OMP 配置中彻底移除 Ponytail 包、extension、skills 和配置引用" -> flag=true, scope=project (durable current configuration state).
 - "type: fix" -> flag=false (vague commit fragment with no self-contained durable fact).
 - "Music playing now" -> flag=false (transient UI/runtime status).
 - "先强制使用 Chafa；后续确认已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp" -> flag=true, scope=project, but distill only the final Kgp state (superseded intermediate states must not become separate memories).
@@ -118,7 +118,7 @@ Two contrastive examples:
 - "已把审计流程的第 4 步补写进 commands/memory.md 的 workflow 段落" -> flag=false (a completed one-off edit to a data or doc file is already recorded by that file; only the durable configuration or behaviour state it leaves behind would qualify).
 - "复核了一遍现有规则，push 前检查明文密钥这条依然有效，本轮没有新增或修改任何规则" -> flag=false (restating an already-recorded rule adds nothing; flag only when the delta establishes or changes it).
 - "修复 asaki-memory 记忆提取全线失效的 bash 3.2 负偏移 bug，已推送 e07ac92 并验证部署" -> flag=false (a short release/hash recap of a fix already captured in the project is a duplicate, not a second durable memory).
-- "Removed large memory injection at Pi session start, now only shows compact status banner" -> flag=false (an intermediate rollout snapshot that was superseded by the current session-start design is not stable memory).
+- "Removed large memory injection at OMP session start, now only shows compact status banner" -> flag=false (an intermediate rollout snapshot that was superseded by the current session-start design is not stable memory).
 - When the user correction is another adjustment to the same visual value (colour, opacity, padding, radius, or offset) during an active tuning loop, and its antecedent is an earlier candidate or agent proposal from that session -> flag=false. Intermediate visual tuning states are expected to be superseded; only an explicitly reported converged final state may qualify.
 - "Prior memory candidate: 虚拟工作区高亮改用半透明" … "User: 不要颜色了，只加边框" -> flag=false (another visual-tuning redirect is an intermediate state, even when it rejects a prior candidate).
 - "保留调研文件" … "调研的文件删掉"; "update data/names-db.json" … "it is gitignored, skip that step"; or "also change X in this same PR" -> flag=false (single-task cleanup and PR scope, not standing rules).
@@ -126,7 +126,7 @@ Two contrastive examples:
 - "paneru 启用 focus_follows_mouse = true" -> flag=false (a bare literal repository config assignment belongs only in its source file). By contrast, a completed cross-repository behavioural state such as "two repositories now use build caching" remains flag=true even when project attribution is ambiguous.
 - "tab 改为总体/全局引导/付费引导，默认显示总体；卡片和进组数据都删" -> flag=false (the user naming what one page, chart or field of one deliverable should look like is a build instruction for the current iteration, not a memory; it qualifies only when the user says it holds from now on, or when the correction is about a way of working rather than one screen). This covers instructions about an artefact, never completed work: an assistant report of a FIX that names a mechanism and the failure mode it removes stays flag=true even when the change is a visual one.
 - "Assistant: 等 AU 转化分析完成之后再做 Data 页的联动" … "User: data页不做联动" -> flag=false (a verdict on whether one page of one deliverable gets one feature dies with that version of the page; it is a correction, and it is still not a durable rule, so it must not be promoted to a prohibition in order to stop the feature being proposed again). This narrow test is about the CONTENT of one artefact — which page shows what — and never about how documents, code or reports are structured in general: a verdict that documents should rely on their existing heading levels instead of a table of contents stays flag=true, because it is a reusable way of writing docs that merely happened to surface on one file.
-- "产物交付前应先对每个元素应用消融原则" -> flag=false (the body of a general output standard that is already written in ~/.claude/CLAUDE.md, ~/.pi/agent/AGENTS.md or a project AGENTS.md is injected into every session already, so restating it as a memory adds nothing and only spends injection budget). Apply this only when the delta itself shows that text being quoted or paraphrased out of such a file; never withhold a candidate on a guess that some rule like it might already exist somewhere.
+- "产物交付前应先对每个元素应用消融原则" -> flag=false (the body of a general output standard that is already written in ~/.claude/CLAUDE.md, ~/.omp/agent/AGENTS.md or a project AGENTS.md is injected into every session already, so restating it as a memory adds nothing and only spends injection budget). Apply this only when the delta itself shows that text being quoted or paraphrased out of such a file; never withhold a candidate on a guess that some rule like it might already exist somewhere.
 - "Super+Enter 现在打开一个新的终端窗口" or "顶栏现在按 WiFi、音量、电池的顺序排" -> flag=false (in an environment or dotfiles repository, what a key binding or a status bar currently does is configuration state whose real source is the config file; record it only when the delta also carries the reasoning behind that choice).
 - "Herdr feature completed: tests and e2e passed, lint clean, docs synced" -> flag=false (shipped status without a reusable learning).
 - A candidate that writes a host, endpoint, or credential field which an existing nondisclosure rule says not to persist -> flag=false (memory cannot violate nondisclosure).
@@ -153,7 +153,7 @@ Be conservative: when genuinely unsure, prefer flag=false — a missed candidate
 Output your FINAL answer as compact JSON only, no other prose before or after it: {"flag":true|false,"text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","project_id":"<one known project id when scope=project, else empty string>","reason":"<short reason, especially when flag=false>"}'
 
 # KEEP IN SYNC — byte-identical — with CORRECTION_SYSTEM_PROMPT in stop-extract.sh and
-# integrations/pi/asaki-memory.ts.
+# integrations/omp/asaki-memory.ts.
 CORRECTION_SYSTEM_PROMPT='You are a memory-candidate detector, not a writer. Given a conversation delta, decide if it contains something worth saving as a durable memory, and if so pre-distill it into ready-to-write fields — the client executes the write itself via HTTP after your response (the server then routes it to a review queue), so make the call carefully here.
 
 PRIORITY: the user correcting the agent outranks everything else. A correction is any turn where the user rejects, reverses, narrows, or explicitly approves what the agent just did. If one delta contains BOTH a correction and an ordinary outcome/preference, emit ONLY the correction — the competitor is dropped, not downgraded. At most one candidate per delta.
@@ -246,7 +246,7 @@ Non-correction examples (unchanged rules):
 - "已将变更推送至 origin/main，提交为 8df25dd" -> flag=false (one-off delivery status, not durable memory).
 - "Node.js new URL().hostname 对 IPv6 loopback 返回 [::1]" -> flag=false (generic technical trivia, not a user/project memory).
 - "点点数据的 App 详情页是 JS SPA，WebFetch 抓不到价格，后续改用官方 API" -> flag=true, scope=project (tool/site-specific learning never belongs in global scope).
-- "已从 Pi 配置中彻底移除 Ponytail 包、extension、skills 和配置引用" -> flag=true, scope=project (durable current configuration state).
+- "已从 OMP 配置中彻底移除 Ponytail 包、extension、skills 和配置引用" -> flag=true, scope=project (durable current configuration state).
 - "type: fix" -> flag=false (vague commit fragment with no self-contained durable fact).
 - "Music playing now" -> flag=false (transient UI/runtime status).
 - "先强制使用 Chafa；后续确认已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp" -> flag=true, scope=project, but distill only the final Kgp state (superseded intermediate states must not become separate memories).
@@ -265,7 +265,7 @@ Non-correction examples (unchanged rules):
 - "已把审计流程的第 4 步补写进 commands/memory.md 的 workflow 段落" -> flag=false (a completed one-off edit to a data or doc file is already recorded by that file; only the durable configuration or behaviour state it leaves behind would qualify).
 - "复核了一遍现有规则，push 前检查明文密钥这条依然有效，本轮没有新增或修改任何规则" -> flag=false (restating an already-recorded rule adds nothing; flag only when the delta establishes or changes it).
 - "修复 asaki-memory 记忆提取全线失效的 bash 3.2 负偏移 bug，已推送 e07ac92 并验证部署" -> flag=false (a short release/hash recap of a fix already captured in the project is a duplicate, not a second durable memory).
-- "Removed large memory injection at Pi session start, now only shows compact status banner" -> flag=false (an intermediate rollout snapshot that was superseded by the current session-start design is not stable memory).
+- "Removed large memory injection at OMP session start, now only shows compact status banner" -> flag=false (an intermediate rollout snapshot that was superseded by the current session-start design is not stable memory).
 - When the user correction is another adjustment to the same visual value (colour, opacity, padding, radius, or offset) during an active tuning loop, and its antecedent is an earlier candidate or agent proposal from that session -> flag=false. Intermediate visual tuning states are expected to be superseded; only an explicitly reported converged final state may qualify.
 - "Prior memory candidate: 虚拟工作区高亮改用半透明" … "User: 不要颜色了，只加边框" -> flag=false (another visual-tuning redirect is an intermediate state, even when it rejects a prior candidate).
 - "保留调研文件" … "调研的文件删掉"; "update data/names-db.json" … "it is gitignored, skip that step"; or "also change X in this same PR" -> flag=false (single-task cleanup and PR scope, not standing rules).
@@ -273,7 +273,7 @@ Non-correction examples (unchanged rules):
 - "paneru 启用 focus_follows_mouse = true" -> flag=false (a bare literal repository config assignment belongs only in its source file). By contrast, a completed cross-repository behavioural state such as "two repositories now use build caching" remains flag=true even when project attribution is ambiguous.
 - "tab 改为总体/全局引导/付费引导，默认显示总体；卡片和进组数据都删" -> flag=false (the user naming what one page, chart or field of one deliverable should look like is a build instruction for the current iteration, not a memory; it qualifies only when the user says it holds from now on, or when the correction is about a way of working rather than one screen). This covers instructions about an artefact, never completed work: an assistant report of a FIX that names a mechanism and the failure mode it removes stays flag=true even when the change is a visual one.
 - "Assistant: 等 AU 转化分析完成之后再做 Data 页的联动" … "User: data页不做联动" -> flag=false (a verdict on whether one page of one deliverable gets one feature dies with that version of the page; it is a correction, and it is still not a durable rule, so it must not be promoted to a prohibition in order to stop the feature being proposed again). This narrow test is about the CONTENT of one artefact — which page shows what — and never about how documents, code or reports are structured in general: a verdict that documents should rely on their existing heading levels instead of a table of contents stays flag=true, because it is a reusable way of writing docs that merely happened to surface on one file.
-- "产物交付前应先对每个元素应用消融原则" -> flag=false (the body of a general output standard that is already written in ~/.claude/CLAUDE.md, ~/.pi/agent/AGENTS.md or a project AGENTS.md is injected into every session already, so restating it as a memory adds nothing and only spends injection budget). Apply this only when the delta itself shows that text being quoted or paraphrased out of such a file; never withhold a candidate on a guess that some rule like it might already exist somewhere.
+- "产物交付前应先对每个元素应用消融原则" -> flag=false (the body of a general output standard that is already written in ~/.claude/CLAUDE.md, ~/.omp/agent/AGENTS.md or a project AGENTS.md is injected into every session already, so restating it as a memory adds nothing and only spends injection budget). Apply this only when the delta itself shows that text being quoted or paraphrased out of such a file; never withhold a candidate on a guess that some rule like it might already exist somewhere.
 - "Super+Enter 现在打开一个新的终端窗口" or "顶栏现在按 WiFi、音量、电池的顺序排" -> flag=false (in an environment or dotfiles repository, what a key binding or a status bar currently does is configuration state whose real source is the config file; record it only when the delta also carries the reasoning behind that choice).
 - "Herdr feature completed: tests and e2e passed, lint clean, docs synced" -> flag=false (shipped status without a reusable learning).
 - A candidate that writes a host, endpoint, or credential field which an existing nondisclosure rule says not to persist -> flag=false (memory cannot violate nondisclosure).

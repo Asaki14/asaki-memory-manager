@@ -1,26 +1,24 @@
 // Offline coverage for the two review-line formatters (plan E9): src/mcp.ts's `formatReviewLine`
-// and the copy in integrations/pi/asaki-memory.ts. Pure string assertions — no Worker, no D1, no
+// and the copy in integrations/omp/asaki-memory.ts. Pure string assertions — no Worker, no D1, no
 // network, no model.
 //
-// The Pi extension must stay a single file that imports Pi host modules this repo does not depend
-// on, so its formatter is loaded out of the `// #region asaki-review-format` block by
-// scripts/pi-trace-region.mjs — the eval executes the shipped source text, not a copy of it.
+// The OMP formatter region is loaded from its actual source by scripts/omp-trace-region.mjs.
+// This executes shipped code, not a copy of it.
 //
 // What is pinned:
 //   1. a correction row with supersedes_candidates + supersedes_pending_review_id renders the exact
 //      block from plan §7.1 (rule line, correction moment with the antecedent source, supersession
 //      suggestion with the target's current scope/kind/confidence, the contradicts line, meta);
 //   2. a non-correction row is byte-identical to the pre-change output (golden strings below);
-//   3. the deliberate asymmetry survives: only the Pi fallback line prints importance/confidence;
+//   3. the deliberate asymmetry survives: only the OMP fallback line prints importance/confidence;
 //   4. the correction block is character-identical between the two copies.
-import { loadPiReviewFormatter } from './pi-trace-region.mjs';
+import { loadOmpReviewFormatter } from './omp-trace-region.mjs';
 
-// src/mcp.ts has type-only imports, so importing it strips to a side-effect-free module load; if
-// that ever stops being true this import is where it surfaces.
+// src/mcp.ts has type-only imports, so importing it strips to a side-effect-free module load.
 const { formatReviewLine: mcpFormat, formatLifecycleReport: mcpLifecycle } = await import('../src/mcp.ts');
-const { module: pi, dispose } = await loadPiReviewFormatter();
-const piFormat = pi.formatReviewLine as (item: unknown, index?: number) => string;
-const piLifecycle = pi.formatLifecycleReport as (data: unknown) => string;
+const { module: omp, dispose } = await loadOmpReviewFormatter();
+const ompFormat = omp.formatReviewLine as (item: unknown, index?: number) => string;
+const ompLifecycle = omp.formatLifecycleReport as (data: unknown) => string;
 
 let pass = 0;
 const failures: string[] = [];
@@ -79,9 +77,9 @@ const correctionBlock = [
 ].join('\n');
 
 check('mcp / correction block', mcpFormat(correctionRow, 0), correctionBlock);
-check('pi / correction block', piFormat(correctionRow, 0), correctionBlock);
+check('omp / correction block', ompFormat(correctionRow, 0), correctionBlock);
 // 4. the two copies must not drift — same input, same characters.
-check('correction block is identical across both copies', mcpFormat(correctionRow, 0), piFormat(correctionRow, 0));
+check('correction block is identical across both copies', mcpFormat(correctionRow, 0), ompFormat(correctionRow, 0));
 
 // A real pending row also carries status; the queue's own fields stay on the meta line.
 const pendingRow = { ...correctionRow, status: 'pending', supersedes_candidates: null };
@@ -94,7 +92,7 @@ const pendingBlock = [
   '   source=claude-code:stop-classifier created_at=2026-07-31T02:11Z',
 ].join('\n');
 check('mcp / suggestion cap reached', mcpFormat(pendingRow, 0), pendingBlock);
-check('pi / suggestion cap reached', piFormat(pendingRow, 0), pendingBlock);
+check('omp / suggestion cap reached', ompFormat(pendingRow, 0), pendingBlock);
 
 // Evidence is optional at the row level (coercion is total server-side), so a correction with no
 // recoverable antecedent must still render — visibly weak, not crashed or hidden.
@@ -108,7 +106,7 @@ const bareBlock = [
   '   id=rev_bare scope=global kind=rule importance=0.80 confidence=1.00',
 ].join('\n');
 check('mcp / correction without evidence', mcpFormat(bareCorrection), bareBlock);
-check('pi / correction without evidence', piFormat(bareCorrection), bareBlock);
+check('omp / correction without evidence', ompFormat(bareCorrection), bareBlock);
 
 // --- 2 + 3. the non-correction fallback, byte-identical to the pre-change output --------------
 const plainRow = {
@@ -127,8 +125,8 @@ check(
   '2. 偏好短句输出 id=rev_02 status=pending scope=global kind=preference source=pi:agent-end-classifier created_at=2026-07-30T09:00Z updated_at=2026-07-30T09:05Z potential_duplicate=[memory_id=mem_11 suggested=ignore reason="near-duplicate"]',
 );
 check(
-  'pi / non-correction line unchanged (keeps importance/confidence)',
-  piFormat(plainRow, 1),
+  'omp / non-correction line unchanged (keeps importance/confidence)',
+  ompFormat(plainRow, 1),
   '2. 偏好短句输出 id=rev_02 status=pending scope=global kind=preference importance=0.40 confidence=1.00 source=pi:agent-end-classifier created_at=2026-07-30T09:00Z updated_at=2026-07-30T09:05Z potential_duplicate=[memory_id=mem_11 suggested=ignore reason="near-duplicate"]',
 );
 
@@ -142,8 +140,8 @@ const resolvedRow = {
 };
 check('mcp / resolved non-correction row', mcpFormat(resolvedRow), '统一用 pnpm id=rev_03 status=resolved action=update memory_id=mem_9 scope=project kind=decision');
 check(
-  'pi / resolved non-correction row',
-  piFormat(resolvedRow),
+  'omp / resolved non-correction row',
+  ompFormat(resolvedRow),
   '统一用 pnpm id=rev_03 status=resolved action=update memory_id=mem_9 scope=project kind=decision importance=0.50 confidence=1.00',
 );
 
@@ -176,7 +174,7 @@ const longBlock = [
   '   id=rev_04 scope=project kind=rule importance=0.90 confidence=0.85',
 ].join('\n');
 check('mcp / long supersession target is truncated', mcpFormat(longRow), longBlock);
-check('pi / long supersession target is truncated', piFormat(longRow), longBlock);
+check('omp / long supersession target is truncated', ompFormat(longRow), longBlock);
 
 // --- 5. the global-promotion suggestion (captain decision 8) -----------------------------------
 // A project correction whose rule already exists in ANOTHER project renders one `⤷ promote:` line per
@@ -198,7 +196,7 @@ const promotionBlock = [
   '   source=claude-code:stop-classifier created_at=2026-07-31T02:11Z',
 ].join('\n');
 check('mcp / promotion suggestion', mcpFormat(promotionRow, 0), promotionBlock);
-check('pi / promotion suggestion', piFormat(promotionRow, 0), promotionBlock);
+check('omp / promotion suggestion', ompFormat(promotionRow, 0), promotionBlock);
 
 const promotionCapRow = { ...correctionRow, supersedes_candidates: undefined, promotion_candidates: null };
 const promotionCapBlock = [
@@ -210,11 +208,11 @@ const promotionCapBlock = [
   '   source=claude-code:stop-classifier created_at=2026-07-31T02:11Z',
 ].join('\n');
 check('mcp / promotion cap reached', mcpFormat(promotionCapRow), promotionCapBlock);
-check('pi / promotion cap reached', piFormat(promotionCapRow), promotionCapBlock);
+check('omp / promotion cap reached', ompFormat(promotionCapRow), promotionCapBlock);
 
 // A row that was never promotable (no promotion_candidates key at all) must render exactly as before.
 check('mcp / no promotion key leaves the block unchanged', mcpFormat(correctionRow, 0), correctionBlock);
-check('pi / no promotion key leaves the block unchanged', piFormat(correctionRow, 0), correctionBlock);
+check('omp / no promotion key leaves the block unchanged', ompFormat(correctionRow, 0), correctionBlock);
 
 // --- 6. the lifecycle report (captain decision 4) ----------------------------------------------
 const lifecycleData = {
@@ -237,7 +235,7 @@ const lifecycleText = [
   '1. mem_old [scope=global kind=preference importance=0.40] idle=64d last_signal=2026-05-28T09:00Z reinforced=0x "偏好短句输出"',
 ].join('\n');
 check('mcp / lifecycle report', mcpLifecycle(lifecycleData), lifecycleText);
-check('pi / lifecycle report', piLifecycle(lifecycleData), lifecycleText);
+check('omp / lifecycle report', ompLifecycle(lifecycleData), lifecycleText);
 
 const emptyLifecycle = { idle_days_threshold: 30, standing_rules: { active: 17, reinforced: 0, total_reinforcements: 0, repeat_rate: 0 }, recurrence: [], idle_rules: [] };
 const emptyLifecycleText = [
@@ -248,7 +246,7 @@ const emptyLifecycleText = [
   'Possibly stale: none idle for 30d.',
 ].join('\n');
 check('mcp / lifecycle report with nothing to flag', mcpLifecycle(emptyLifecycle), emptyLifecycleText);
-check('pi / lifecycle report with nothing to flag', piLifecycle(emptyLifecycle), emptyLifecycleText);
+check('omp / lifecycle report with nothing to flag', ompLifecycle(emptyLifecycle), emptyLifecycleText);
 
 dispose();
 

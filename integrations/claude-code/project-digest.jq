@@ -2,8 +2,8 @@
 # SessionStart hook (integrations/claude-code/session-start.sh).
 #
 # KEEP IN SYNC with the canonical TypeScript in src/services/projectDigest.ts (and its
-# verbatim copy in integrations/pi/asaki-memory.ts). scripts/eval-project-digest.ts runs
-# this file against the same fixtures as the TS copy and fails if the rendered blocks
+# verbatim copy in integrations/omp/asaki-memory.ts). scripts/eval-project-digest.ts runs
+# this file against the same fixtures as the OMP copy and fails if the rendered blocks
 # differ by a single byte.
 #
 # Input:  the /v1/memories/list response ({"memories": [...]}) on stdin — the SAME response

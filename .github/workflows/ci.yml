@@ -46,7 +46,9 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run typecheck:pi
+      - run: npm run typecheck:omp
+      - run: npm run eval:candidates
+      - run: npm run eval:omp-inject
       # Drift guards: the prompt copies and the two project-context implementations are only
       # "in sync" if something fails when they are not.
       - run: npm run eval:prompt-sync

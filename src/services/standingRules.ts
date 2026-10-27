@@ -7,14 +7,14 @@
  * `/v1/memories/list` response they already fetch for the session banner.
  *
  * The region between the `standing-rules:begin` / `standing-rules:end` markers below is
- * the source of truth and is copied VERBATIM into `integrations/pi/asaki-memory.ts`
- * (Pi ships a single self-contained extension file, so it cannot import this module).
+ * the source of truth and is copied VERBATIM into `integrations/omp/asaki-memory.ts`
+ * (the OMP native extension is a single self-contained file, so it cannot import this module).
  * `integrations/claude-code/standing-rules.jq` is the jq re-implementation for the
  * Claude Code SessionStart hook. `scripts/eval-standing-rules.ts` asserts all three
  * agree: it byte-compares the two TS copies and diffs the jq output against this one.
  */
 
-// --- standing-rules:begin (KEEP IN SYNC: src/services/standingRules.ts <-> integrations/pi/asaki-memory.ts) ---
+// --- standing-rules:begin (KEEP IN SYNC: src/services/standingRules.ts <-> integrations/omp/asaki-memory.ts) ---
 export const STANDING_RULES_DEFAULT_KINDS = ['rule', 'preference'] as const;
 export const STANDING_RULES_DEFAULT_MAX = 20;
 export const STANDING_RULES_MAX_CHARS = 4000;

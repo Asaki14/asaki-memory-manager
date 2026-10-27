@@ -12,8 +12,8 @@
 #   - the banner's field/omission matrix on all three paths (setup-required, normal, list failure),
 #   - auto-inject sends the validated top_k/min_score and honours its display budget.
 #
-# Pi half: scripts/eval-pi-inject.mjs (invoked at the end), which also emits the banner matrix so
-# the two clients' field sets and order are compared byte for byte.
+ # OMP half: scripts/eval-omp-inject.mjs exercises the native ExtensionAPI host and emits the
+ # banner matrix compared below against the Claude Code hook builder.
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -317,13 +317,13 @@ assert_eq "K: an absurd top_k clamps to 20" "$(printf '%s' "$BODY" | jq -r '.top
 
 unset ASAKI_MEMORY_AUTO_INJECT ASAKI_MEMORY_AUTO_INJECT_ALWAYS
 
-# --- Pi half + cross-client banner comparison ---------------------------------------------------
+ # --- OMP half + cross-client banner comparison ------------------------------------------------
 MATRIX="$WORK/banner-matrix.tsv"
-if ! ASAKI_BANNER_MATRIX_OUT="$MATRIX" node --experimental-strip-types "$ROOT/scripts/eval-pi-inject.mjs"; then
+if ! ASAKI_BANNER_MATRIX_OUT="$MATRIX" node --experimental-strip-types "$ROOT/scripts/eval-omp-inject.mjs"; then
   FAILURES=$((FAILURES + 1))
 fi
 
-# The Pi builder and the hook's asaki_banner_line() must render the same state identically —
+ # The OMP builder and the hook's asaki_banner_line() must render the same state identically —
 # same field set, same order, same separators.
 # shellcheck source=/dev/null
 ASAKI_MEMORY_SESSION_START_LIB=1 . "$ROOT/integrations/claude-code/session-start.sh"
@@ -348,12 +348,12 @@ claude_matrix_line() {
 }
 
 if [ -f "$MATRIX" ]; then
-  while IFS=$'\t' read -r label pi_line; do
+  while IFS=$'\t' read -r label omp_line; do
     [ -z "$label" ] && continue
-    assert_eq "matrix ${label}: Claude and Pi render the same fields" "$(claude_matrix_line "$label")" "$pi_line"
+    assert_eq "matrix ${label}: Claude and OMP render the same fields" "$(claude_matrix_line "$label")" "$omp_line"
   done <"$MATRIX"
 else
-  fail "matrix: scripts/eval-pi-inject.mjs did not emit the banner matrix"
+  fail "matrix: scripts/eval-omp-inject.mjs did not emit the banner matrix"
 fi
 
 echo "session-inject eval: ${CHECKS} Claude-side checks, ${FAILURES} failure(s)"

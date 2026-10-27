@@ -1,9 +1,7 @@
-// Pi half of `npm run eval:inject-env`: runs the same parameterized table as the bash halves
-// against the SHIPPED `// #region asaki-env-parse` block of integrations/pi/asaki-memory.ts, so
-// the contract is asserted at runtime and not merely typechecked.
-import { loadPiEnvParsers } from './pi-trace-region.mjs';
+// OMP half of `npm run eval:inject-env`: applies the shared table to the OMP source region.
+import { loadOmpEnvParsers } from './omp-trace-region.mjs';
 
-const { module, dispose } = await loadPiEnvParsers();
+const { module, dispose } = await loadOmpEnvParsers();
 const {
   parsePositiveIntEnv,
   parseUnitScoreEnv,
@@ -69,7 +67,7 @@ const intTable = [
 
 for (const [raw, expected] of intTable) {
   variants.forEach((variant, index) => {
-    check(`pi int ${variant.name} raw=${JSON.stringify(raw)}`, expected[index], parsePositiveIntEnv(raw, variant.def, variant.cap));
+    check(`OMP int ${variant.name} raw=${JSON.stringify(raw)}`, expected[index], parsePositiveIntEnv(raw, variant.def, variant.cap));
   });
 }
 
@@ -102,7 +100,7 @@ const scoreTable = [
 ];
 
 for (const [raw, expected] of scoreTable) {
-  check(`pi score raw=${JSON.stringify(raw)}`, expected, parseUnitScoreEnv(raw, 0.67));
+  check(`OMP score raw=${JSON.stringify(raw)}`, expected, parseUnitScoreEnv(raw, 0.67));
 }
 
 // Every accepted score must be a number the server accepts (it 400s outside [0,1]).
@@ -110,13 +108,13 @@ for (const [raw] of scoreTable) {
   const value = parseUnitScoreEnv(raw, 0.67);
   checks += 1;
   if (!Number.isFinite(value) || value < 0 || value > 1) {
-    failures.push(`pi score raw=${JSON.stringify(raw)}: ${value} is outside the server's [0,1] range`);
+    failures.push(`OMP score raw=${JSON.stringify(raw)}: ${value} is outside the server's [0,1] range`);
   }
 }
 
 dispose();
 
-console.log(`inject-env eval (pi): ${checks} checks, ${failures.length} failure(s)`);
+console.log(`inject-env eval (omp): ${checks} checks, ${failures.length} failure(s)`);
 if (failures.length > 0) {
   for (const failure of failures) console.log(`- FAIL ${failure}`);
   process.exit(1);

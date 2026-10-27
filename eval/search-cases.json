@@ -1,8 +1,8 @@
 [
   {
-    "name": "pi auto inject env var outranks unrelated extension memory",
-    "query": "Asaki memory Pi extension agent-decided memory retrieval auto inject disabled default ASAKI_MEMORY_AUTO_INJECT",
-    "project_id": ".pi",
+    "name": "OMP auto inject env var outranks unrelated extension memory",
+    "query": "Asaki memory OMP extension agent-decided memory retrieval auto inject disabled default ASAKI_MEMORY_AUTO_INJECT",
+    "project_id": ".omp",
     "top_k": 3,
     "expected_top_ids": [
       "asaki-auto-inject"
@@ -14,7 +14,7 @@
       {
         "id": "atomic-commit",
         "content": "atomic-commit extension now generates English Conventional Commit subjects from git status/worktree changes instead of extracting assistant/user conversation text; it also filters key-exit-debug.log from auto-commit summaries and temp-index commits as runtime noise.",
-        "project_id": ".pi",
+        "project_id": ".omp",
         "kind": "decision",
         "importance": 0.7,
         "confidence": 0.95,
@@ -22,8 +22,8 @@
       },
       {
         "id": "asaki-auto-inject",
-        "content": "Asaki memory Pi extension auto-injection was optimized: automatic memory search now only runs when the prompt matches memory-needed cues unless ASAKI_MEMORY_AUTO_INJECT_ALWAYS is enabled; empty/no-injection search displays are hidden unless ASAKI_MEMORY_DEBUG is enabled.",
-        "project_id": ".pi",
+        "content": "Asaki memory OMP extension auto-injection was optimized: automatic memory search now only runs when the prompt matches memory-needed cues unless ASAKI_MEMORY_AUTO_INJECT_ALWAYS is enabled; empty/no-injection search displays are hidden unless ASAKI_MEMORY_DEBUG is enabled.",
+        "project_id": ".omp",
         "kind": "decision",
         "importance": 0.65,
         "confidence": 0.9,
@@ -245,7 +245,7 @@
     "memories": [
       {
         "id": "auto-min-score",
-        "content": "Pi auto inject defaults to ASAKI_MEMORY_AUTO_MIN_SCORE=0.50; keep low-score memories out of injected context.",
+        "content": "OMP auto inject defaults to ASAKI_MEMORY_AUTO_MIN_SCORE=0.50; keep low-score memories out of injected context.",
         "project_id": "asaki-memory-manager",
         "kind": "rule",
         "semantic": 0.72
@@ -405,7 +405,7 @@
   },
   {
     "name": "debug display query prefers score details integration",
-    "query": "Pi MCP search results debug show score_details",
+    "query": "OMP MCP search results debug show score_details",
     "project_id": "asaki-memory-manager",
     "top_k": 3,
     "expected_top_ids": [
@@ -417,7 +417,7 @@
     "memories": [
       {
         "id": "score-details-debug",
-        "content": "Pi and MCP search results should optionally display score_details in debug mode while keeping default output concise.",
+        "content": "OMP and MCP search results should optionally display score_details in debug mode while keeping default output concise.",
         "project_id": "asaki-memory-manager",
         "kind": "decision",
         "semantic": 0.72
@@ -1073,7 +1073,7 @@
       },
       {
         "id": "auto-min-score",
-        "content": "Pi auto inject defaults to ASAKI_MEMORY_AUTO_MIN_SCORE=0.50; keep low-score memories out of injected context.",
+        "content": "OMP auto inject defaults to ASAKI_MEMORY_AUTO_MIN_SCORE=0.50; keep low-score memories out of injected context.",
         "project_id": "asaki-memory-manager",
         "kind": "rule",
         "semantic": 0.82
@@ -1251,20 +1251,20 @@
     ]
   },
   {
-    "name": "pi integration query prefers pi extension path",
-    "query": "integrations pi asaki-memory optional Pi extension",
+    "name": "OMP integration query prefers native extension path",
+    "query": "integrations omp asaki-memory native OMP extension",
     "project_id": "asaki-memory-manager",
     "top_k": 3,
     "expected_top_ids": [
-      "pi-integration"
+      "omp-integration"
     ],
     "bad_result_ids": [
       "mcp-integration"
     ],
     "memories": [
       {
-        "id": "pi-integration",
-        "content": "integrations/pi/asaki-memory.ts is the optional Pi integration extension.",
+        "id": "omp-integration",
+        "content": "integrations/omp/asaki-memory.ts is the native OMP extension entry point.",
         "project_id": "asaki-memory-manager",
         "kind": "fact",
         "semantic": 0.79
@@ -1287,7 +1287,7 @@
       "mcp-integration"
     ],
     "bad_result_ids": [
-      "pi-integration"
+      "omp-integration"
     ],
     "memories": [
       {
@@ -1298,8 +1298,8 @@
         "semantic": 0.79
       },
       {
-        "id": "pi-integration",
-        "content": "integrations/pi/asaki-memory.ts is the optional Pi integration extension.",
+        "id": "omp-integration",
+        "content": "integrations/omp/asaki-memory.ts is the native OMP extension entry point.",
         "project_id": "asaki-memory-manager",
         "kind": "fact",
         "semantic": 0.82

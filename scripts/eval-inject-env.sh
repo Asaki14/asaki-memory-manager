@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # Offline eval for the injection knobs' numeric env parsing.
 #
-# One parameterized table, three copies of the same contract:
-#   - asaki_parse_positive_int / asaki_parse_unit_score in integrations/claude-code/user-prompt.sh
-#   - asaki_parse_positive_int in integrations/claude-code/session-start.sh
-#   - parsePositiveIntEnv / parseUnitScoreEnv in integrations/pi/asaki-memory.ts (run through
-#     scripts/eval-inject-env.mjs, which loads the shipped `// #region asaki-env-parse` block)
+# One parameterized table covers the numeric injection env contract:
+#   - both Claude Code hook libraries
+#   - the OMP `// #region asaki-env-parse` via scripts/eval-inject-env.mjs
 #
 # Both hooks are sourced as libraries (their *_LIB guards stop before any hook side effect), so
 # nothing here reads stdin, calls curl, or writes anything.
@@ -137,7 +135,7 @@ for row in "${INT_TABLE[@]}"; do
   CHECKS=$((CHECKS + 1))
 done
 
-# The Pi copy of the same contract, driven by the same table.
+# The OMP copy of the shared contract is driven by the same table.
 if ! node --experimental-strip-types "$ROOT/scripts/eval-inject-env.mjs"; then
   FAILURES=$((FAILURES + 1))
 fi

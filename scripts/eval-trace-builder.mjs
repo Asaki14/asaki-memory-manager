@@ -2,28 +2,28 @@
 //
 // A `Tool:` line inside a hand-written classifier fixture only proves the model can read that
 // line. This eval checks the PRODUCER: a captured Claude Code transcript slice and a synthetic
-// Pi AgentMessage[] go through the shipped builders and the emitted text is asserted verbatim —
+// OMP AgentMessage[] go through the shipped builders and the emitted text is asserted verbatim —
 // tool/arg selection per client, R1–R5 redaction, the gate-before-redact order, truncation,
 // ordering, the prior/current delimiters, `toolResult` never being read, and the byte identity
 // of the trace-off output.
 //
-// Claude Code's builder is imported directly; the Pi builder lives inside a single publishable
-// file, so its `#region asaki-trace-builder` block is loaded via scripts/pi-trace-region.mjs.
+// Claude Code's builder is imported directly; the OMP trace region is loaded from the native
+// extension source via scripts/omp-trace-region.mjs.
 // No network, no model, no Worker.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildDelta, buildDeltaResult, redactCommand, redactToken, stripPrivate, traceLineForToolUse } from '../integrations/claude-code/build-delta.mjs';
-import { loadPiTraceBuilder } from './pi-trace-region.mjs';
+import { loadOmpTraceBuilder } from './omp-trace-region.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO_ROOT = '/repo';
 
 const claudeTranscript = readFileSync(join(ROOT, 'test/fixtures/trace-builder-claude-transcript.jsonl'), 'utf8');
-const piMessages = JSON.parse(readFileSync(join(ROOT, 'test/fixtures/trace-builder-pi-messages.json'), 'utf8'));
+const ompMessages = JSON.parse(readFileSync(join(ROOT, 'test/fixtures/trace-builder-omp-messages.json'), 'utf8'));
 
-const { module: pi, dispose } = await loadPiTraceBuilder();
+const { module: omp, dispose } = await loadOmpTraceBuilder();
 
 let pass = 0;
 const failures = [];
@@ -106,16 +106,16 @@ check('unknown tool emits the name alone', traceLineForToolUse('WebFetch', { url
 check('gated arg drops the whole line', traceLineForToolUse('Bash', { command: 'wrangler secret put ADMIN_API_KEY' }, REPO_ROOT), null);
 check('missing repo root bounds every path', traceLineForToolUse('Read', { file_path: '/repo/src/index.ts' }, ''), 'Tool: read');
 
-// --- Pi: same discipline, its own whitelist ---------------------------------------------------
-const piTraceOff = [
+// --- OMP: same discipline, native tool whitelist ----------------------------------------------
+const ompTraceOff = [
   'User: 改一下 src/index.ts 的排序',
   'Assistant: 好的，我先读一下文件。',
   'Assistant: 已提交改动。',
   'User: 别再自动 commit 了',
 ].join('\n\n');
-check('pi / trace off, correction off is byte-identical to today', pi.buildExtractionText(piMessages, {}), piTraceOff);
+check('OMP / trace off, correction off is byte-identical to today', omp.buildExtractionText(ompMessages, {}), ompTraceOff);
 
-const piTraceOn = [
+const ompTraceOn = [
   'User: 改一下 src/index.ts 的排序',
   'Assistant: 好的，我先读一下文件。',
   'Tool: read src/index.ts',
@@ -125,51 +125,62 @@ const piTraceOn = [
   "Tool: bash ssh <host> 'systemctl restart api'",
   'Tool: todowrite',
   'Tool: edit src/index.ts',
-  // Pi has `find`, not `Glob`, and its whitelisted arg is `pattern`.
-  'Tool: find src/**/*.ts',
+  'Tool: find',
+  'Tool: glob src/**/*.ts',
   'Assistant: 已提交改动。',
   'User: 别再自动 commit 了',
 ].join('\n\n');
-check('pi / trace on emits the expected lines', pi.buildExtractionText(piMessages, { actionTrace: true, repoRoot: REPO_ROOT }), piTraceOn);
-check('pi / toolResult messages are never read', String(pi.buildExtractionText(piMessages, { actionTrace: true, repoRoot: REPO_ROOT }).includes('DATABASE_PASSWORD')), 'false');
-check('pi / thinking is never read', String(pi.buildExtractionText(piMessages, { actionTrace: true, repoRoot: REPO_ROOT }).includes('internal reasoning')), 'false');
-check('pi / path arg key is `path`, not `file_path`', pi.traceLineForToolCall({ type: 'toolCall', name: 'edit', arguments: { file_path: '/repo/src/index.ts' } }, REPO_ROOT), 'Tool: edit');
-check('pi / ls is whitelisted', pi.traceLineForToolCall({ type: 'toolCall', name: 'ls', arguments: { path: '/repo/src' } }, REPO_ROOT), 'Tool: ls src');
-check('pi / Claude-style tool names are not in Pi table', pi.traceLineForToolCall({ type: 'toolCall', name: 'Glob', arguments: { pattern: 'src/**' } }, REPO_ROOT), 'Tool: glob');
-
-// --- Pi: the prior/current boundary the correction prompt depends on --------------------------
-const piCorrection = pi.buildExtractionText(piMessages, { actionTrace: true, correctionMode: true, repoRoot: REPO_ROOT });
-const priorLines = piTraceOn.split('\n\n').slice(0, -1);
-const currentLines = piTraceOn.split('\n\n').slice(-1);
+check('OMP / trace on emits the expected lines', omp.buildExtractionText(ompMessages, { actionTrace: true, repoRoot: REPO_ROOT }), ompTraceOn);
+check('OMP / toolResult messages are never read', String(omp.buildExtractionText(ompMessages, { actionTrace: true, repoRoot: REPO_ROOT }).includes('DATABASE_PASSWORD')), 'false');
+check('OMP / thinking is never read', String(omp.buildExtractionText(ompMessages, { actionTrace: true, repoRoot: REPO_ROOT }).includes('internal reasoning')), 'false');
 check(
-  'pi / correction mode labels prior context and delimits the current turn',
-  piCorrection,
-  [pi.PRIOR_BLOCK_HEADER, ...priorLines, pi.CURRENT_DELTA_DELIMITER, ...currentLines].join('\n\n'),
+  'OMP hashline edit traces the repo-relative path but not patch contents',
+  omp.traceLineForToolCall({ type: 'toolCall', name: 'edit', arguments: { input: `[src/index.ts#A1B2]
+PUT 1.=1:
++const value = 2;` } }, REPO_ROOT),
+  'Tool: edit src/index.ts',
+);
+check('OMP find omits its free-form query from traces', omp.traceLineForToolCall({ type: 'toolCall', name: 'find', arguments: { query: 'locate a sensitive deployment key' } }, REPO_ROOT), 'Tool: find');
+check('OMP glob traces its bounded path argument', omp.traceLineForToolCall({ type: 'toolCall', name: 'glob', arguments: { path: 'src/**/*.ts' } }, REPO_ROOT), 'Tool: glob src/**/*.ts');
+check('OMP unwhitelisted tools emit only their name', omp.traceLineForToolCall({ type: 'toolCall', name: 'webfetch', arguments: { url: 'https://internal.invalid/private' } }, REPO_ROOT), 'Tool: webfetch');
+
+// --- OMP: prior/current boundary required by correction mode ---------------------------------
+const ompCorrection = omp.buildExtractionText(ompMessages, { actionTrace: true, correctionMode: true, repoRoot: REPO_ROOT });
+const priorLines = ompTraceOn.split('\n\n').slice(0, -1);
+const currentLines = ompTraceOn.split('\n\n').slice(-1);
+check(
+  'OMP / correction mode labels prior context and delimits the current turn',
+  ompCorrection,
+  [omp.PRIOR_BLOCK_HEADER, ...priorLines, omp.CURRENT_DELTA_DELIMITER, ...currentLines].join('\n\n'),
 );
 check(
-  'pi / the prior memory candidate line lands inside the prior block',
-  pi
-    .buildExtractionText(piMessages, { actionTrace: true, correctionMode: true, repoRoot: REPO_ROOT, priorCandidate: '每次编辑完成后自动 commit 并推送' })
+  'OMP / the prior memory candidate line lands inside the prior block',
+  omp
+    .buildExtractionText(ompMessages, { actionTrace: true, correctionMode: true, repoRoot: REPO_ROOT, priorCandidate: '每次编辑完成后自动 commit 并推送' })
     .split('\n\n')
     .at(-3),
   'Prior memory candidate: 每次编辑完成后自动 commit 并推送',
 );
 check(
-  'pi / a single-turn delta has no prior block at all',
-  pi.buildExtractionText([{ role: 'user', content: [{ type: 'text', text: '别再自动 commit 了' }] }], { correctionMode: true }),
+  'OMP / a single-turn delta has no prior block at all',
+  omp.buildExtractionText([{ role: 'user', content: [{ type: 'text', text: '别再自动 commit 了' }] }], { correctionMode: true }),
   'User: 别再自动 commit 了',
 );
 check(
-  'pi / transcript order is preserved, nothing is deduplicated',
-  pi.buildExtractionText(
+  'OMP / transcript order is preserved, nothing is deduplicated',
+  omp.buildExtractionText(
     [
-      { role: 'assistant', stopReason: 'toolUse', content: [{ type: 'toolCall', name: 'edit', arguments: { path: '/repo/src/a.ts' } }] },
+      { role: 'assistant', stopReason: 'toolUse', content: [{ type: 'toolCall', name: 'edit', arguments: { input: `[src/a.ts#A1B2]
+PUT 1.=1:
++const value = 2;` } }] },
       { role: 'user', content: [{ type: 'text', text: '不对' }] },
-      { role: 'assistant', stopReason: 'toolUse', content: [{ type: 'toolCall', name: 'edit', arguments: { path: '/repo/src/a.ts' } }] },
+      { role: 'assistant', stopReason: 'toolUse', content: [{ type: 'toolCall', name: 'edit', arguments: { input: `[src/a.ts#A1B2]
+PUT 1.=1:
++const value = 2;` } }] },
     ],
     { actionTrace: true, correctionMode: true, repoRoot: REPO_ROOT },
   ),
-  [pi.PRIOR_BLOCK_HEADER, 'Tool: edit src/a.ts', pi.CURRENT_DELTA_DELIMITER, 'User: 不对', 'Tool: edit src/a.ts'].join('\n\n'),
+  [omp.PRIOR_BLOCK_HEADER, 'Tool: edit src/a.ts', omp.CURRENT_DELTA_DELIMITER, 'User: 不对', 'Tool: edit src/a.ts'].join('\n\n'),
 );
 
 // --- `<private>…</private>` user-explicit exclusion (report §四 P2-A, captain ruling c) ---------
@@ -212,23 +223,23 @@ check('private / an assistant-side marker never drops the delta (only the user c
 check('private / a delta with no marker is untouched (no privateOnly, no whitespace change)', String(buildDeltaResult(claudeTranscript, { repoRoot: REPO_ROOT, actionTrace: true }).privateOnly), 'false');
 check('private / stripPrivate reports sawMarker only when it changed the text', String(stripPrivate('nothing here').sawMarker), 'false');
 
-// Pi: same three shapes. Pi keeps no offset, so "advance the cursor" collapses to an empty delta.
-const piUser = (text) => ({ role: 'user', content: [{ type: 'text', text }] });
-const piAsst = (text) => ({ role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text }] });
-check('pi / private / a closed block is stripped, the rest survives', pi.buildExtractionText([piUser('以后都用 pnpm <private>我的体检报告</private> 记住这条')], {}), 'User: 以后都用 pnpm 记住这条');
+// OMP: the same private-text shapes; cursor advancement is not part of the extension transcript.
+const ompUser = (text) => ({ role: 'user', content: [{ type: 'text', text }] });
+const ompAsst = (text) => ({ role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text }] });
+check('OMP / private / a closed block is stripped, the rest survives', omp.buildExtractionText([ompUser('以后都用 pnpm <private>我的体检报告</private> 记住这条')], {}), 'User: 以后都用 pnpm 记住这条');
 check(
-  'pi / private / a mixed delta keeps the non-private turns',
-  pi.buildExtractionText([piUser('<private>薪资细节</private>'), piAsst('好的'), piUser('以后都用 pnpm')], {}),
+  'OMP / private / a mixed delta keeps the non-private turns',
+  omp.buildExtractionText([ompUser('<private>薪资细节</private>'), ompAsst('好的'), ompUser('以后都用 pnpm')], {}),
   ['Assistant: 好的', 'User: 以后都用 pnpm'].join('\n\n'),
 );
-check('pi / private / an all-private current turn empties the whole delta', pi.buildExtractionText([piUser('以后都用 pnpm'), piAsst('好的'), piUser('<private>整轮都是私密内容</private>')], {}), '');
+check('OMP / private / an all-private current turn empties the whole delta', omp.buildExtractionText([ompUser('以后都用 pnpm'), ompAsst('好的'), ompUser('<private>整轮都是私密内容</private>')], {}), '');
 check(
-  'pi / private / an all-private current turn empties the delta in correction mode too',
-  pi.buildExtractionText([piUser('以后都用 pnpm'), piAsst('好的'), piUser('<PRIVATE>整轮都是私密内容</private>')], { correctionMode: true, actionTrace: true, repoRoot: REPO_ROOT }),
+  'OMP / private / an all-private current turn empties the delta in correction mode too',
+  omp.buildExtractionText([ompUser('以后都用 pnpm'), ompAsst('好的'), ompUser('<PRIVATE>整轮都是私密内容</private>')], { correctionMode: true, actionTrace: true, repoRoot: REPO_ROOT }),
   '',
 );
-check('pi / private / an unclosed marker strips to the end of the segment', pi.buildExtractionText([piUser('先说正事 <private>然后开始讲私事')], {}), 'User: 先说正事');
-check('pi / private / an unclosed marker covering the whole turn empties the delta', pi.buildExtractionText([piUser('<private>全部都是私事')], {}), '');
+check('OMP / private / an unclosed marker strips to the end of the segment', omp.buildExtractionText([ompUser('先说正事 <private>然后开始讲私事')], {}), 'User: 先说正事');
+check('OMP / private / an unclosed marker covering the whole turn empties the delta', omp.buildExtractionText([ompUser('<private>全部都是私事')], {}), '');
 
 // --- Cross-client agreement on the shared rules ------------------------------------------------
 for (const command of [
@@ -240,7 +251,7 @@ for (const command of [
 ]) {
   check(
     `both clients redact identically: ${command}`,
-    pi.traceLineForToolCall({ type: 'toolCall', name: 'bash', arguments: { command } }, REPO_ROOT),
+    omp.traceLineForToolCall({ type: 'toolCall', name: 'bash', arguments: { command } }, REPO_ROOT),
     traceLineForToolUse('Bash', { command }, REPO_ROOT),
   );
 }

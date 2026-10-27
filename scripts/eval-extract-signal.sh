@@ -7,7 +7,7 @@
 #
 # KEEP IN SYNC: this pattern must match EXTRACT_SIGNAL_PATTERN in
 # integrations/claude-code/stop-extract.sh and EXTRACT_SIGNAL_RE in
-# integrations/pi/asaki-memory.ts. This script only exercises the bash/grep copy directly (the
+# integrations/omp/asaki-memory.ts. This script only exercises the bash/grep copy directly (the
 # actual production code path for the Stop hook); drift against the TS copy must still be caught
 # by comparing the two patterns at review time.
 set -uo pipefail

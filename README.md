@@ -33,13 +33,13 @@ AI coding agents are far more useful when they remember. But most memory stacks 
 - **Human-in-the-loop** — unsupervised background classifiers never auto-write; their candidates land in a review queue you approve via a `/memory` audit.
 - **Deterministic dedup guards** — exact, subset, and technical-token paraphrase checks run *before* any LLM decision.
 - **Self-improving** — classifier regression eval turns audit misses into permanent few-shot cases; the extraction eval remains only for the deprecated compatibility path.
-- **First-class agent integrations** — a Claude Code plugin, a Pi extension (also loadable by omp), and a stdio MCP server for Codex.
+- **First-class agent integrations** — an OMP-native extension, a Claude Code plugin, and remote/stdio MCP servers.
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    A["AI Agent · App · Pi · Claude Code"] -->|"REST / MCP (bearer auth)"| W["Cloudflare Worker<br/>Hono router + auth + rate limit"]
+    A["AI Agent · OMP · Claude Code · MCP Client"] -->|"REST / MCP (bearer auth)"| W["Cloudflare Worker<br/>Hono router + auth + rate limit"]
     W --> AI["Workers AI<br/>bge-m3 embeddings · LLM merge/ignore decisions"]
     W --> D1[("D1<br/>source of truth<br/>memories · events · reviews")]
     W --> V[("Vectorize<br/>semantic index + metadata filters")]
@@ -131,7 +131,7 @@ conflict, the system instructions win.
 
 - **Scope**: `global` rules always; `project` rules only when the session's project matches; `session` scope is never injected.
 - **Cap**: at most 20 rules and 4000 characters of rule lines, each rule clamped to 240 characters. Over cap, selection is deterministic — importance desc, then recency desc, then id — and a `(showing N of M standing rules — more exist…)` marker is appended so the agent knows to list the rest. Worst case is ~4.3 KB (~1.1k English / ~2.2k Chinese tokens); a real 17-rule set measures ~2.1 KB.
-- **Delivery**: Claude Code emits it from the SessionStart hook (re-emitted on compact so the rules survive compaction); Pi appends it to the system prompt on every agent run from a per-process cached fetch. Neither client issues an extra request at startup beyond the memory list it already fetches.
+- **Delivery**: Claude Code emits it from the SessionStart hook (re-emitted on compact so the rules survive compaction); the OMP extension appends it to `before_agent_start`'s system prompt. Both clients reuse the memory list already fetched.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -139,7 +139,7 @@ conflict, the system instructions win.
 | `ASAKI_MEMORY_STANDING_RULES_MAX` | `20` | Hard cap on injected rules. |
 | `ASAKI_MEMORY_STANDING_RULES_KINDS` | `rule,preference` | Comma-separated kinds to treat as standing. Use `rule` to inject rules only. |
 
-Selection and rendering are one canonical implementation in [`src/services/standingRules.ts`](src/services/standingRules.ts), copied verbatim into the Pi extension and re-implemented in [`integrations/claude-code/standing-rules.jq`](integrations/claude-code/standing-rules.jq); `npm run eval:standing-rules` fails if any copy drifts.
+Selection and rendering are one canonical implementation in [`src/services/standingRules.ts`](src/services/standingRules.ts), copied verbatim into the OMP extension and re-implemented in [`integrations/claude-code/standing-rules.jq`](integrations/claude-code/standing-rules.jq); `npm run eval:standing-rules` fails if any copy drifts.
 
 ### Project memory digest (both clients)
 
@@ -167,7 +167,7 @@ asaki_memory_get with those ids to read them)
 - **Scope and order**: identical to standing rules — global always, project on match, session never; importance desc → recency desc → id desc.
 - **Cap**: at most 10 expanded memories and 6000 characters of block text, each expanded line clamped to 240 characters.
 - **Id index**: whatever the memory cap cut off is then listed as compact `id [scope/kind] excerpt (N chars)` rows — up to 30 rows / 2000 characters, inside the same 6000-character budget. Knowing the id is what makes an unexpanded memory addressable: `asaki_memory_get(ids)` reads it in full, and the trailing character count is the fetch-cost hint. `ASAKI_MEMORY_DIGEST_INDEX=0` falls back to the old one-sentence `(showing N of M project memories — more exist…)` marker. Standing rules deliberately have no index. Worst case is therefore ~6 KB on top of the standing-rule block's 4 KB.
-- **Delivery**: Claude Code emits it from the SessionStart hook right after the standing rules (re-emitted on compact); Pi appends it to the `before_agent_start` system prompt after the standing rules — that is the only Pi path that reaches the model, since its `[Memory]` banner is transcript-local. Both clients reuse the memory list they already fetch, so the block costs no extra request.
+- **Delivery**: Claude Code emits it from the SessionStart hook after the standing rules (re-emitted on compact); OMP appends it to the `before_agent_start` system prompt after standing rules. Both clients reuse the memory list they already fetch.
 - **This is on by default**, so upgrading adds it to every session's opening context; `ASAKI_MEMORY_PROJECT_DIGEST=0` turns it off in one variable.
 
 | Variable | Default | Purpose |
@@ -178,7 +178,7 @@ asaki_memory_get with those ids to read them)
 | `ASAKI_MEMORY_PROJECT_DIGEST_CONTENT_CHARS` | `240` | Per-memory character clamp for the expanded lines (clamped to 2000). |
 | `ASAKI_MEMORY_DIGEST_INDEX` | `1` | Set to `0`/`off`/`false` to replace the id index with the old one-sentence marker. |
 
-Selection and rendering are one canonical implementation in [`src/services/projectDigest.ts`](src/services/projectDigest.ts), copied verbatim into the Pi extension and re-implemented in [`integrations/claude-code/project-digest.jq`](integrations/claude-code/project-digest.jq); `npm run eval:project-digest` fails if any copy drifts, and `npm run eval:session-inject` checks both clients' wiring.
+Selection and rendering are one canonical implementation in [`src/services/projectDigest.ts`](src/services/projectDigest.ts), copied verbatim into the OMP extension and re-implemented in [`integrations/claude-code/project-digest.jq`](integrations/claude-code/project-digest.jq); `npm run eval:project-digest` fails if any copy drifts, and `npm run eval:session-inject` checks both clients' wiring.
 
 Known boundary shared by both blocks: the clients list at most 100 memories, which is also the server maximum, and the server returns the 100 most recently updated rows *before* the importance sort runs. Past ~100 active global+project memories an older high-importance one can therefore be dropped before selection sees it — the digest's id index makes the gap visible (a memory in neither the expanded lines nor the index was never listed) but does not close it. Watch the `memories=` count in the status banner.
 
@@ -192,67 +192,20 @@ user=asaki | project=asaki-memory-manager | memories=90 | pendingReviews=3 | cla
 
 `autoExtract` is deliberately not on this line — the deprecated server-extraction path is off by default and uninformative when it is, so `/memory status` reports it (plus the effective classifier state) instead.
 
-### Pi
+### OMP
 
-Pi doesn't support remote MCP, so it ships as a self-contained single-file extension, published as a standalone npm package:
+OMP is the native extension integration. The single entry point is [`integrations/omp/asaki-memory.ts`](integrations/omp/asaki-memory.ts); it uses OMP's `ExtensionAPI` directly and calls the existing Asaki Worker REST API, not OMP's separate local memory backends.
 
-```bash
-pi install npm:@asaki14/pi-memory
-```
-
-On every `session_start` it renders a compact, transcript-local `[Memory]` status banner (see [Session status banner](#session-status-banner-both-clients)). It appears with Pi's startup resource information, scrolls away with the conversation, and does not enter LLM context — the standing-rule block and the project digest are what actually reach the model, via the `before_agent_start` system prompt. On `agent_end` it runs a background classifier that pre-distills one candidate and writes it to the review queue — throttled, and skipping anything that trips the sensitive-text gate.
-
-The extension is published as `npm:@asaki14/pi-memory` and that is what every machine consumes; a change merged here reaches Pi only after the next npm release (`npm run build:pi` → `npm publish` from `dist/pi-package/` → `pi update npm:@asaki14/pi-memory`). Env changes need a new Pi process: the extension reads env per call, but a running process keeps the environment it started with.
-
-<details>
-<summary><b>Common Pi environment variables</b></summary>
+Install it from this checkout by linking the extension into OMP's local extension directory:
 
 ```bash
-export ASAKI_MEMORY_API_URL="https://your-worker.your-subdomain.workers.dev"
-export ASAKI_MEMORY_API_KEY="your-admin-api-key"
-export ASAKI_MEMORY_USER_ID="alice"
-export ASAKI_MEMORY_PROJECT_ID="demo-app"
-export ASAKI_MEMORY_AUTO_INJECT="1"
-export ASAKI_MEMORY_AUTO_INJECT_TOP_K="6"   # 1..20; invalid values fall back to 6
-export ASAKI_MEMORY_AUTO_MIN_SCORE="0.67"   # must be within [0,1]; anything else falls back
-export ASAKI_MEMORY_AUTO_EXTRACT="0"
-export ASAKI_MEMORY_AUTO_CLASSIFIER="1"
-export ASAKI_MEMORY_STANDING_RULES="1"
-export ASAKI_MEMORY_PROJECT_DIGEST="1"
-export ASAKI_MEMORY_DIGEST_INDEX="1"   # 0 replaces the digest id index with the old marker
-export ASAKI_MEMORY_CLASSIFIER_MODEL="openai-codex/gpt-5.6-luna"
-export ASAKI_MEMORY_EXTRACT_MIN_INTERVAL_SECONDS="300"
-# Both default on. Correction mode makes the classifier detect the user correcting the agent and
-# record the evidence; action trace adds one redacted `Tool: <name> <arg>` line per tool call to
-# the delta. Set either to 0 to opt out. See integrations/claude-code/README.md for what action
-# trace sends off-machine — paths, URIs and hosts are redacted, non-path free text is not.
-export ASAKI_MEMORY_CORRECTION_MODE="1"
-export ASAKI_MEMORY_ACTION_TRACE="1"
+mkdir -p ~/.omp/agent/local-extensions
+ln -s /path/to/asaki-memory-manager/integrations/omp/asaki-memory.ts ~/.omp/agent/local-extensions/asaki-memory.ts
 ```
 
-The classifier model can also be set via `classifierModel` in `~/.pi/agent/asaki-memory.json`. Keep `ASAKI_MEMORY_AUTO_EXTRACT=0`: server-side `/v1/memories/extract` is deprecated compatibility behavior and must not be enabled for routine capture.
+Set `ASAKI_MEMORY_BASE_URL` and `ASAKI_MEMORY_API_KEY` in OMP's process environment. Optional `ASAKI_MEMORY_*` settings control user/project identity, startup injection, the classifier, correction mode, action trace, and output limits. Use `/memory status` to check backend connectivity and effective classifier settings.
 
-</details>
-
-The extension exposes `asaki_memory_search`, `asaki_memory_add`, `asaki_memory_list`, `asaki_memory_update`, `asaki_memory_delete`, `asaki_memory_review_create`, `asaki_memory_review_list`, `asaki_memory_review_resolve`, and the `/memory` command.
-
-### omp
-
-omp ([Oh My Pi](https://github.com/oh-my-pi/oh-my-pi)) loads the same single-file extension through its legacy-Pi compatibility loader, so there is no separate build or package. Point it at the file — either per run or permanently:
-
-```bash
-omp -e ~/.pi/agent/npm/node_modules/@asaki14/pi-memory/asaki-memory.ts
-```
-
-```yaml
-# ~/.omp/agent/config.yml
-extensions:
-  - ~/.pi/agent/npm/node_modules/@asaki14/pi-memory/asaki-memory.ts
-```
-
-Configuration carries over untouched: the extension resolves its agent directory as `PI_CODING_AGENT_DIR || ~/.pi/agent`, so under omp it keeps reading `~/.pi/agent/asaki-memory.json` and the same `ASAKI_MEMORY_*` environment as Pi. All the tools, the `/memory` command, the standing-rule block and the project digest behave identically.
-
-One cosmetic difference: omp's extension host has no `registerEntryRenderer`, so the `[Memory]` startup banner is appended as a plain session entry and rendered by omp's default instead of the styled `[Memory]` block. omp also surfaces extension tools as `xd://<tool>` devices rather than named tools; that is omp's convention, not a defect.
+The extension registers the `asaki_memory_*` tools and `/memory` command. It injects standing rules and the project digest into OMP's `before_agent_start` system prompt, and runs its local classifier through a headless `omp --print` child process. The classifier submits candidates to the existing Worker API for review; it does not write directly to memory.
 
 ### MCP
 
@@ -450,7 +403,7 @@ curl -X POST http://127.0.0.1:8787/v1/memories/candidates \
   }'
 ```
 
-Agents submit concise candidates from their own context. Local background classifiers (`source: "pi:agent-end-classifier"` or `"claude-code:stop-classifier"`) are the active/default automated source and always land in `reviews`, never `decisions`. The legacy `/v1/memories/extract` endpoint remains for backward compatibility but is deprecated and must not receive routine/full-transcript capture.
+Agents submit concise candidates from their own context. Local background classifiers (`source: "omp:agent-end-classifier"` or `"claude-code:stop-classifier"`) are the active/default automated source and always land in `reviews`, never `decisions`. The legacy `/v1/memories/extract` endpoint remains for backward compatibility but is deprecated and must not receive routine/full-transcript capture.
 
 </details>
 

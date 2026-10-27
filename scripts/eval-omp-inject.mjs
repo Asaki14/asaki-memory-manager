@@ -1,39 +1,29 @@
-// Pi half of `npm run eval:session-inject`: exercises the SHIPPED integrations/pi/asaki-memory.ts
-// end-to-end with stubbed Pi host modules (scripts/pi-host-stubs.mjs) and a stubbed fetch.
+// OMP half of `npm run eval:session-inject`: exercises the real native extension with a stubbed
+// Worker fetch and an OMP ExtensionAPI host.
 //
-// What it proves, none of which tsc can:
-//  1. the project digest reaches the MODEL — it is in the systemPrompt returned by
-//     `before_agent_start`, not merely in the transcript-local `session_start` banner entry;
-//  2. the injected order is base system prompt → precheck → standing rules → project digest;
-//  3. a whole session start costs ONE /v1/memories/list — including when `session_start` and
-//     `before_agent_start` overlap (the loader's in-flight promise is shared, not just its value);
-//  4. the switches and the dynamic kind complement behave (digest off, digest index off, standing
-//     off + digest on,
-//     ASAKI_MEMORY_STANDING_RULES_KINDS=rule pushing preference into the digest);
-//  5. the banner field/omission matrix, on the pure builder from `// #region asaki-banner`;
-//  6. the auto-inject display boundaries (8 short results vs one oversized first result) and that
-//     the request carries the validated top_k AND min_score.
-//  7. the file still loads, and still registers every tool, on a host that exposes no
-//     registerEntryRenderer and passes `systemPrompt` as a rendered block array (omp's shape),
-//     without swallowing that host's own base prompt.
+// It proves observable system-prompt injection, shared request behavior, graceful backend failure,
+// tool registration, native host command/renderer registration, and the classifier child command.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { transform } from 'esbuild';
-import { registerPiHostStubs } from './pi-host-stubs.mjs';
+import { registerOmpHostStubs } from './omp-host-stubs.mjs';
 
-registerPiHostStubs();
+registerOmpHostStubs();
 
-// The extension uses TypeScript parameter properties, which node's strip-only mode rejects, so
-// the SHIPPED source text is transpiled (not rewritten) and imported from a temp file. Its bare
-// imports of the Pi host modules still resolve through the stub hooks registered above.
-const piSourcePath = join(dirname(fileURLToPath(import.meta.url)), '..', 'integrations', 'pi', 'asaki-memory.ts');
-const transpiled = await transform(readFileSync(piSourcePath, 'utf8'), { loader: 'ts', format: 'esm', target: 'node22' });
-const extensionDir = mkdtempSync(join(tmpdir(), 'asaki-pi-extension-'));
+// Transpile the actual extension source so parameter properties and TypeScript syntax execute.
+const ompSourcePath = join(dirname(fileURLToPath(import.meta.url)), '..', 'integrations', 'omp', 'asaki-memory.ts');
+const transpiled = await transform(readFileSync(ompSourcePath, 'utf8'), { loader: 'ts', format: 'esm', target: 'node22' });
+const extensionDir = mkdtempSync(join(tmpdir(), 'asaki-omp-extension-'));
 const extensionPath = join(extensionDir, 'asaki-memory.mjs');
 writeFileSync(extensionPath, transpiled.code);
-process.on('exit', () => rmSync(extensionDir, { recursive: true, force: true }));
+const ompHome = mkdtempSync(join(tmpdir(), 'asaki-omp-home-'));
+process.env.HOME = ompHome;
+process.on('exit', () => {
+  rmSync(extensionDir, { recursive: true, force: true });
+  rmSync(ompHome, { recursive: true, force: true });
+});
 
 const failures = [];
 let checks = 0;
@@ -93,7 +83,13 @@ process.env.ASAKI_MEMORY_BASE_URL = 'http://127.0.0.1:9';  // loopback: the exte
 process.env.ASAKI_MEMORY_API_KEY = 'test-key';
 process.env.ASAKI_MEMORY_USER_ID = 'asaki';
 process.env.ASAKI_MEMORY_PROJECT_ID = 'proj';
-process.env.PI_CODING_AGENT_DIR = '/nonexistent-pi-agent-dir';
+process.env.ASAKI_MEMORY_AUTO_EXTRACT = '0';
+process.env.ASAKI_MEMORY_AUTO_CLASSIFIER = '1';
+process.env.ASAKI_MEMORY_AUTO_INJECT = '0';
+process.env.ASAKI_MEMORY_AUTO_INJECT_ALWAYS = '0';
+process.env.ASAKI_MEMORY_STARTUP_INJECT = '1';
+process.env.ASAKI_MEMORY_CORRECTION_MODE = '0';
+process.env.ASAKI_MEMORY_ACTION_TRACE = '0';
 delete process.env.ASAKI_MEMORY_STANDING_RULES;
 delete process.env.ASAKI_MEMORY_STANDING_RULES_KINDS;
 delete process.env.ASAKI_MEMORY_PROJECT_DIGEST;
@@ -101,23 +97,52 @@ delete process.env.ASAKI_MEMORY_PROJECT_DIGEST;
 const extension = await import(pathToFileURL(extensionPath).href);
 
 const handlers = new Map();
-const entries = [];
 const tools = [];
-const entryRenderers = [];
+const commands = [];
+const entries = [];
+const renderers = [];
+const execCalls = [];
+function schema(type) {
+  return {
+    type,
+    int() { return this; },
+    min() { return this; },
+    max() { return this; },
+    optional() { return this; },
+    describe() { return this; },
+  };
+}
+const zod = {
+  object: (shape) => ({ ...schema('object'), shape }),
+  string: () => schema('string'),
+  number: () => schema('number'),
+  int: () => schema('int'),
+  boolean: () => schema('boolean'),
+  array: (item) => ({ ...schema('array'), item }),
+  enum: (values) => ({ ...schema('enum'), values }),
+  union: (items) => ({ ...schema('union'), items }),
+};
 const pi = {
-  registerMessageRenderer: () => {},
-  registerEntryRenderer: (type) => entryRenderers.push(type),
-  registerCommand: () => {},
-  registerTool: (tool) => tools.push(tool.name),
+  zod,
+  registerMessageRenderer: (type, renderer) => renderers.push({ type, renderer }),
+  registerCommand: (name, command) => commands.push({ name, command }),
+  registerTool: (tool) => tools.push(tool),
   on: (name, handler) => handlers.set(name, handler),
   appendEntry: (type, data) => entries.push({ type, data }),
+  sendUserMessage: () => {},
+  exec: async (...args) => {
+    execCalls.push(args);
+    return { code: 0, stdout: '{"flag":false}' };
+  },
 };
 extension.default(pi);
 
-for (const name of ['session_start', 'before_agent_start', 'session_before_switch']) {
-  checkTrue(`extension registers the ${name} handler`, handlers.has(name));
+for (const name of ['session_start', 'before_agent_start', 'session_before_switch', 'agent_end']) {
+  checkTrue(`OMP extension registers the ${name} handler`, handlers.has(name));
 }
-checkTrue('a host WITH registerEntryRenderer still gets the banner renderer', entryRenderers.includes('asaki-memory-banner'));
+checkTrue('OMP native ExtensionAPI registers its renderer', renderers.some(({ type }) => type === 'asaki-memory-context'));
+checkTrue('OMP native ExtensionAPI registers the memory command', commands.some(({ name }) => name === 'memory'));
+checkTrue('OMP native ExtensionAPI registers all memory tools', tools.some(({ name }) => name === 'asaki_memory_search') && tools.length >= 10);
 
 const ctx = { cwd: process.cwd(), hasUI: true, signal: undefined, ui: { notify: () => {} }, isIdle: () => true };
 
@@ -132,7 +157,7 @@ async function freshSession() {
 }
 
 async function runBeforeAgentStart(prompt = '请继续之前的决策') {
-  return handlers.get('before_agent_start')({ prompt, systemPrompt: 'BASE_SYSTEM_PROMPT' }, ctx);
+  return handlers.get('before_agent_start')({ prompt, systemPrompt: ['BASE_SYSTEM_PROMPT'] }, ctx);
 }
 
 // --- 1/2/3: sequential session start, injected order, one list ------------------------------
@@ -159,6 +184,28 @@ checkTrue('the standing block carries rule/preference only', /- \[global\/rule\]
 const digestBlock = prompt.slice(prompt.indexOf('## Asaki Project Memory'));
 checkTrue('the digest carries the non-standing kinds', digestBlock.includes('- [global/decision] 决策一') && digestBlock.includes('- [project/bug_fix] 修复一'));
 checkTrue('the digest excludes standing kinds', !digestBlock.includes('/rule]') && !digestBlock.includes('/preference]'));
+const searchTool = tools.find(({ name }) => name === 'asaki_memory_search');
+searchResults = [{ id: 's1', content: '查询结果', score: 0.9, scope: 'global', kind: 'fact' }];
+calls.length = 0;
+const searchOutput = await searchTool.execute('eval-call', { query: '项目决定', top_k: 3 }, undefined, undefined, ctx);
+const searchRequest = calls.find((call) => call.url.endsWith('/v1/memories/search'));
+checkTrue('search tool sends its query and bound to Worker REST API', searchRequest?.body?.query === '项目决定' && searchRequest?.body?.top_k === 3);
+checkTrue('search tool returns the Worker memory content', JSON.stringify(searchOutput).includes('查询结果'));
+
+// The classifier is isolated behind ExtensionAPI.exec; the eval never launches a real OMP process.
+await handlers.get('agent_end')({
+  messages: [{ role: 'user', content: [{ type: 'text', text: '以后都遵循这个项目规则' }] }],
+}, ctx);
+await new Promise((resolve) => setTimeout(resolve, 0));
+const classifierCall = execCalls.at(-1);
+check('classifier launches omp through ExtensionAPI.exec', 'omp', classifierCall?.[0]);
+const classifierArgs = classifierCall?.[1] ?? [];
+const classifierModel = process.env.ASAKI_MEMORY_CLASSIFIER_MODEL || 'openai-codex/gpt-5.6-luna';
+checkTrue('classifier uses headless text print mode and configured model', classifierArgs.includes('--print') && classifierArgs.includes('--mode') && classifierArgs[classifierArgs.indexOf('--mode') + 1] === 'text' && classifierArgs.includes('--model') && classifierArgs[classifierArgs.indexOf('--model') + 1] === classifierModel);
+checkTrue('classifier disables tools, extensions, skills, and rules', ['--no-tools', '--no-extensions', '--no-skills', '--no-rules'].every((flag) => classifierArgs.includes(flag)));
+const classifierSessionDir = classifierArgs[classifierArgs.indexOf('--session-dir') + 1];
+checkTrue('classifier uses the temporary session directory as cwd and bounded execution options', classifierSessionDir?.includes('asaki-omp-classifier-') && classifierCall?.[2]?.cwd === classifierSessionDir && classifierCall?.[2]?.timeout === 120_000);
+
 
 // --- 3b: overlapping session_start / before_agent_start still costs one list ----------------
 await freshSession();
@@ -207,38 +254,11 @@ checkTrue('the digest still excludes the configured standing kind', !standingOff
 delete process.env.ASAKI_MEMORY_STANDING_RULES;
 delete process.env.ASAKI_MEMORY_STANDING_RULES_KINDS;
 
-// --- 7: host-API tolerance ------------------------------------------------------------------
-// omp's extension host has registerMessageRenderer but no registerEntryRenderer, and hands
-// `before_agent_start` the rendered system-prompt BLOCK ARRAY rather than one string. An
-// unguarded renderer call aborts the factory before any registerTool (no memory tools at all);
-// an unnormalised array base prompt is dropped by the typeof-string filter and the returned
-// value then REPLACES the host's whole system prompt with just our blocks.
-const ompHandlers = new Map();
-const ompTools = [];
-const ompPi = {
-  registerMessageRenderer: () => {},
-  registerCommand: () => {},
-  registerTool: (tool) => ompTools.push(tool.name),
-  on: (name, handler) => ompHandlers.set(name, handler),
-  appendEntry: () => {},
-};
-let ompLoadError = null;
-try {
-  extension.default(ompPi);
-} catch (error) {
-  ompLoadError = error;
-}
-checkTrue(`a host without registerEntryRenderer still loads (${ompLoadError?.message ?? 'ok'})`, ompLoadError === null);
-checkTrue('such a host registers the same tool set', tools.length > 0 && ompTools.join(',') === tools.join(','));
-checkTrue('such a host still gets the search tool', ompTools.includes('asaki_memory_search'));
-
+// Native OMP sends the system prompt as rendered blocks; the host preserves them through the extension callback.
 await freshSession();
-const arrayBase = await ompHandlers.get('before_agent_start')({ prompt: '请继续之前的决策', systemPrompt: ['BLOCK_ONE', 'BLOCK_TWO'] }, ctx);
-checkTrue('an array systemPrompt keeps every base block', arrayBase.systemPrompt.startsWith('BLOCK_ONE\n\nBLOCK_TWO'));
-checkTrue(
-  'an array systemPrompt still carries both injected blocks',
-  arrayBase.systemPrompt.includes('## Asaki Standing Rules') && arrayBase.systemPrompt.includes('## Asaki Project Memory'),
-);
+const arrayBase = await runBeforeAgentStart();
+checkTrue('OMP systemPrompt array preserves the base prompt', arrayBase.systemPrompt.startsWith('BASE_SYSTEM_PROMPT'));
+checkTrue('OMP systemPrompt array receives both memory blocks', arrayBase.systemPrompt.includes('## Asaki Standing Rules') && arrayBase.systemPrompt.includes('## Asaki Project Memory'));
 
 // --- list failure degrades both blocks, banner keeps its fallbacks --------------------------
 await freshSession();
@@ -271,8 +291,8 @@ check(
 checkTrue('the banner has no autoExtract field', !bannerLine.includes('autoExtract'));
 
 // --- 5: banner field/omission matrix on the pure builder ------------------------------------
-const { loadPiBanner, loadPiAutoInject } = await import('./pi-trace-region.mjs');
-const banner = await loadPiBanner();
+const { loadOmpBanner, loadOmpAutoInject } = await import('./omp-trace-region.mjs');
+const banner = await loadOmpBanner();
 const { buildSessionBannerLine, bannerBlockField } = banner.module;
 
 check('bannerBlockField omits a disabled block', null, bannerBlockField(false, { shown: 3, eligible: 9 }));
@@ -346,7 +366,7 @@ const oversizedContext = String(withOversized.message?.content ?? '');
 checkTrue('the oversized first result is truncated per item, so every line still fits', oversizedContext.split('\n').every((line) => line.length <= 6000));
 checkTrue('the oversized run still shows the remaining short results', oversizedContext.includes('injected 9/9'));
 
-const autoInject = await loadPiAutoInject();
+const autoInject = await loadOmpAutoInject();
 const { formatAutoMemoryLines, formatAutoMemoryContext, MAX_TOOL_OUTPUT_CHARS } = autoInject.module;
 check('formatAutoMemoryLines honours topK', 3, formatAutoMemoryLines(searchResults, 0.5, 3).length);
 check('formatAutoMemoryLines drops sub-threshold results', 0, formatAutoMemoryLines(searchResults, 0.99, 8).length);
@@ -361,7 +381,7 @@ checkTrue('a per-item clamp keeps the block within the output budget', budgeted.
 checkTrue('a truncated block reports the budget footer', budgeted.includes('output budget reached'));
 autoInject.dispose();
 
-console.log(`session-inject eval (pi): ${checks} checks, ${failures.length} failure(s)`);
+console.log(`session-inject eval (omp): ${checks} checks, ${failures.length} failure(s)`);
 if (failures.length > 0) {
   for (const failure of failures) console.log(`- FAIL ${failure}`);
   process.exit(1);
