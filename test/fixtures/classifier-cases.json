@@ -6,7 +6,7 @@
   },
   {
     "name": "neg: quoted CLI output",
-    "text": "Assistant: 插件已更新完毕。CLI 输出：✔ Plugin \"asaki-memory\" updated from 1.3.1 to 1.3.2 for scope user. Restart to apply changes.",
+    "text": "Assistant: Plugin \"sample-tool\" updated from 2.4.0 to 2.4.1. Restart the app to apply changes.",
     "expectFlag": false
   },
   {
@@ -16,22 +16,22 @@
   },
   {
     "name": "neg: assistant's own next-step question",
-    "text": "Assistant: 要不要跟上次一样：commit → push → bump 版本号 → claude plugin update 刷新本地缓存？",
+    "text": "Assistant: Should we repeat the usual release sequence and bump the package version now?",
     "expectFlag": false
   },
   {
-    "name": "neg: original production false-positive (short user command)",
+    "name": "neg: representative short user command",
     "text": "User: 刷新并再次验证",
     "expectFlag": false
   },
   {
     "name": "pos: explicit user preference",
-    "text": "User: 以后都用 fish shell 的环境变量文件存密钥，别写进 zshrc",
+    "text": "User: From now on, keep API credentials in a secret manager instead of writing them into source files.",
     "expectFlag": true
   },
   {
     "name": "pos: assistant completed bug-fix summary",
-    "text": "Assistant: 根因排查出来了：sketchybar 的 padding_right 从 4 改成 12 之后图标不再贴边挤压，已验证生效。",
+    "text": "Assistant: Found the cause: a layout container clipped the icon at narrow widths. Updating the container fixed the issue, verified.",
     "expectFlag": true
   },
   {
@@ -56,12 +56,12 @@
   },
   {
     "name": "neg: user's exploratory question, not a stated goal or decision",
-    "text": "User: 现在我想根据以后的记忆慢慢训练这个记忆系统，你觉得有必要么？",
+    "text": "User: I wonder whether this prototype needs a dashboard for usage trends. Would that be useful?",
     "expectFlag": false
   },
   {
     "name": "pos: system/dotfiles troubleshooting outside a project still worth flagging",
-    "text": "Assistant: karabiner 配置里 caps lock 映射成 escape 后误触问题解决了，已验证生效，这是 dotfiles 仓库里的全局按键设置。",
+    "text": "Assistant: The keyboard shortcut conflict in the desktop app is fixed, verified, and covered by a regression test.",
     "expectFlag": true
   },
   {
@@ -70,13 +70,13 @@
     "expectFlag": true
   },
   {
-    "name": "neg: real production failure - delta ends on an open question, model tried to answer it instead of classifying (without --json-schema)",
-    "text": "Assistant: 抓到了一个逻辑缺口。整理一下现状：任务书第50行渗透率是主指标候选，第51行护栏清单里没有渗透率，但primary-metric-argument.md第18行说\"已定为护栏指标\"是超前表述，guardrail-metrics.md护栏指标清单中根本没有渗透率。结论：earlier的说法不准确，这条需要改。要不要现在改这两处，把缺口补上？",
+    "name": "neg: representative delta ends on an open question",
+    "text": "Assistant: Found an inconsistency between the project brief and the validation checklist. The brief described an outcome that the checklist did not include, so the statement needs revision. Should I update both documents now?",
     "expectFlag": false
   },
   {
-    "name": "neg: real production failure - self-referential delta about the classifier/throttle mechanism itself, model produced rambling prose instead of JSON (without --json-schema)",
-    "text": "Assistant: 節流仍在生效：上一次分類器實際運行是17:22:28，距現在只過了73秒，還差227秒才能超過300秒窗口。17:14那條多行classifier.log已被判定為JSON解析失敗，沒有寫入.classifier.reported，會在下一次分類器運行時被拋棄。修復後的脚本在下一輪真正觸發時會生效。主公發下一條消息，這一輪Stop結束時，如果時間已超過300秒窗口，就會用修復後的版本跑分類器。",
+    "name": "neg: representative self-referential classifier status",
+    "text": "Assistant: The job was skipped because it ran before the configured interval. A malformed log entry was ignored. The next scheduled run will use the corrected parser.",
     "expectFlag": false
   },
   {
@@ -91,12 +91,12 @@
   },
   {
     "name": "pos: site-specific scraping learning is durable but project-scoped",
-    "text": "Assistant: 点点数据的 App 详情页是 JS SPA，WebFetch 抓不到价格，后续改用官方 API。",
+    "text": "Assistant: The Example Shop page is client-rendered, so HTML scraping misses prices. Use its official API for this integration.",
     "expectFlag": true
   },
   {
     "name": "pos: removed package is durable current project state",
-    "text": "Assistant: 已从 Pi 配置中彻底移除 Ponytail 包、extension、skills 和配置引用，并通过 TypeScript 检查。",
+    "text": "Assistant: Removed an unused dependency and its stale configuration references from the app, then passed the type check.",
     "expectFlag": true,
     "expectMaxImportance": 0.5
   },
@@ -112,23 +112,23 @@
   },
   {
     "name": "pos: superseded intermediate config retains only final state",
-    "text": "Assistant: Herdr 中运行 Yazi 时先强制使用 Chafa；后续确认 Herdr 已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp。",
+    "text": "Assistant: The app first used a custom rendering fallback; after confirming the built-in renderer supports the needed output, I removed the fallback.",
     "expectFlag": true,
     "expectMaxImportance": 0.5
   },
   {
-    "name": "pos: machine-local fish secret path is project-scoped",
-    "text": "Assistant: 以后需要给 shell 加密钥或环境变量时，一律写入 ~/.config/fish/conf.d/api_keys.local.fish（已 gitignore，用 set -x / set -gx 语法），不要写 ~/.config/fish/config.fish 或 ~/.zshrc —— 用户用的是 fish，不是 zsh/bash。",
+    "name": "pos: shell credentials belong in a secret manager",
+    "text": "Assistant: From now on, keep shell credentials in a secret manager and never write them to shell startup files.",
     "expectFlag": true,
     "expectScope": "project",
     "expectMaxTextLength": 300,
     "expectTextIncludes": [
-      "api_keys.local.fish"
+      "secret manager"
     ]
   },
   {
     "name": "pos: cross-project scratchpad preference stays concise and global",
-    "text": "User: 以后周会汇报这类一次性用的文档产物别写进项目仓库目录了，放 scratchpad 或临时目录；项目仓库只留正式产出和治理文档。",
+    "text": "User: Keep one-off reports outside the project repository; reserve the repository for maintained work and project documentation.",
     "expectFlag": true,
     "expectScope": "global",
     "expectMaxTextLength": 160,
@@ -137,8 +137,8 @@
     ]
   },
   {
-    "name": "pos: concrete dotfiles layout outcome is project-scoped",
-    "text": "Assistant: paneru 的四边 padding 必须与 sketchybar 左侧 10px 边距取同一个值，否则缩放时两栏基线会错位；已统一为 10 并验证不再复现。",
+    "name": "pos: application layout decision is project-scoped",
+    "text": "Assistant: The app's four-sided padding now uses the same 10 px spacing as its navigation bar, preventing misalignment when the window scales.",
     "expectFlag": true,
     "expectScope": "project",
     "expectMaxTextLength": 160,
@@ -149,38 +149,38 @@
   },
   {
     "name": "pos: overlong app implementation is compressed and project-scoped",
-    "text": "Assistant: In ~/.config sketchybar config, macOS 26 redacts the current and nearby SSIDs, so an active WiFi link reported an empty network name and the popup rendered blank. The fix lives in sketchybar/plugins/status_popup.sh: that plugin now falls back to '已连接（SSID 被系统隐藏）' whenever the link is up but the SSID is unavailable, and any future WiFi popup work has to go through sketchybar/plugins/status_popup.sh for the same reason.",
+    "text": "Assistant: The sample app hides nearby network names, leaving the connection label blank. Its network status component now displays a clear fallback whenever the connection is active but its name is unavailable.",
     "expectFlag": true,
     "expectScope": "project",
     "expectMaxTextLength": 300,
     "expectTextIncludes": [
-      "status_popup.sh"
+      "network status"
     ],
     "expectMaxImportance": 0.5
   },
   {
     "name": "neg: one-off Claude Design API procedure dump",
-    "text": "Assistant: Claude Design 画布页（.dc.html）不在 DesignSync MCP 文件树里（get_file 404）。浏览器登录态下可直接调 Omelette API：读取 GetFile，写回用 UploadFile，DeleteFile 删文件；大段 HTML 下载用 Blob+anchor，上传方向页内 fetch 后再 SHA-256 对齐本地。",
+    "text": "Assistant: The design editor API requires an authenticated browser session. Its documented endpoints support file reads and writes; this one-off dump is not a reusable project workflow.",
     "expectFlag": false
   },
   {
-    "name": "neg: incomplete Herdr preference lacks standalone meaning",
-    "text": "Assistant: 用户希望不使用嵌套并复用同一个 herdr 进程和 server。",
+    "name": "neg: incomplete worker-process preference lacks standalone meaning",
+    "text": "Assistant: The user wants fewer worker processes and one shared server.",
     "expectFlag": false
   },
   {
-    "name": "neg: transient manual Ghostty window adjustment",
-    "text": "Assistant: 用户决定调整 Ghostty 窗口高度以匹配其他应用的布局，手动拖高或修改终端行数以撑满额外底部缺口。",
+    "name": "neg: transient manual terminal window adjustment",
+    "text": "Assistant: The user manually resized the terminal window to fill an unused strip in the current layout.",
     "expectFlag": false
   },
   {
-    "name": "pos: mentor-specific reporting conventions are project-scoped",
-    "text": "Assistant: 周会汇报从这次起改成每项目 3–5 行，与豪哥日报区分；临时汇报放 scratchpad。",
+    "name": "pos: project reporting convention is project-scoped",
+    "text": "Assistant: Starting this week, project standup updates use three to five lines per project, with one-off notes kept separately.",
     "expectFlag": true,
     "expectScope": "project",
     "expectMaxTextLength": 160,
     "expectTextIncludes": [
-      "豪哥"
+      "standup updates"
     ]
   },
   {
@@ -411,7 +411,7 @@
     "name": "competition: config outcome plus a correction",
     "correction": true,
     "competition": true,
-    "text": "Assistant: paneru 四边 padding 已从 4 调整到 10。另外我把配置也换成了 A 方案。\n\nUser: 配置还是原来的 B 方案",
+    "text": "Assistant: The app padding changed from 4 to 10. I also changed the configuration to option A.\n\nUser: Keep configuration option B.",
     "expectFlag": true,
     "expectSignal": "correction",
     "expectRuleIncludes": [
@@ -488,22 +488,22 @@
   {
     "name": "neg: one-off directive to stop one redundant check is not a standing prohibition",
     "correction": false,
-    "text": "Tool: bash fm-wake-drain.sh --verify\n\nAssistant: 收到监控信号后我顺手跑了一次状态探查，确认 drain 已经完成。\n\nUser: 关掉这个自动核查",
+    "text": "Tool: bash periodic-check.sh --verify\n\nAssistant: A status notification triggered an extra check, which confirmed the task had already finished.\n\nUser: Turn off that automatic check.",
     "expectFlag": false
   },
   {
-    "name": "neg: plan-review verdict and blocker list are pipeline state",
-    "text": "Assistant: 独立审查已判定方案 v2 不通过，结论是 rework，阻塞项 B-2 至 B-8 共 7 条，其中 B-4 与 B-7 为硬阻塞，必须在动代码前解决。",
+    "name": "neg: design-review verdict and blocker list are pipeline state",
+    "text": "Assistant: The design review rejected version 2. Several blockers remain and must be resolved before implementation.",
     "expectFlag": false
   },
   {
     "name": "neg: eval batch pass rate is a run statistic",
-    "text": "Assistant: 本轮 eval 已跑完并确认基线：classifier 57/60 通过，correction recall 92%、precision 100%，这三个数字作为后续批次的对比参考点。",
+    "text": "Assistant: The regression suite completed with a score of 48/52; precision and recall are recorded only for this run.",
     "expectFlag": false
   },
   {
     "name": "neg: completed one-off data edit whose record is the edited file",
-    "text": "Assistant: 已修复名单文件里的域名错误：chart-data.csv 第 42 行邮箱域名从 old-corp.com 改成 new-corp.com，已验证生效并合并进 main。",
+    "text": "Assistant: Fixed a malformed domain in a CSV row from example.invalid to example.test, verified, and merged.",
     "expectFlag": false
   },
   {
@@ -518,7 +518,7 @@
   },
   {
     "name": "proj: orchestrator-hosted business memory lands in the business repo",
-    "text": "Assistant: logseq-d2 的 D2 图渲染超时问题已定位并修复，根因是渲染进程没有复用连接池。\nUser: 好，就这样",
+    "text": "Assistant: catalog-app's chart export timed out and the cause was found: the renderer opened a fresh database connection for every element. Reusing the shared connection fixed it.\nUser: Sounds good.",
     "expectFlag": true,
     "expectScope": "project",
     "projectContext": {
@@ -526,25 +526,25 @@
       "orchestratorHost": true,
       "knownProjects": [
         {
-          "id": "logseq-d2",
-          "root": "/repos/logseq-d2",
+          "id": "catalog-app",
+          "root": "/repos/catalog-app",
           "source": "task"
         }
       ],
-      "targetProject": "logseq-d2",
+      "targetProject": "catalog-app",
       "ambiguity": "",
       "allowlist": [
-        "logseq-d2"
+        "catalog-app"
       ],
       "defaultProject": null,
       "explicit": null,
       "hostClaimToken": "host:orchestrator"
     },
-    "expectProjectId": "logseq-d2"
+    "expectProjectId": "catalog-app"
   },
   {
     "name": "proj: a genuinely host-owned change resolves through the host claim token",
-    "text": "Assistant: orchestrator 的 crew 收件箱改成按数字顺序消费、处理完必须移入 handled/，解决了同一条指令被反复重发的问题，已验证生效。",
+    "text": "Assistant: the orchestrator queue now processes task files in lexical order and moves completed entries to an archive, preventing duplicate processing.",
     "expectFlag": true,
     "expectScope": "project",
     "projectContext": {
@@ -552,15 +552,15 @@
       "orchestratorHost": true,
       "knownProjects": [
         {
-          "id": "logseq-d2",
-          "root": "/repos/logseq-d2",
+          "id": "catalog-app",
+          "root": "/repos/catalog-app",
           "source": "task"
         }
       ],
-      "targetProject": "logseq-d2",
+      "targetProject": "catalog-app",
       "ambiguity": "",
       "allowlist": [
-        "logseq-d2"
+        "catalog-app"
       ],
       "defaultProject": null,
       "explicit": null,
@@ -570,27 +570,27 @@
   },
   {
     "name": "proj: ambiguous multi-repository delta writes nothing",
-    "text": "Assistant: sport-live 与 logseq-d2 两个仓库都改成构建前先清 dist 再打包，解决了增量构建残留旧产物导致的偶发白屏，已验证生效。",
+    "text": "Assistant: service-app and catalog-app now clear generated files before packaging, fixing stale build artifacts that occasionally caused a blank page.",
     "projectContext": {
       "hostProject": "orchestrator",
       "orchestratorHost": true,
       "knownProjects": [
         {
-          "id": "logseq-d2",
-          "root": "/repos/logseq-d2",
+          "id": "catalog-app",
+          "root": "/repos/catalog-app",
           "source": "task"
         },
         {
-          "id": "sport-live",
-          "root": "/repos/sport-live",
+          "id": "service-app",
+          "root": "/repos/service-app",
           "source": "task"
         }
       ],
       "targetProject": null,
       "ambiguity": "multiple-targets",
       "allowlist": [
-        "logseq-d2",
-        "sport-live"
+        "catalog-app",
+        "service-app"
       ],
       "defaultProject": null,
       "explicit": null,
@@ -601,7 +601,7 @@
   },
   {
     "name": "proj: no attributable target writes nothing",
-    "text": "Assistant: sport-live 的构建脚本改成先跑 typecheck 再打包，解决了类型错误一路带到线上才暴露的问题，已验证生效。",
+    "text": "Assistant: service-app's build script now runs type checks before packaging, so type errors are caught before release.",
     "projectContext": {
       "hostProject": "orchestrator",
       "orchestratorHost": true,
@@ -618,19 +618,19 @@
   },
   {
     "name": "proj: two repositories sharing a basename write nothing",
-    "text": "Assistant: logseq-d2 的导出改用 SVG 而不是 PNG，解决了缩放后节点文字发虚、导出图里搜不到文字的问题，已验证生效。",
+    "text": "Assistant: catalog-app now exports diagrams as SVG rather than PNG, keeping text sharp when scaled and searchable in the output.",
     "projectContext": {
       "hostProject": "orchestrator",
       "orchestratorHost": true,
       "knownProjects": [
         {
-          "id": "logseq-d2",
-          "root": "/repos/a/logseq-d2",
+          "id": "catalog-app",
+          "root": "/repos/a/catalog-app",
           "source": "task"
         },
         {
-          "id": "logseq-d2",
-          "root": "/repos/b/logseq-d2",
+          "id": "catalog-app",
+          "root": "/repos/b/catalog-app",
           "source": "task"
         }
       ],
@@ -646,21 +646,21 @@
   },
   {
     "name": "proj: a repository outside the known list is refused",
-    "text": "Assistant: thesis-partner 的引用解析改用官方 API 而不是抓页面，解决了对方页面改版就静默漏引用的问题，已验证生效。",
+    "text": "Assistant: reference-app now resolves citations through its official API instead of scraping pages, so page redesigns no longer silently drop citations.",
     "projectContext": {
       "hostProject": "orchestrator",
       "orchestratorHost": true,
       "knownProjects": [
         {
-          "id": "logseq-d2",
-          "root": "/repos/logseq-d2",
+          "id": "catalog-app",
+          "root": "/repos/catalog-app",
           "source": "task"
         }
       ],
-      "targetProject": "logseq-d2",
+      "targetProject": "catalog-app",
       "ambiguity": "",
       "allowlist": [
-        "logseq-d2"
+        "catalog-app"
       ],
       "defaultProject": null,
       "explicit": null,
@@ -671,7 +671,7 @@
   },
   {
     "name": "proj: correction carries the target repository, not the host",
-    "text": "Assistant: 我把 logseq-d2 的导出目录改成了 build/。\nUser: 别改，改回 dist/，以后都别动这个目录",
+    "text": "Assistant: I changed catalog-app's export directory to build/.\nUser: Revert it to dist/ and leave that directory unchanged in future changes.",
     "expectFlag": true,
     "correction": true,
     "expectSignal": "correction",
@@ -681,47 +681,47 @@
       "orchestratorHost": true,
       "knownProjects": [
         {
-          "id": "logseq-d2",
-          "root": "/repos/logseq-d2",
+          "id": "catalog-app",
+          "root": "/repos/catalog-app",
           "source": "task"
         }
       ],
-      "targetProject": "logseq-d2",
+      "targetProject": "catalog-app",
       "ambiguity": "",
       "allowlist": [
-        "logseq-d2"
+        "catalog-app"
       ],
       "defaultProject": null,
       "explicit": null,
       "hostClaimToken": "host:orchestrator"
     },
-    "expectProjectId": "logseq-d2"
+    "expectProjectId": "catalog-app"
   },
   {
     "name": "proj: ordinary single-repository session is unchanged (proven path)",
-    "text": "Assistant: sport-live 的比分轮询改成只在页面可见时才发请求，解决了后台标签页把接口打到限流的问题，已验证生效。",
+    "text": "Assistant: service-app only sends score polling requests while the page is visible, avoiding rate limits from background tabs.",
     "expectFlag": true,
     "expectScope": "project",
     "projectContext": {
-      "hostProject": "sport-live",
+      "hostProject": "service-app",
       "orchestratorHost": false,
       "knownProjects": [
         {
-          "id": "sport-live",
-          "root": "/repos/sport-live",
+          "id": "service-app",
+          "root": "/repos/service-app",
           "source": "host"
         }
       ],
-      "targetProject": "sport-live",
+      "targetProject": "service-app",
       "ambiguity": "",
       "allowlist": [
-        "sport-live"
+        "service-app"
       ],
-      "defaultProject": "sport-live",
+      "defaultProject": "service-app",
       "explicit": null,
       "hostClaimToken": null
     },
-    "expectProjectId": "sport-live"
+    "expectProjectId": "service-app"
   },
   {
     "name": "proj: a global memory carries no project_id",
@@ -733,15 +733,15 @@
       "orchestratorHost": true,
       "knownProjects": [
         {
-          "id": "logseq-d2",
-          "root": "/repos/logseq-d2",
+          "id": "catalog-app",
+          "root": "/repos/catalog-app",
           "source": "task"
         }
       ],
-      "targetProject": "logseq-d2",
+      "targetProject": "catalog-app",
       "ambiguity": "",
       "allowlist": [
-        "logseq-d2"
+        "catalog-app"
       ],
       "defaultProject": null,
       "explicit": null,
@@ -782,7 +782,7 @@
   {
     "name": "correction-single-incident-troubleshooting-step",
     "correction": true,
-    "text": "Prior context (ALREADY PROCESSED — antecedent only, never extract from this block):\nAssistant: 历史配方指向的凭证文件 ~/.config/fish/conf.d/xvpn-intel.fish 也不存在\n--- current delta below ---\nUser: 凭证在 ~/.config/fish/conf.d/xvpn-intel.fish，但是好像被删掉了，在 git 历史中尝试是否能恢复这一个文件",
+    "text": "Prior context (ALREADY PROCESSED — antecedent only, never extract from this block):\nAssistant: The historical note refers to a credential file at /tmp/project/secrets.env, but the file is missing.\n--- current delta below ---\nUser: The credential file is /tmp/project/secrets.env, but it seems to have been deleted. Try recovering this file from version history.",
     "expectSignal": "correction",
     "expectSignalSubtype": "terse_redirect",
     "expectRuleForm": "procedure",
@@ -822,7 +822,7 @@
   {
     "name": "correction-one-off-task-scoping-same-pr",
     "correction": true,
-    "text": "Assistant: This PR only changes the newly added groups.\nUser: also change 王少鹏 from 竹 to 杉 in src/generationChars.js, in this same PR.",
+    "text": "Assistant: This change updates the newly added groups.\nUser: Also rename the temporary label in src/sample.ts in this same PR.",
     "expectSignal": "correction",
     "expectSignalSubtype": "terse_redirect",
     "expectRuleForm": "procedure",
@@ -830,9 +830,9 @@
     "expectFlag": false
   },
   {
-    "name": "correction-already-curated-in-captain-md",
+    "name": "correction-already-curated-settings",
     "correction": true,
-    "text": "Assistant: 等等，pane 那个改一下，我发现第二个船员会出现在 tab 左下，默认应该在右下\nUser: 与第一个船员共享右半侧才对，后面的船员以此类推",
+    "text": "Assistant: The settings panel now places the secondary pane below the main pane by default.\nUser: Keep the panes side by side, matching the existing layout.",
     "expectSignal": "correction",
     "expectSignalSubtype": "explicit_negation",
     "expectRuleForm": "preference",
@@ -841,23 +841,23 @@
   },
   {
     "name": "outcome-shipped-status-no-durable-value",
-    "text": "Assistant: Herdr pane placement feature completed: unit tests (11 cases), e2e verified in guarded lab (2026-08-12), lint clean, docs synced.",
+    "text": "Assistant: The sample app's panel placement feature is complete: unit tests and end-to-end checks passed, lint is clean, and docs are synced.",
     "expectFlag": false
   },
   {
     "name": "outcome-config-value-belongs-in-repo",
-    "text": "Assistant: paneru 启用焦点跟随鼠标（focus_follows_mouse = true）",
+    "text": "Assistant: The sample app now enables focus-following in its configuration file.",
     "expectFlag": false
   },
   {
     "name": "outcome-contradicts-existing-nondisclosure-rule",
-    "text": "Assistant: subscription-monitor 的 live checkout 已配置 ops/env.local，权限为 0600，QBZ_HOST 指向 http://127.51.0.150。",
+    "text": "Assistant: The sample service has a local test endpoint configured with a restricted token field.",
     "expectFlag": false
   },
   {
     "name": "correction-durable-procedure-positive",
     "correction": true,
-    "text": "Assistant: 报告两个审计工已入队列进展正常，但未检查队列完成通知或处理任务成果\nUser: crew 已经完成很久了，为什么你没反应？",
+    "text": "Assistant: I reported two tasks as active without checking whether their completion notifications had arrived.\nUser: Check completion notifications and process the output before reporting task progress.",
     "expectFlag": true,
     "expectSignal": "correction",
     "expectSignalSubtype": "explicit_negation",
@@ -869,26 +869,26 @@
     ]
   },
   {
-    "name": "attr: personal work-hours fact captured in a dotfiles session stays global",
-    "text": "Assistant: 我按 13:00-22:00 每天 9 小时算了你的时薪。\nUser: 时薪有问题，我的工作时间是 9:00-18:30，12:00-13:00 午休，公司包餐，加班费另算",
+    "name": "attr: a global personal fact captured in another project stays global",
+    "text": "Assistant: I used the wrong schedule when estimating the workday.\nUser: My usual workday runs from 09:00 to 17:00 with a one-hour break.",
     "expectFlag": true,
     "expectScope": "global",
     "projectContext": {
-      "hostProject": ".config",
+      "hostProject": "sample-host",
       "orchestratorHost": false,
       "knownProjects": [
         {
-          "id": ".config",
-          "root": "/repos/.config",
+          "id": "sample-host",
+          "root": "/repos/sample-host",
           "source": "host"
         }
       ],
-      "targetProject": ".config",
+      "targetProject": "sample-host",
       "ambiguity": "",
       "allowlist": [
-        ".config"
+        "sample-host"
       ],
-      "defaultProject": ".config",
+      "defaultProject": "sample-host",
       "explicit": null,
       "hostClaimToken": null
     },
@@ -896,32 +896,32 @@
     "correction": true
   },
   {
-    "name": "attr: market-rate trivia captured in a dotfiles session is not a dotfiles memory",
-    "text": "Assistant: 查下来秋招应届生薪资实际 18-25K，26K+ 多为 3-5 年工作经验。",
+    "name": "attr: external salary trivia in a sample project is not project memory",
+    "text": "Assistant: A sample report compares two hypothetical salary bands for a fictional role; the range is too broad to answer the question.",
     "expectFlag": false,
     "projectContext": {
-      "hostProject": ".config",
+      "hostProject": "sample-host",
       "orchestratorHost": false,
       "knownProjects": [
         {
-          "id": ".config",
-          "root": "/repos/.config",
+          "id": "sample-host",
+          "root": "/repos/sample-host",
           "source": "host"
         }
       ],
-      "targetProject": ".config",
+      "targetProject": "sample-host",
       "ambiguity": "",
       "allowlist": [
-        ".config"
+        "sample-host"
       ],
-      "defaultProject": ".config",
+      "defaultProject": "sample-host",
       "explicit": null,
       "hostClaimToken": null
     }
   },
   {
-    "name": "attr: a dotfiles bug fix keeps the dotfiles repo, not the orchestrator host",
-    "text": "Assistant: SketchyBar 弹层改用分段独立行槽而不是共享范围，修好了一段行数减少时另一段被挤到分割线上方的问题，已验证生效。",
+    "name": "attr: a web-app bug fix keeps the target project, not the host",
+    "text": "Assistant: web-app now retains keyboard focus after a modal closes, fixing keyboard navigation after dismissing the dialog.",
     "expectFlag": true,
     "expectScope": "project",
     "projectContext": {
@@ -929,124 +929,124 @@
       "orchestratorHost": true,
       "knownProjects": [
         {
-          "id": ".config",
-          "root": "/repos/.config",
+          "id": "web-app",
+          "root": "/repos/web-app",
           "source": "task"
         }
       ],
-      "targetProject": ".config",
+      "targetProject": "web-app",
       "ambiguity": "",
       "allowlist": [
-        ".config"
+        "web-app"
       ],
       "defaultProject": null,
       "explicit": null,
       "hostClaimToken": "host:orchestrator"
     },
-    "expectProjectId": ".config"
+    "expectProjectId": "web-app"
   },
   {
-    "name": "attr: crew-orchestration procedure is not a memory of the PM repo the session ran in",
-    "text": "Assistant: 工人已经在最后一步做真 Chrome 逐态校验，进度正常。\nUser: 我打开看了，lavish 页面根本没动，你是照抄工人自己说的进度。以后向我汇报工人进度前，先自己核实工人的实际产出，不要直接转述工人的自述。",
+    "name": "attr: cross-project reporting procedure is not memory of the host repository",
+    "text": "Assistant: The worker reports that the final browser validation is complete.\nUser: I checked the page and it has not changed. Verify the actual output before reporting task progress.",
     "expectFlag": true,
     "correction": true,
     "expectSignal": "correction",
     "projectContext": {
-      "hostProject": "back-to-school",
+      "hostProject": "sample-app",
       "orchestratorHost": false,
       "knownProjects": [
         {
-          "id": "back-to-school",
-          "root": "/repos/back-to-school",
+          "id": "sample-app",
+          "root": "/repos/sample-app",
           "source": "host"
         }
       ],
-      "targetProject": "back-to-school",
+      "targetProject": "sample-app",
       "ambiguity": "",
       "allowlist": [
-        "back-to-school"
+        "sample-app"
       ],
-      "defaultProject": "back-to-school",
+      "defaultProject": "sample-app",
       "explicit": null,
       "hostClaimToken": null
     },
     "expectProjectId": ""
   },
   {
-    "name": "neg: multi-fact completion log of this round of dotfiles edits",
-    "text": "Assistant: 已修复工作区3终端图标、bar 左右对称（630px）、天气源改用 Open-Meteo 显示武侯区、新增 AI 用量面板、删除 weather.sh 死代码、禁用 alt-5 工作区绑定。",
+    "name": "neg: multi-fact completion log is not durable memory",
+    "text": "Assistant: Fixed the desktop app's missing status icon, aligned its navigation spacing, added a weather panel, removed unused code, and disabled an obsolete keyboard shortcut.",
     "expectFlag": false,
     "projectContext": {
-      "hostProject": ".config",
+      "hostProject": "sample-host",
       "orchestratorHost": false,
       "knownProjects": [
         {
-          "id": ".config",
-          "root": "/repos/.config",
+          "id": "sample-host",
+          "root": "/repos/sample-host",
           "source": "host"
         }
       ],
-      "targetProject": ".config",
+      "targetProject": "sample-host",
       "ambiguity": "",
       "allowlist": [
-        ".config"
+        "sample-host"
       ],
-      "defaultProject": ".config",
+      "defaultProject": "sample-host",
       "explicit": null,
       "hostClaimToken": null
     }
   },
   {
     "name": "neg: a newly added script is a one-off completion log",
-    "text": "Assistant: 新增了 publish.sh，跑一条命令就能完成打包和发布，已经试跑通过。",
+    "text": "Assistant: Added a publish script that packages the app in one command and confirmed it runs successfully.",
     "expectFlag": false,
     "projectContext": {
-      "hostProject": ".config",
+      "hostProject": "sample-host",
       "orchestratorHost": false,
       "knownProjects": [
         {
-          "id": ".config",
-          "root": "/repos/.config",
+          "id": "sample-host",
+          "root": "/repos/sample-host",
           "source": "host"
         }
       ],
-      "targetProject": ".config",
+      "targetProject": "sample-host",
       "ambiguity": "",
       "allowlist": [
-        ".config"
+        "sample-host"
       ],
-      "defaultProject": ".config",
+      "defaultProject": "sample-host",
       "explicit": null,
       "hostClaimToken": null
     }
   },
   {
-    "name": "neg: literal popup style values whose source of truth is the file just edited",
-    "text": "Assistant: sketchybar 所有弹层（datetime、volume、wifi、weather）已统一为 SURFACE 0x80 半透、圆角 18px、边距 20px。",
+    "name": "neg: literal UI style values belong in the file just edited",
+    "text": "Assistant: The app's dialog uses a warm background, 16 px corner radius, and 24 px spacing on every side.",
     "expectFlag": false,
     "projectContext": {
-      "hostProject": ".config",
+      "hostProject": "sample-host",
       "orchestratorHost": false,
       "knownProjects": [
         {
-          "id": ".config",
-          "root": "/repos/.config",
+          "id": "sample-host",
+          "root": "/repos/sample-host",
           "source": "host"
         }
       ],
-      "targetProject": ".config",
+      "targetProject": "sample-host",
       "ambiguity": "",
       "allowlist": [
-        ".config"
+        "sample-host"
       ],
-      "defaultProject": ".config",
+      "defaultProject": "sample-host",
       "explicit": null,
       "hostClaimToken": null
     }
   },
   {
     "name": "attr: a business metric definition for an unlisted repo is never filed under the orchestrator",
-    "text": "Assistant: 分期看板的「在途」我先按实时试用人数算。\nUser: 不对，在途 = 总试用 − 已到期，不要用实时试用人数，以后这个看板都按这个口径",
+    "text": "Assistant: I initially counted active subscriptions as the pending total.\nUser: Pending means all active subscriptions minus the completed ones; use this definition for the dashboard from now on.",
     "expectFlag": true,
     "correction": true,
     "projectContext": {
@@ -1054,13 +1054,13 @@
       "orchestratorHost": true,
       "knownProjects": [
         {
-          "id": "asaki-memory-manager",
-          "root": "/repos/asaki-memory-manager",
+          "id": "catalog-app",
+          "root": "/repos/catalog-app",
           "source": "task"
         },
         {
-          "id": "logseq-d2",
-          "root": "/repos/logseq-d2",
+          "id": "service-app",
+          "root": "/repos/service-app",
           "source": "task"
         }
       ],
@@ -1068,7 +1068,7 @@
       "ambiguity": "multiple-targets",
       "allowlist": [
         "asaki-memory-manager",
-        "logseq-d2"
+        "service-app"
       ],
       "defaultProject": null,
       "explicit": null,
@@ -1104,7 +1104,7 @@
   },
   {
     "name": "attr: several targets in flight still let the named target repo win",
-    "text": "Assistant: logseq-d2 的 D2 代码块改成保存时才渲染，解决了每次按键都重排的卡顿，已验证。",
+    "text": "Assistant: catalog-app now renders code examples only after save, eliminating the lag caused by re-rendering on every keystroke.",
     "expectFlag": true,
     "expectScope": "project",
     "projectContext": {
@@ -1117,8 +1117,8 @@
           "source": "task"
         },
         {
-          "id": "logseq-d2",
-          "root": "/repos/logseq-d2",
+          "id": "catalog-app",
+          "root": "/repos/catalog-app",
           "source": "task"
         }
       ],
@@ -1126,32 +1126,32 @@
       "ambiguity": "multiple-targets",
       "allowlist": [
         "asaki-memory-manager",
-        "logseq-d2"
+        "catalog-app"
       ],
       "defaultProject": null,
       "explicit": null,
       "hostClaimToken": "host:orchestrator"
     },
-    "expectProjectId": "logseq-d2"
+    "expectProjectId": "catalog-app"
   },
   {
     "name": "neg: one-off dashboard tab layout directive",
-    "text": "Assistant: 页面级做一个「全局引导/付费引导」切换，购买成功分叉树显示月套餐、一次性年付、分期三个选项，只删卡片保留进组数据用于告警。\nUser: tab改为总体/全局引导/付费引导，放在国家切换tab旁边，默认显示总体；分叉不仅要看购买成功，还要看后续各个链路；卡片和进组数据都删",
+    "text": "Assistant: The dashboard should show a region filter and a summary card.\nUser: Remove the card and make the filter default to all regions.",
     "expectFlag": false
   },
   {
     "name": "neg: one-off scope verdict on a page feature",
-    "text": "Assistant: 等 AU 转化分析完成之后再做 Data 页的联动。\nUser: data页不做联动",
+    "text": "Assistant: Link the overview page to the analysis page after the data refresh.\nUser: Do not add that link to this version.",
     "expectFlag": false
   },
   {
     "name": "neg: one-off chart merge verdict",
-    "text": "Assistant: 只改总体效果那张图，全局引导和付费引导两节的 LTV 图不动。\nUser: 全局引导和付费引导内容都是一样的，所以直接做成全局可切换的tab就行",
+    "text": "Assistant: Keep the overview chart unchanged.\nUser: Combine the two identical sections into one selectable tab.",
     "expectFlag": false
   },
   {
     "name": "neg: body of an injected global output standard (消融原则)",
-    "text": "Assistant: 按全局规范「产物」一节，交付前我对每个元素做一次消融——删掉它，读者理解结论、作出决策、执行动作或审计结果都不受影响的就删；过程流水账、重复信息、套话前言默认删除。\nUser: 嗯",
+    "text": "Assistant: Before delivery, remove every element that does not help readers understand the conclusion, make a decision, take action, or audit the result.\nUser: Sounds good.",
     "expectFlag": false
   },
   {
@@ -1161,72 +1161,72 @@
   },
   {
     "name": "neg: current key binding state in a dotfiles repository",
-    "text": "Assistant: 现在 Super+H 和 Super+L 在 aerospace 里是左右切换工作区。\nUser: 知道了",
+    "text": "Assistant: The sample app maps Alt+Left and Alt+Right to previous and next workspace.\nUser: Understood.",
     "expectFlag": false,
     "projectContext": {
-      "hostProject": ".config",
+      "hostProject": "sample-host",
       "orchestratorHost": false,
       "knownProjects": [
         {
-          "id": ".config",
-          "root": "/home/u/.config",
+          "id": "sample-host",
+          "root": "/repos/sample-host",
           "source": "host"
         }
       ],
-      "targetProject": ".config",
+      "targetProject": "sample-host",
       "ambiguity": "",
       "allowlist": [
-        ".config"
+        "sample-host"
       ],
-      "defaultProject": ".config",
+      "defaultProject": "sample-host",
       "explicit": null,
       "hostClaimToken": null
     }
   },
   {
     "name": "neg: current status bar layout in a dotfiles repository",
-    "text": "Assistant: 顶栏现在的排列是左边工作区、中间歌词、右边 WiFi、音量、电池，都在 bar-items.conf 里配。\nUser: 好",
+    "text": "Assistant: The status bar shows workspace tabs on the left, a summary in the center, and network and battery indicators on the right.\nUser: Thanks.",
     "expectFlag": false,
     "projectContext": {
-      "hostProject": ".config",
+      "hostProject": "sample-host",
       "orchestratorHost": false,
       "knownProjects": [
         {
-          "id": ".config",
-          "root": "/home/u/.config",
+          "id": "sample-host",
+          "root": "/repos/sample-host",
           "source": "host"
         }
       ],
-      "targetProject": ".config",
+      "targetProject": "sample-host",
       "ambiguity": "",
       "allowlist": [
-        ".config"
+        "sample-host"
       ],
-      "defaultProject": ".config",
+      "defaultProject": "sample-host",
       "explicit": null,
       "hostClaimToken": null
     }
   },
   {
     "name": "neg: current Super+Enter behaviour is configuration state",
-    "text": "Assistant: Super+Enter 现在打开一个新的 ghostty 窗口，不是新建 tab。\nUser: 明白",
+    "text": "Assistant: Alt+Enter opens a new terminal window rather than a new tab.\nUser: Got it.",
     "expectFlag": false,
     "projectContext": {
-      "hostProject": ".config",
+      "hostProject": "sample-host",
       "orchestratorHost": false,
       "knownProjects": [
         {
-          "id": ".config",
-          "root": "/home/u/.config",
+          "id": "sample-host",
+          "root": "/repos/sample-host",
           "source": "host"
         }
       ],
-      "targetProject": ".config",
+      "targetProject": "sample-host",
       "ambiguity": "",
       "allowlist": [
-        ".config"
+        "sample-host"
       ],
-      "defaultProject": ".config",
+      "defaultProject": "sample-host",
       "explicit": null,
       "hostClaimToken": null
     }

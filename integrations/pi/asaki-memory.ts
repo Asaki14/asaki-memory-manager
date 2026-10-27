@@ -709,13 +709,13 @@ const AMBIGUITY_MULTIPLE = "multiple-targets";
 const AMBIGUITY_CONFLICT = "identity-conflict";
 
 // Prefix of the claim token that lets a memory be filed under an orchestrator host. It exists so
-// that "this memory is about orchestrator itself" is a deliberate answer rather than the shape a
+// that "this memory is about the host repository itself" is deliberate rather than the shape a
 // nearest-match guess happens to take.
 const HOST_CLAIM_PREFIX = "host:";
 
-// A orchestrator task metadata file is `key=value` lines. Only these two keys matter here:
+// An orchestrator task metadata file is `key=value` lines. Only these two keys matter here:
 //   project=<absolute path of the TARGET repository's primary checkout>
-//   worktree=<absolute path of the disposable worktree the crewmate runs in>
+//   worktree=<absolute path of the disposable worktree the task runs in>
 // Unknown keys, blank lines and comments are ignored rather than rejected — this file is written
 // by another tool and must never be able to break memory capture.
 function parseTaskMeta(text: unknown): Record<string, string> {
@@ -960,8 +960,8 @@ function resolveCandidateProjectId(ctx: ProjectContext | null | undefined, model
 }
 // #endregion
 
-// Build the project context for this session. The orchestrator home is overridable so a test (or a
-// relocated install) can point at another orchestrator checkout.
+// Build the project context for this session. The orchestrator home is opt-in; unset means
+// orchestrator metadata is not read.
 function projectContextFor(ctx: unknown): ReturnType<typeof buildProjectContext> {
   const config = memoryConfig();
   const cwd = cwdFromContext(ctx);
@@ -969,7 +969,7 @@ function projectContextFor(ctx: unknown): ReturnType<typeof buildProjectContext>
     cwd,
     gitRoot: findGitRoot(cwd) ?? "",
     envProjectId: config.projectId || "",
-    orchestratorHome: process.env.ASAKI_MEMORY_orchestrator_HOME || join(homedir(), "orchestrator"),
+    orchestratorHome: process.env.ASAKI_MEMORY_ORCHESTRATOR_HOME || "",
   });
 }
 
@@ -1840,7 +1840,7 @@ Additional noise classes that read like durable memories but are not — all fla
 - A transient version claim, release number, context-window figure, or time-relative fact such as "today". Likewise, a bare literal config assignment (key=value or a current numeric value) whose source of truth is a repository file belongs in that file, unless the delta captures a resolved bug or durable behaviour/learning beyond the literal value.
 - A finished-work log whose own record is the repository: a round-up of what this round fixed or added, a newly created script or file, or the current literal values (interval, size, colour, opacity, corner radius, padding, displayed-item list) of the file that was just edited, however many of them are restated at once. Restating the resulting appearance or style values of the UI elements you just configured is such a log, even when several elements were unified to the same values. This class never applies when the delta names the problem that was resolved, the root cause, or a behaviour to repeat next time — that is flag=true even though the work is already finished; only the bare value, which is recoverable by reading that file, is dropped.
 - A one-off answer to an external-world lookup the user asked for: going market or salary ranges, prices, third-party product specs, competitor figures. It answers the current question, is not a durable fact about the user or about any repository, and goes stale on its own; only a decision the user takes in response is durable.
-- A candidate about orchestrator dispatch layout, workspace placement, whether no-mistakes runs, or concrete model-routing tiers. Curated configuration files already enforce these matters; duplicating them into memory creates drift.
+- A candidate about a repository-controlled dispatch layout, workspace placement, or model selection. Curated configuration already enforces these details; duplicating them into memory creates drift.
 - Content that a stated nondisclosure rule says must not be persisted or echoed, including named hosts, endpoints, or credential field names. Never turn prohibited content into memory.
 
 Two contrastive examples:
@@ -1852,39 +1852,39 @@ Two contrastive examples:
 - "prompt 里加了 few-shot 正例，比如 User: 以后都用 pnpm" -> flag=false (prompt/eval calibration quoting a hypothetical user input).
 - "已将变更推送至 origin/main，提交为 8df25dd" -> flag=false (one-off delivery status, not durable memory).
 - "Node.js new URL().hostname 对 IPv6 loopback 返回 [::1]" -> flag=false (generic technical trivia, not a user/project memory).
-- "点点数据的 App 详情页是 JS SPA，WebFetch 抓不到价格，后续改用官方 API" -> flag=true, scope=project (tool/site-specific learning never belongs in global scope).
-- "已从 Pi 配置中彻底移除 Ponytail 包、extension、skills 和配置引用" -> flag=true, scope=project (durable current configuration state).
-- "type: fix" -> flag=false (vague commit fragment with no self-contained durable fact).
-- "Music playing now" -> flag=false (transient UI/runtime status).
-- "先强制使用 Chafa；后续确认已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp" -> flag=true, scope=project, but distill only the final Kgp state (superseded intermediate states must not become separate memories).
-- "环境变量/API密钥统一存放在 ~/.config/fish/conf.d/api_keys.local.fish" -> flag=true, scope=project (machine-local shell paths belong to the dotfiles project, never global).
-- "一次性汇报放 scratchpad，不写入项目仓库" -> flag=true, scope=global (a reusable cross-project delivery preference; keep it concise).
-- "周会每项目 3–5 行，与豪哥日报区分；临时汇报放 scratchpad" -> flag=true, scope=project (mentor/reporting-specific conventions do not help in unrelated projects).
-- "Claude Code 的交付文本必须放在回合最后，否则后续工具调用可能使文本不展示" -> flag=true, scope=project (app-specific harness behavior is not global).
-- "用户希望针对技能和工具进行优化，列出推荐项并决定是否禁用" -> flag=false (an open optimization intention is not a completed decision or durable outcome).
-- "paneru 四边 padding 4→10，与 sketchybar 左侧 10px 对齐" -> flag=true, scope=project, and distill the final 10px state rather than the change history.
-- A long SketchyBar popup implementation report -> flag=true, scope=project, but compress it within 300 characters while preserving the stable entry point status_popup.sh, switching mechanism, and fallback behavior.
-- "Claude Design 画布页（.dc.html）不在 DesignSync MCP 文件树里（get_file 404）。浏览器登录态下可直接调 Omelette API：读取 GetFile，写回用 UploadFile，DeleteFile 删文件；大段 HTML 下载用 Blob+anchor，上传方向页内 fetch 后再 SHA-256 对齐本地。" -> flag=false (raw one-off API procedure dump, not an explicit repeat-use convention or established project workflow).
-- "用户希望不使用嵌套并复用同一个 herdr 进程和 server" -> flag=false ("不使用嵌套" lacks an object and cannot stand alone).
-- "手动拖高 Ghostty 窗口以填补当前布局缺口" -> flag=false (transient manual UI adjustment).
-- "独立审查判定方案 v2 不通过，阻塞项 B-2 至 B-8 需在动代码前解决" -> flag=false (a plan-review verdict and its blocker list are pipeline state, replaced by the next review round).
-- "classifier eval 57/60 通过，correction recall 92%、precision 100%，作为后续批次的对比参考点" -> flag=false (eval pass rates and batch statistics describe one run, not durable knowledge).
-- "已把审计流程的第 4 步补写进 commands/memory.md 的 workflow 段落" -> flag=false (a completed one-off edit to a data or doc file is already recorded by that file; only the durable configuration or behaviour state it leaves behind would qualify).
-- "复核了一遍现有规则，push 前检查明文密钥这条依然有效，本轮没有新增或修改任何规则" -> flag=false (restating an already-recorded rule adds nothing; flag only when the delta establishes or changes it).
-- "修复 asaki-memory 记忆提取全线失效的 bash 3.2 负偏移 bug，已推送 e07ac92 并验证部署" -> flag=false (a short release/hash recap of a fix already captured in the project is a duplicate, not a second durable memory).
-- "Removed large memory injection at Pi session start, now only shows compact status banner" -> flag=false (an intermediate rollout snapshot that was superseded by the current session-start design is not stable memory).
-- When the user correction is another adjustment to the same visual value (colour, opacity, padding, radius, or offset) during an active tuning loop, and its antecedent is an earlier candidate or agent proposal from that session -> flag=false. Intermediate visual tuning states are expected to be superseded; only an explicitly reported converged final state may qualify.
-- "Prior memory candidate: 虚拟工作区高亮改用半透明" … "User: 不要颜色了，只加边框" -> flag=false (another visual-tuning redirect is an intermediate state, even when it rejects a prior candidate).
-- "保留调研文件" … "调研的文件删掉"; "update data/names-db.json" … "it is gitignored, skip that step"; or "also change X in this same PR" -> flag=false (single-task cleanup and PR scope, not standing rules).
-- "orchestrator 第二个船员默认在右下" … "与第一个船员共享右半侧才对" -> flag=false (crew placement is enforced by curated configuration, so memory must not duplicate it).
-- "paneru 启用 focus_follows_mouse = true" -> flag=false (a bare literal repository config assignment belongs only in its source file). By contrast, a completed cross-repository behavioural state such as "two repositories now use build caching" remains flag=true even when project attribution is ambiguous.
-- "tab 改为总体/全局引导/付费引导，默认显示总体；卡片和进组数据都删" -> flag=false (the user naming what one page, chart or field of one deliverable should look like is a build instruction for the current iteration, not a memory; it qualifies only when the user says it holds from now on, or when the correction is about a way of working rather than one screen). This covers instructions about an artefact, never completed work: an assistant report of a FIX that names a mechanism and the failure mode it removes stays flag=true even when the change is a visual one.
-- "Assistant: 等 AU 转化分析完成之后再做 Data 页的联动" … "User: data页不做联动" -> flag=false (a verdict on whether one page of one deliverable gets one feature dies with that version of the page; it is a correction, and it is still not a durable rule, so it must not be promoted to a prohibition in order to stop the feature being proposed again). This narrow test is about the CONTENT of one artefact — which page shows what — and never about how documents, code or reports are structured in general: a verdict that documents should rely on their existing heading levels instead of a table of contents stays flag=true, because it is a reusable way of writing docs that merely happened to surface on one file.
-- "产物交付前应先对每个元素应用消融原则" -> flag=false (the body of a general output standard that is already written in ~/.claude/CLAUDE.md, ~/.pi/agent/AGENTS.md or a project AGENTS.md is injected into every session already, so restating it as a memory adds nothing and only spends injection budget). Apply this only when the delta itself shows that text being quoted or paraphrased out of such a file; never withhold a candidate on a guess that some rule like it might already exist somewhere.
-- "Super+Enter 现在打开一个新的终端窗口" or "顶栏现在按 WiFi、音量、电池的顺序排" -> flag=false (in an environment or dotfiles repository, what a key binding or a status bar currently does is configuration state whose real source is the config file; record it only when the delta also carries the reasoning behind that choice).
-- "Herdr feature completed: tests and e2e passed, lint clean, docs synced" -> flag=false (shipped status without a reusable learning).
-- A candidate that writes a host, endpoint, or credential field which an existing nondisclosure rule says not to persist -> flag=false (memory cannot violate nondisclosure).
-- "Assistant: 报告 crew 仍在队列，未检查完成通知" … "User: crew 已经完成很久了，为什么你没反应？" -> flag=true, scope=project, rule_form=procedure, text must say to check the crew 完成通知 and process results before reporting queue progress (a reusable orchestrator procedure failure, not one-off task scope or a global rule).
+- "The payment portal page is a client-rendered app; use the official API when HTML scraping misses prices" -> flag=true, scope=project (durable integration learning).
+- "Removed an unused package from the app configuration" -> flag=true, scope=project (durable current configuration state).
+- "type: fix" -> flag=false (vague fragment).
+- "Music playing now" -> flag=false (transient status).
+- "A rendering workaround was replaced after the standard renderer gained support" -> flag=true, scope=project, distill only the final renderer state (superseded intermediate states do not become separate memories).
+- "Store environment credentials in the project secret manager" -> flag=true, scope=project (project-local configuration guidance, not a machine path).
+- "Put one-off notes in a scratch folder, not the repository" -> flag=true, scope=global (reusable cross-project delivery preference).
+- "Weekly reports use a short section per project" -> flag=true, scope=project (a project-specific reporting convention).
+- "Return the final response after all tool calls" -> flag=true, scope=project (a client-specific behavior).
+- "I may want to review the plugin list later" -> flag=false (open intention, no decision).
+- "Set all four padding values to 10" -> flag=true, scope=project, distill the final state, not the edit history.
+- A long UI implementation report -> flag=true, scope=project, compress it while preserving the stable entry point, switching mechanism, and fallback.
+- "The design editor API requires a browser session; downloading and uploading files uses its documented endpoints" -> flag=false (one-off procedure dump, not a durable workflow).
+- "Reuse the existing worker process instead of nesting another one" -> flag=false (the correction lacks a durable scope).
+- "Increase the window height to fill the current layout gap" -> flag=false (transient manual UI adjustment).
+- "The plan review lists unresolved blockers before implementation" -> flag=false (temporary review state).
+- "The classifier passed 48 of 52 cases" -> flag=false (run-specific metrics are not durable).
+- "Added one sentence to the contribution guide" -> flag=false (the file records the edit).
+- "The existing release rule remains unchanged" -> flag=false (restating a rule does not add information).
+- "Fixed a parser bug in release 2.1, commit abc123" -> flag=false (a release recap duplicates the captured fix).
+- "Session startup now shows a compact status line" -> flag=false (an intermediate implementation snapshot).
+- Repeated visual adjustments during an active tuning loop -> flag=false; preserve only an explicitly stated final result.
+- "Prior memory candidate: use a blue highlight" … "User: remove the color and use an outline" -> flag=false (an intermediate visual redirect).
+- "Keep the draft" … "Delete the draft" or "skip this unrelated step" -> flag=false (one-task scope).
+- "worker pool default concurrency is 4" … "use 8 instead" -> flag=false (a repository-controlled implementation setting belongs in configuration, not memory).
+- "two services now use the same cache key" -> flag=true when it records a completed cross-project behavior.
+- "Set this dashboard default tab to overview and remove its extra cards" -> flag=false (one deliverable instruction).
+- "Assistant: move the chart below the summary" … "User: leave the page layout as it is" -> flag=false (a correction about one deliverable, not a reusable document rule).
+- "Before each release, apply the repository contribution checklist" -> flag=false when it only restates an injected repository instruction.
+- "The test service listens on port 8080" -> flag=false (a literal value belongs in configuration unless its cause matters).
+- "The feature is complete and all checks passed" -> flag=false (shipped status alone is not a learning).
+- A candidate containing a credential that a nondisclosure rule forbids persisting -> flag=false.
+- "Assistant: reported a task as complete without checking it" … "User: verify the output before reporting completion" -> flag=true, scope=global, rule_form=procedure.
 
 If flag=true, distill: compress the candidate into exactly ONE self-contained sentence for text, same language as the source. Preference/rule should be roughly 40-160 characters; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 characters. No bullet lists. One fact per memory — never chain multiple facts with semicolons/commas. Never paste raw code, CLI output, or a multi-paragraph narrative.
 
@@ -1894,13 +1894,13 @@ Classify (only meaningful when flag=true):
 - project_id: which repository this memory belongs to. The selectable ids are exactly the ones in the "known projects" list of the Project context block; anything else is not selectable. Output "" (empty string) whenever scope is not "project", the delta is about a repository that is not one of those ids, the delta cannot be attributed to exactly one of them, or the active target project is marked unresolved. An empty project_id makes the client skip the write, and skipping is the correct outcome, never a failure to avoid — never substitute the nearest listed repository for one that is absent. When the host project line marks the host as an orchestrator host, that host is NOT selectable by name: filing a memory under it requires the exact project_id token that line quotes, and that token is correct ONLY when the delta is about the code, config, docs or workflow of the orchestrator repository itself, never because the session runs there.
 - Attribution follows the SUBJECT of the delta, never the directory the session happened to run in. A fact about the user themself (pay, working hours, schooling, housing, market rates they are researching) is scope="global" or nothing at all, never a memory of the repository that hosted the session; and a memory about repository X keeps X even when the session ran inside repository Y — when X is not selectable, the answer is "", never the session host.
 - A memory has an owning repository only when the delta is about that repository — its code, config, docs, product or workflow. A rule about a skill, a report format, a prompt file or a general output standard that lives outside every listed repository owns no repository at all: answer project_id="" instead of filing it under the repository whose checkout the session happened to sit in. This decides project_id only; scope still comes from the scope rule above, which keeps a quirk of one tool or app at "project" even when no repository owns it.
-- Project context whose host line marks orchestrator as an orchestrator host quoting project_id="host:orchestrator", known projects logseq-d2, delta "orchestrator 的 crew 状态文件改成每条任务一个 append-only 文件，解决了多 crew 并发写同一文件互相覆盖的问题" -> project_id="host:orchestrator" (the delta is about the orchestrator repository itself, so the quoted claim token is the answer; a bare "orchestrator" is not selectable there).
-- The same context, delta "分期看板的试用转化率口径定为已转化除以试用已到期" -> project_id="" (the dashboard repository is not in the known projects list, and hosting that discussion is not a reason to answer "host:orchestrator", which asserts the memory is about orchestrator itself).
-- The same context, delta "提速取数不能靠削减数据口径或缩短时间范围，要提速就改调度——错峰、拆班、并行取数" -> project_id="" (the delta names no listed repository at all, and the one task that happens to be in flight is not evidence that a way of working belongs to it; a known project id is an answer about the SUBJECT, never about what the orchestrator is currently busy with).
-- The same context, delta "thesis-partner 的引用解析已改用官方 API" -> project_id="" (the repository the delta is about is not selectable; never fall back to the nearest listed one).
-- Project context with host project .config, delta "我的工作时间是 9:00-18:30，12:00-13:00 午休，加班费另算" -> flag=true, scope="global", project_id="" (a fact about the user is never a memory of the repository the session ran in).
-- Project context with host project orchestrator and known projects .config, delta "SketchyBar 弹层改用分段独立行槽而不是共享范围，修好了一段行数减少时另一段被挤到分割线上方的问题" -> project_id=".config" (attribution follows the subject of the delta, not the host the session ran on).
-- Project context with host project back-to-school, delta "以后向我汇报工人进度前，先自己核实工人的实际产出，不要直接转述" -> scope="global", project_id="" (a rule about how you report to the user is cross-project; never file it under the product repository that hosted the session).
+- Project context whose host line marks orchestrator as an orchestrator host quoting project_id="host:orchestrator", known projects catalog-app, delta "the orchestrator task metadata parser now ignores malformed comment lines" -> project_id="host:orchestrator" (the delta is about the orchestrator itself, so the explicit claim token is required).
+- The same context, delta "the reporting dashboard now uses the settled conversion denominator" -> project_id="" (the dashboard repository is not in the known projects list; do not substitute the host).
+- The same context, delta "speed up data loading by scheduling independent requests in parallel" -> project_id="" (no listed repository is identified as the subject).
+- The same context, delta "reference-app now uses an official API for citations" -> project_id="" (that repository is not selectable).
+- Project context with host project catalog-app, delta "User prefers concise answers in every project" -> flag=true, scope="global", project_id="" (a cross-project communication preference is not a memory of the host repository).
+- Project context with host project orchestrator and known projects web-app, delta "web-app now preserves keyboard focus when a dialog closes" -> project_id="web-app" (attribution follows the subject, not the host).
+- Project context with host project sample-app, delta "before reporting a completed task, check the resulting artifact rather than relying on a status message" -> scope="global", project_id="" (a reusable reporting procedure is cross-project).
 
 Be conservative: when genuinely unsure, prefer flag=false — a missed candidate falls back to the existing prompt-based reminder, a false alarm costs the main agent one wasted turn.
 
@@ -1973,7 +1973,7 @@ Additional noise classes that read like durable memories but are not — all fla
 - A transient version claim, release number, context-window figure, or time-relative fact such as "today". Likewise, a bare literal config assignment (key=value or a current numeric value) whose source of truth is a repository file belongs in that file, unless the delta captures a resolved bug or durable behaviour/learning beyond the literal value.
 - A finished-work log whose own record is the repository: a round-up of what this round fixed or added, a newly created script or file, or the current literal values (interval, size, colour, opacity, corner radius, padding, displayed-item list) of the file that was just edited, however many of them are restated at once. Restating the resulting appearance or style values of the UI elements you just configured is such a log, even when several elements were unified to the same values. This class never applies when the delta names the problem that was resolved, the root cause, or a behaviour to repeat next time — that is flag=true even though the work is already finished; only the bare value, which is recoverable by reading that file, is dropped.
 - A one-off answer to an external-world lookup the user asked for: going market or salary ranges, prices, third-party product specs, competitor figures. It answers the current question, is not a durable fact about the user or about any repository, and goes stale on its own; only a decision the user takes in response is durable.
-- A candidate about orchestrator dispatch layout, workspace placement, whether no-mistakes runs, or concrete model-routing tiers. Curated configuration files already enforce these matters; duplicating them into memory creates drift.
+- A candidate about a repository-controlled dispatch layout, workspace placement, or model selection. Curated configuration already enforces these details; duplicating them into memory creates drift.
 - Content that a stated nondisclosure rule says must not be persisted or echoed, including named hosts, endpoints, or credential field names. Never turn prohibited content into memory.
 
 Correction examples:
@@ -1988,7 +1988,7 @@ Correction examples:
 - "Prior memory candidate: Always run the full eval suite before every commit" … "User: that memory is wrong, drop it — only run it before a release" -> flag=true, rule_form=retract (NOT procedure), antecedent_source=candidate, redirect_target="only before a release".
 - "User: 这样不会有问题吗？" -> flag=false (a question is not a verdict).
 - "Assistant: 我上面那条改错了，已经修回来了" -> flag=false (the agent correcting itself is not a user correction).
-- "Tool: bash fm-wake-drain.sh --verify" … "User: 关掉这个自动核查" -> flag=false (a 这个/这次-scoped verdict switches off ONE specific redundant run and is not durable; only widen a verdict into a standing prohibition when the user words themselves generalize, e.g. 别再/以后/每次/again).
+- "Tool: bash periodic-check.sh --verify" … "User: 关掉这个自动核查" -> flag=false (a scoped verdict switches off one redundant check and is not durable; widen only when the user words themselves generalize, e.g. 别再/以后/每次/again).
 - One delta with "Assistant: 已修复登录超时" and "User: 别再自动 commit 了" -> emit ONLY the correction; the fix outcome is dropped.
 
 Non-correction examples (unchanged rules):
@@ -2001,39 +2001,39 @@ Non-correction examples (unchanged rules):
 - "prompt 里加了 few-shot 正例，比如 User: 以后都用 pnpm" -> flag=false (prompt/eval calibration quoting a hypothetical user input).
 - "已将变更推送至 origin/main，提交为 8df25dd" -> flag=false (one-off delivery status, not durable memory).
 - "Node.js new URL().hostname 对 IPv6 loopback 返回 [::1]" -> flag=false (generic technical trivia, not a user/project memory).
-- "点点数据的 App 详情页是 JS SPA，WebFetch 抓不到价格，后续改用官方 API" -> flag=true, scope=project (tool/site-specific learning never belongs in global scope).
-- "已从 Pi 配置中彻底移除 Ponytail 包、extension、skills 和配置引用" -> flag=true, scope=project (durable current configuration state).
-- "type: fix" -> flag=false (vague commit fragment with no self-contained durable fact).
-- "Music playing now" -> flag=false (transient UI/runtime status).
-- "先强制使用 Chafa；后续确认已支持 Kitty graphics，撤销 Chafa 并恢复 Kgp" -> flag=true, scope=project, but distill only the final Kgp state (superseded intermediate states must not become separate memories).
-- "环境变量/API密钥统一存放在 ~/.config/fish/conf.d/api_keys.local.fish" -> flag=true, scope=project (machine-local shell paths belong to the dotfiles project, never global).
-- "一次性汇报放 scratchpad，不写入项目仓库" -> flag=true, scope=global (where one-off artifacts go is a reusable cross-project delivery preference, so it stays global even though the sentence mentions 项目仓库; keep it concise).
-- "周会每项目 3–5 行，与豪哥日报区分；临时汇报放 scratchpad" -> flag=true, scope=project (mentor/reporting-specific conventions do not help in unrelated projects).
-- "Claude Code 的交付文本必须放在回合最后，否则后续工具调用可能使文本不展示" -> flag=true, scope=project (app-specific harness behavior is not global).
-- "用户希望针对技能和工具进行优化，列出推荐项并决定是否禁用" -> flag=false (an open optimization intention is not a completed decision or durable outcome).
-- "paneru 四边 padding 4→10，与 sketchybar 左侧 10px 对齐" -> flag=true, scope=project, and distill the final 10px state rather than the change history.
-- A long SketchyBar popup implementation report -> flag=true, scope=project, but compress it within 300 characters while preserving the stable entry point status_popup.sh, switching mechanism, and fallback behavior.
-- "Claude Design 画布页（.dc.html）不在 DesignSync MCP 文件树里（get_file 404）。浏览器登录态下可直接调 Omelette API：读取 GetFile，写回用 UploadFile，DeleteFile 删文件；大段 HTML 下载用 Blob+anchor，上传方向页内 fetch 后再 SHA-256 对齐本地。" -> flag=false (raw one-off API procedure dump, not an explicit repeat-use convention or established project workflow).
-- "用户希望不使用嵌套并复用同一个 herdr 进程和 server" -> flag=false ("不使用嵌套" lacks an object and cannot stand alone).
-- "手动拖高 Ghostty 窗口以填补当前布局缺口" -> flag=false (transient manual UI adjustment).
-- "独立审查判定方案 v2 不通过，阻塞项 B-2 至 B-8 需在动代码前解决" -> flag=false (a plan-review verdict and its blocker list are pipeline state, replaced by the next review round).
-- "classifier eval 57/60 通过，correction recall 92%、precision 100%，作为后续批次的对比参考点" -> flag=false (eval pass rates and batch statistics describe one run, not durable knowledge).
-- "已把审计流程的第 4 步补写进 commands/memory.md 的 workflow 段落" -> flag=false (a completed one-off edit to a data or doc file is already recorded by that file; only the durable configuration or behaviour state it leaves behind would qualify).
-- "复核了一遍现有规则，push 前检查明文密钥这条依然有效，本轮没有新增或修改任何规则" -> flag=false (restating an already-recorded rule adds nothing; flag only when the delta establishes or changes it).
-- "修复 asaki-memory 记忆提取全线失效的 bash 3.2 负偏移 bug，已推送 e07ac92 并验证部署" -> flag=false (a short release/hash recap of a fix already captured in the project is a duplicate, not a second durable memory).
-- "Removed large memory injection at Pi session start, now only shows compact status banner" -> flag=false (an intermediate rollout snapshot that was superseded by the current session-start design is not stable memory).
-- When the user correction is another adjustment to the same visual value (colour, opacity, padding, radius, or offset) during an active tuning loop, and its antecedent is an earlier candidate or agent proposal from that session -> flag=false. Intermediate visual tuning states are expected to be superseded; only an explicitly reported converged final state may qualify.
-- "Prior memory candidate: 虚拟工作区高亮改用半透明" … "User: 不要颜色了，只加边框" -> flag=false (another visual-tuning redirect is an intermediate state, even when it rejects a prior candidate).
-- "保留调研文件" … "调研的文件删掉"; "update data/names-db.json" … "it is gitignored, skip that step"; or "also change X in this same PR" -> flag=false (single-task cleanup and PR scope, not standing rules).
-- "orchestrator 第二个船员默认在右下" … "与第一个船员共享右半侧才对" -> flag=false (crew placement is enforced by curated configuration, so memory must not duplicate it).
-- "paneru 启用 focus_follows_mouse = true" -> flag=false (a bare literal repository config assignment belongs only in its source file). By contrast, a completed cross-repository behavioural state such as "two repositories now use build caching" remains flag=true even when project attribution is ambiguous.
-- "tab 改为总体/全局引导/付费引导，默认显示总体；卡片和进组数据都删" -> flag=false (the user naming what one page, chart or field of one deliverable should look like is a build instruction for the current iteration, not a memory; it qualifies only when the user says it holds from now on, or when the correction is about a way of working rather than one screen). This covers instructions about an artefact, never completed work: an assistant report of a FIX that names a mechanism and the failure mode it removes stays flag=true even when the change is a visual one.
-- "Assistant: 等 AU 转化分析完成之后再做 Data 页的联动" … "User: data页不做联动" -> flag=false (a verdict on whether one page of one deliverable gets one feature dies with that version of the page; it is a correction, and it is still not a durable rule, so it must not be promoted to a prohibition in order to stop the feature being proposed again). This narrow test is about the CONTENT of one artefact — which page shows what — and never about how documents, code or reports are structured in general: a verdict that documents should rely on their existing heading levels instead of a table of contents stays flag=true, because it is a reusable way of writing docs that merely happened to surface on one file.
-- "产物交付前应先对每个元素应用消融原则" -> flag=false (the body of a general output standard that is already written in ~/.claude/CLAUDE.md, ~/.pi/agent/AGENTS.md or a project AGENTS.md is injected into every session already, so restating it as a memory adds nothing and only spends injection budget). Apply this only when the delta itself shows that text being quoted or paraphrased out of such a file; never withhold a candidate on a guess that some rule like it might already exist somewhere.
-- "Super+Enter 现在打开一个新的终端窗口" or "顶栏现在按 WiFi、音量、电池的顺序排" -> flag=false (in an environment or dotfiles repository, what a key binding or a status bar currently does is configuration state whose real source is the config file; record it only when the delta also carries the reasoning behind that choice).
-- "Herdr feature completed: tests and e2e passed, lint clean, docs synced" -> flag=false (shipped status without a reusable learning).
-- A candidate that writes a host, endpoint, or credential field which an existing nondisclosure rule says not to persist -> flag=false (memory cannot violate nondisclosure).
-- "Assistant: 报告 crew 仍在队列，未检查完成通知" … "User: crew 已经完成很久了，为什么你没反应？" -> flag=true, scope=project, rule_form=procedure, text must say to check the crew 完成通知 and process results before reporting queue progress (a reusable orchestrator procedure failure, not one-off task scope or a global rule).
+- "The payment portal page is a client-rendered app; use the official API when HTML scraping misses prices" -> flag=true, scope=project (durable integration learning).
+- "Removed an unused package from the app configuration" -> flag=true, scope=project (durable current configuration state).
+- "type: fix" -> flag=false (vague fragment).
+- "Music playing now" -> flag=false (transient status).
+- "A rendering workaround was replaced after the standard renderer gained support" -> flag=true, scope=project, distill only the final renderer state (superseded intermediate states do not become separate memories).
+- "Store environment credentials in the project secret manager" -> flag=true, scope=project (project-local configuration guidance, not a machine path).
+- "Put one-off notes in a scratch folder, not the repository" -> flag=true, scope=global (reusable cross-project delivery preference).
+- "Weekly reports use a short section per project" -> flag=true, scope=project (a project-specific reporting convention).
+- "Return the final response after all tool calls" -> flag=true, scope=project (a client-specific behavior).
+- "I may want to review the plugin list later" -> flag=false (open intention, no decision).
+- "Set all four padding values to 10" -> flag=true, scope=project, distill the final state, not the edit history.
+- A long UI implementation report -> flag=true, scope=project, compress it while preserving the stable entry point, switching mechanism, and fallback.
+- "The design editor API requires a browser session; downloading and uploading files uses its documented endpoints" -> flag=false (one-off procedure dump, not a durable workflow).
+- "Reuse the existing worker process instead of nesting another one" -> flag=false (the correction lacks a durable scope).
+- "Increase the window height to fill the current layout gap" -> flag=false (transient manual UI adjustment).
+- "The plan review lists unresolved blockers before implementation" -> flag=false (temporary review state).
+- "The classifier passed 48 of 52 cases" -> flag=false (run-specific metrics are not durable).
+- "Added one sentence to the contribution guide" -> flag=false (the file records the edit).
+- "The existing release rule remains unchanged" -> flag=false (restating a rule does not add information).
+- "Fixed a parser bug in release 2.1, commit abc123" -> flag=false (a release recap duplicates the captured fix).
+- "Session startup now shows a compact status line" -> flag=false (an intermediate implementation snapshot).
+- Repeated visual adjustments during an active tuning loop -> flag=false; preserve only an explicitly stated final result.
+- "Prior memory candidate: use a blue highlight" … "User: remove the color and use an outline" -> flag=false (an intermediate visual redirect).
+- "Keep the draft" … "Delete the draft" or "skip this unrelated step" -> flag=false (one-task scope).
+- "worker pool default concurrency is 4" … "use 8 instead" -> flag=false (a repository-controlled implementation setting belongs in configuration, not memory).
+- "two services now use the same cache key" -> flag=true when it records a completed cross-project behavior.
+- "Set this dashboard default tab to overview and remove its extra cards" -> flag=false (one deliverable instruction).
+- "Assistant: move the chart below the summary" … "User: leave the page layout as it is" -> flag=false (a correction about one deliverable, not a reusable document rule).
+- "Before each release, apply the repository contribution checklist" -> flag=false when it only restates an injected repository instruction.
+- "The test service listens on port 8080" -> flag=false (a literal value belongs in configuration unless its cause matters).
+- "The feature is complete and all checks passed" -> flag=false (shipped status alone is not a learning).
+- A candidate containing a credential that a nondisclosure rule forbids persisting -> flag=false.
+- "Assistant: reported a task as complete without checking it" … "User: verify the output before reporting completion" -> flag=true, scope=global, rule_form=procedure.
 
 If flag=true, distill: compress the candidate into exactly ONE self-contained sentence for text, same language as the source. Preference/rule should be roughly 40-160 characters; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 characters. No bullet lists. One fact per memory — never chain multiple facts with semicolons/commas. Never paste raw code, CLI output, or a multi-paragraph narrative.
 
@@ -2043,13 +2043,13 @@ Classify (only meaningful when flag=true):
 - project_id: which repository this memory belongs to. The selectable ids are exactly the ones in the "known projects" list of the Project context block; anything else is not selectable. Output "" (empty string) whenever scope is not "project", the delta is about a repository that is not one of those ids, the delta cannot be attributed to exactly one of them, or the active target project is marked unresolved. An empty project_id makes the client skip the write, and skipping is the correct outcome, never a failure to avoid — never substitute the nearest listed repository for one that is absent. When the host project line marks the host as an orchestrator host, that host is NOT selectable by name: filing a memory under it requires the exact project_id token that line quotes, and that token is correct ONLY when the delta is about the code, config, docs or workflow of the orchestrator repository itself, never because the session runs there.
 - Attribution follows the SUBJECT of the delta, never the directory the session happened to run in. A fact about the user themself (pay, working hours, schooling, housing, market rates they are researching) is scope="global" or nothing at all, never a memory of the repository that hosted the session; and a memory about repository X keeps X even when the session ran inside repository Y — when X is not selectable, the answer is "", never the session host.
 - A memory has an owning repository only when the delta is about that repository — its code, config, docs, product or workflow. A rule about a skill, a report format, a prompt file or a general output standard that lives outside every listed repository owns no repository at all: answer project_id="" instead of filing it under the repository whose checkout the session happened to sit in. This decides project_id only; scope still comes from the scope rule above, which keeps a quirk of one tool or app at "project" even when no repository owns it.
-- Project context whose host line marks orchestrator as an orchestrator host quoting project_id="host:orchestrator", known projects logseq-d2, delta "orchestrator 的 crew 状态文件改成每条任务一个 append-only 文件，解决了多 crew 并发写同一文件互相覆盖的问题" -> project_id="host:orchestrator" (the delta is about the orchestrator repository itself, so the quoted claim token is the answer; a bare "orchestrator" is not selectable there).
-- The same context, delta "分期看板的试用转化率口径定为已转化除以试用已到期" -> project_id="" (the dashboard repository is not in the known projects list, and hosting that discussion is not a reason to answer "host:orchestrator", which asserts the memory is about orchestrator itself).
-- The same context, delta "提速取数不能靠削减数据口径或缩短时间范围，要提速就改调度——错峰、拆班、并行取数" -> project_id="" (the delta names no listed repository at all, and the one task that happens to be in flight is not evidence that a way of working belongs to it; a known project id is an answer about the SUBJECT, never about what the orchestrator is currently busy with).
-- The same context, delta "thesis-partner 的引用解析已改用官方 API" -> project_id="" (the repository the delta is about is not selectable; never fall back to the nearest listed one).
-- Project context with host project .config, delta "我的工作时间是 9:00-18:30，12:00-13:00 午休，加班费另算" -> flag=true, scope="global", project_id="" (a fact about the user is never a memory of the repository the session ran in).
-- Project context with host project orchestrator and known projects .config, delta "SketchyBar 弹层改用分段独立行槽而不是共享范围，修好了一段行数减少时另一段被挤到分割线上方的问题" -> project_id=".config" (attribution follows the subject of the delta, not the host the session ran on).
-- Project context with host project back-to-school, delta "以后向我汇报工人进度前，先自己核实工人的实际产出，不要直接转述" -> scope="global", project_id="" (a rule about how you report to the user is cross-project; never file it under the product repository that hosted the session).
+- Project context whose host line marks orchestrator as an orchestrator host quoting project_id="host:orchestrator", known projects catalog-app, delta "the orchestrator task metadata parser now ignores malformed comment lines" -> project_id="host:orchestrator" (the delta is about the orchestrator itself, so the explicit claim token is required).
+- The same context, delta "the reporting dashboard now uses the settled conversion denominator" -> project_id="" (the dashboard repository is not in the known projects list; do not substitute the host).
+- The same context, delta "speed up data loading by scheduling independent requests in parallel" -> project_id="" (no listed repository is identified as the subject).
+- The same context, delta "reference-app now uses an official API for citations" -> project_id="" (that repository is not selectable).
+- Project context with host project catalog-app, delta "User prefers concise answers in every project" -> flag=true, scope="global", project_id="" (a cross-project communication preference is not a memory of the host repository).
+- Project context with host project orchestrator and known projects web-app, delta "web-app now preserves keyboard focus when a dialog closes" -> project_id="web-app" (attribution follows the subject, not the host).
+- Project context with host project sample-app, delta "before reporting a completed task, check the resulting artifact rather than relying on a status message" -> scope="global", project_id="" (a reusable reporting procedure is cross-project).
 
 Be conservative: when genuinely unsure, prefer flag=false — a missed candidate falls back to the existing prompt-based reminder, a false alarm costs the main agent one wasted turn.
 

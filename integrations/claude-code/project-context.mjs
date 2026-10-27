@@ -3,9 +3,8 @@
 //
 // Why this exists: both clients used to derive project_id from one thing only — the basename of
 // the session cwd's git root. That is correct for an ordinary single-repository session, and
-// wrong whenever the session is HOSTED by an orchestrator repository (orchestrator) while the work
-// itself belongs to some other repository: every business memory captured from such a session was
-// filed under project_id=orchestrator.
+// wrong whenever the session is hosted by an orchestrator repository while work itself belongs to
+// another repository: business memories would otherwise be filed under the host project.
 //
 // The fix is not "guess harder". It is: hand the classifier a structured, deterministic snapshot
 // of which repositories are actually in play, let it name one, and accept its answer ONLY when it
@@ -15,9 +14,8 @@
 // The 2026-09-10 memory audit showed the first version of that allowlist still funnelled straight
 // back to the host, for two independent reasons, both fixed here:
 //   1. On an orchestrator host the allowlist was `[hostProject]` in every ambiguous branch, so the
-//      real task targets were REFUSED and the host was the only id that could get through. 9 of 22
-//      project-scope candidates captured from orchestrator main sessions (2026-09-08..10) were filed
-//      under project_id=orchestrator that way.
+//      real task targets were REFUSED and the host was the only id that could get through. Some
+//      project-scope candidates captured from orchestrator-hosted sessions were filed under the host.
 //   2. The host was admissible on the bare name alone, which is indistinguishable from a
 //      nearest-match fallback by a model that has been shown no better option. Naming the host now
 //      requires the explicit `host:<id>` claim token rendered in the context block, so filing a
@@ -45,13 +43,13 @@ export const AMBIGUITY_MULTIPLE = "multiple-targets";
 export const AMBIGUITY_CONFLICT = "identity-conflict";
 
 // Prefix of the claim token that lets a memory be filed under an orchestrator host. It exists so
-// that "this memory is about orchestrator itself" is a deliberate answer rather than the shape a
+// that "this memory is about the host repository itself" is deliberate rather than the shape a
 // nearest-match guess happens to take.
 export const HOST_CLAIM_PREFIX = "host:";
 
-// A orchestrator task metadata file is `key=value` lines. Only these two keys matter here:
+// An orchestrator task metadata file is `key=value` lines. Only these two keys matter here:
 //   project=<absolute path of the TARGET repository's primary checkout>
-//   worktree=<absolute path of the disposable worktree the crewmate runs in>
+//   worktree=<absolute path of the disposable worktree the task runs in>
 // Unknown keys, blank lines and comments are ignored rather than rejected — this file is written
 // by another tool and must never be able to break memory capture.
 export function parseTaskMeta(text) {
@@ -184,7 +182,7 @@ function dedupeById(targets) {
  * @param {string} input.cwd           session cwd
  * @param {string} [input.gitRoot]     git root of that cwd, when the caller already knows it
  * @param {string} [input.envProjectId] ASAKI_MEMORY_PROJECT_ID — an explicit human override
- * @param {string} [input.orchestratorHome] orchestrator home (default $HOME/orchestrator)
+ * @param {string} [input.orchestratorHome] orchestrator home, explicitly configured by the caller
  * @param {object} [io]                filesystem/git adapters (tests inject fakes)
  */
 export function buildProjectContext(input = {}, io = defaultIo) {
@@ -316,12 +314,12 @@ export function resolveCandidateProjectId(ctx, modelProjectId) {
 }
 
 function contextFromEnv(env = process.env) {
-  const home = env.ASAKI_MEMORY_orchestrator_HOME || (env.HOME ? join(env.HOME, "orchestrator") : "");
+  const orchestratorHome = env.ASAKI_MEMORY_ORCHESTRATOR_HOME || "";
   return buildProjectContext({
     cwd: env.ASAKI_PROJECT_CONTEXT_CWD || env.PWD || process.cwd(),
     gitRoot: env.ASAKI_PROJECT_CONTEXT_GIT_ROOT || "",
     envProjectId: env.ASAKI_MEMORY_PROJECT_ID || "",
-    orchestratorHome: home,
+    orchestratorHome,
   });
 }
 
