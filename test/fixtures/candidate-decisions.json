@@ -68,12 +68,12 @@
     "name": "ignore Chinese subset",
     "expected": "ignore",
     "candidate": {
-      "content": "主公喜欢简洁直接的回答。",
+      "content": "用户喜欢简洁直接的回答。",
       "scope": "global",
       "kind": "preference"
     },
     "existing": {
-      "content": "主公喜欢简洁直接的回答，少废话，直接给结果。",
+      "content": "用户喜欢简洁直接的回答，少废话，直接给结果。",
       "scope": "global",
       "kind": "preference"
     }
@@ -166,12 +166,12 @@
     "name": "add same user different preference",
     "expected": "add",
     "candidate": {
-      "content": "主公希望用中文称呼。",
+      "content": "用户希望用中文称呼。",
       "scope": "global",
       "kind": "preference"
     },
     "existing": {
-      "content": "主公偏好最小改动，不做额外抽象。",
+      "content": "用户偏好最小改动，不做额外抽象。",
       "scope": "global",
       "kind": "preference"
     }

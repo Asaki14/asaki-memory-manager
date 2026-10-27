@@ -58,27 +58,27 @@ function world({ metas = {}, gitRoots = {}, dirs = [] } = {}) {
 const META_ASAKI = [
   "window=default:w8:p49",
   "endpoint_task_id=asaki-project-context-v022",
-  "worktree=/home/u/.treehouse/pool/5/asaki-memory-manager",
-  "project=/home/u/Desktop/project/asaki-memory-manager",
+  "worktree=/home/u/.worktrees/5/asaki-memory-manager",
+  "project=/home/u/code/asaki-memory-manager",
   "harness=claude",
   "",
 ].join("\n");
-const META_LOGSEQ = [
-  "endpoint_task_id=logseq-d2-fix",
-  "worktree=/home/u/.treehouse/pool/2/logseq-d2",
-  "project=/home/u/orchestrator/projects/logseq-d2",
+const META_NOTES = [
+  "endpoint_task_id=notes-app-fix",
+  "worktree=/home/u/.worktrees/2/notes-app",
+  "project=/home/u/orchestrator/projects/notes-app",
   "",
 ].join("\n");
 const GIT_ROOTS = {
-  "/home/u/Desktop/project/asaki-memory-manager": "/home/u/Desktop/project/asaki-memory-manager",
+  "/home/u/code/asaki-memory-manager": "/home/u/code/asaki-memory-manager",
   // The orchestrator registry entry is an ALIAS directory; the real checkout lives elsewhere and
   // its basename is the canonical identity.
-  "/home/u/orchestrator/projects/logseq-d2": "/home/u/Desktop/project/logseq-d2",
-  "/home/u/Desktop/project/logseq-d2": "/home/u/Desktop/project/logseq-d2",
+  "/home/u/orchestrator/projects/notes-app": "/home/u/code/notes-app",
+  "/home/u/code/notes-app": "/home/u/code/notes-app",
   [ORCHESTRATOR_HOME]: ORCHESTRATOR_HOME,
-  "/home/u/Desktop/project/sport-live": "/home/u/Desktop/project/sport-live",
-  "/home/u/vendor/logseq-d2": "/home/u/vendor/logseq-d2",
-  "/home/u/.treehouse/pool/5/asaki-memory-manager": "/home/u/Desktop/project/asaki-memory-manager",
+  "/home/u/code/fitness-app": "/home/u/code/fitness-app",
+  "/home/u/vendor/notes-app": "/home/u/vendor/notes-app",
+  "/home/u/.worktrees/5/asaki-memory-manager": "/home/u/code/asaki-memory-manager",
 };
 
 // Run the same table against both implementations so the Pi copy cannot drift semantically.
@@ -94,8 +94,8 @@ function buildBoth(input, io) {
 // --- 1. metadata parsing ----------------------------------------------------------------------
 for (const [label, impl] of impls) {
   const meta = impl.parseTaskMeta(META_ASAKI);
-  eq(`${label}/parse project`, meta.project, "/home/u/Desktop/project/asaki-memory-manager");
-  eq(`${label}/parse worktree`, meta.worktree, "/home/u/.treehouse/pool/5/asaki-memory-manager");
+  eq(`${label}/parse project`, meta.project, "/home/u/code/asaki-memory-manager");
+  eq(`${label}/parse worktree`, meta.worktree, "/home/u/.worktrees/5/asaki-memory-manager");
   eq(`${label}/parse ignores junk`, impl.parseTaskMeta("# c\n\nbroken\nk=v\nk=other").k, "v");
   eq(`${label}/parse value with =`, impl.parseTaskMeta("a=b=c").a, "b=c");
 }
@@ -106,12 +106,12 @@ for (const [label, impl] of impls) {
   for (const [label, impl] of impls) {
     eq(
       `${label}/canonical id ignores registry alias`,
-      impl.canonicalProjectId("/home/u/orchestrator/projects/logseq-d2", io),
-      "logseq-d2",
+      impl.canonicalProjectId("/home/u/orchestrator/projects/notes-app", io),
+      "notes-app",
     );
     eq(
       `${label}/canonical id of a worktree is the repo`,
-      impl.canonicalProjectId("/home/u/.treehouse/pool/5/asaki-memory-manager", io),
+      impl.canonicalProjectId("/home/u/.worktrees/5/asaki-memory-manager", io),
       "asaki-memory-manager",
     );
   }
@@ -124,26 +124,26 @@ for (const [label, impl] of impls) {
 {
   const io = world({ gitRoots: GIT_ROOTS });
   for (const [label, ctx] of buildBoth(
-    { cwd: "/home/u/Desktop/project/sport-live", gitRoot: "/home/u/Desktop/project/sport-live", orchestratorHome: ORCHESTRATOR_HOME },
+    { cwd: "/home/u/code/fitness-app", gitRoot: "/home/u/code/fitness-app", orchestratorHome: ORCHESTRATOR_HOME },
     io,
   )) {
-    eq(`${label}/single-repo target`, ctx.targetProject, "sport-live");
-    eq(`${label}/single-repo default`, ctx.defaultProject, "sport-live");
-    eq(`${label}/single-repo allowlist`, ctx.allowlist, ["sport-live"]);
+    eq(`${label}/single-repo target`, ctx.targetProject, "fitness-app");
+    eq(`${label}/single-repo default`, ctx.defaultProject, "fitness-app");
+    eq(`${label}/single-repo allowlist`, ctx.allowlist, ["fitness-app"]);
     check(`${label}/single-repo not orchestrator`, ctx.orchestratorHost === false);
     // Masking: even when the model says nothing usable, a single-repo session still writes. This
     // is deliberate and survives the 2026-09 hardening: with exactly one repository in play an
     // omitted id is a formatting slip, not a claim that the memory belongs somewhere else. The
     // "in A's checkout, talking about B" misattribution is NOT fixable here — the discriminating
     // signal is the delta's subject, which only the classifier prompt can see.
-    eq(`${label}/single-repo resolves empty model answer`, impls.find(([l]) => l === label)[1].resolveCandidateProjectId(ctx, ""), "sport-live");
+    eq(`${label}/single-repo resolves empty model answer`, impls.find(([l]) => l === label)[1].resolveCandidateProjectId(ctx, ""), "fitness-app");
     eq(`${label}/single-repo host needs no claim token`, ctx.hostClaimToken, null);
   }
 }
 // Without an explicit orchestrator home, task metadata is not loaded and the host is treated as
 // an ordinary single-repository session.
 {
-  const io = world({ metas: { "a.meta": META_LOGSEQ }, gitRoots: GIT_ROOTS });
+  const io = world({ metas: { "a.meta": META_NOTES }, gitRoots: GIT_ROOTS });
   for (const [label, ctx] of buildBoth({ cwd: ORCHESTRATOR_HOME, gitRoot: ORCHESTRATOR_HOME }, io)) {
     check(`${label}/unset orchestrator home disables detection`, ctx.orchestratorHost === false);
     eq(`${label}/unset orchestrator home keeps host as target`, ctx.targetProject, "orchestrator");
@@ -154,7 +154,7 @@ for (const [label, impl] of impls) {
 
 // REPRODUCTION / proven path: explicit ASAKI_MEMORY_PROJECT_ID. The other masking condition.
 {
-  const io = world({ metas: { "a.meta": META_ASAKI, "b.meta": META_LOGSEQ }, gitRoots: GIT_ROOTS });
+  const io = world({ metas: { "a.meta": META_ASAKI, "b.meta": META_NOTES }, gitRoots: GIT_ROOTS });
   for (const [label, ctx] of buildBoth(
     { cwd: ORCHESTRATOR_HOME, gitRoot: ORCHESTRATOR_HOME, envProjectId: "manual-override", orchestratorHome: ORCHESTRATOR_HOME },
     io,
@@ -163,30 +163,30 @@ for (const [label, impl] of impls) {
     eq(`${label}/explicit allowlist`, ctx.allowlist, ["manual-override"]);
     const impl = impls.find(([l]) => l === label)[1];
     // An override is a human decision: it beats even a confident model answer.
-    eq(`${label}/explicit beats model`, impl.resolveCandidateProjectId(ctx, "logseq-d2"), "manual-override");
+    eq(`${label}/explicit beats model`, impl.resolveCandidateProjectId(ctx, "notes-app"), "manual-override");
   }
 }
 
 // TRIGGER: orchestrator-hosted background extraction, one task in flight -> the business repository
 // is uniquely attributable and must win over the host.
 {
-  const io = world({ metas: { "a.meta": META_LOGSEQ }, gitRoots: GIT_ROOTS });
+  const io = world({ metas: { "a.meta": META_NOTES }, gitRoots: GIT_ROOTS });
   for (const [label, ctx] of buildBoth({ cwd: ORCHESTRATOR_HOME, gitRoot: ORCHESTRATOR_HOME, orchestratorHome: ORCHESTRATOR_HOME }, io)) {
     const impl = impls.find(([l]) => l === label)[1];
     check(`${label}/orchestrator detected`, ctx.orchestratorHost === true);
     eq(`${label}/orchestrator host project`, ctx.hostProject, "orchestrator");
-    eq(`${label}/orchestrator target`, ctx.targetProject, "logseq-d2");
+    eq(`${label}/orchestrator target`, ctx.targetProject, "notes-app");
     // The host is NOT an allowlist member on an orchestrator host: see the claim-token assertions.
-    eq(`${label}/orchestrator allowlist`, ctx.allowlist, ["logseq-d2"]);
+    eq(`${label}/orchestrator allowlist`, ctx.allowlist, ["notes-app"]);
     eq(`${label}/orchestrator claim token`, ctx.hostClaimToken, "host:orchestrator");
     // SYMPTOM the fix removes: never default to the host.
     eq(`${label}/orchestrator has no default`, ctx.defaultProject, null);
-    eq(`${label}/business memory lands in the business repo`, impl.resolveCandidateProjectId(ctx, "logseq-d2"), "logseq-d2");
+    eq(`${label}/business memory lands in the business repo`, impl.resolveCandidateProjectId(ctx, "notes-app"), "notes-app");
     // Bare host names look like nearest-match guesses, so reject them.
     eq(`${label}/bare host name refused`, impl.resolveCandidateProjectId(ctx, "orchestrator"), null);
     eq(`${label}/true host-owned change`, impl.resolveCandidateProjectId(ctx, "host:orchestrator"), "orchestrator");
     // The token is host-specific: it cannot be reused to claim some other repository.
-    eq(`${label}/claim token of another repo refused`, impl.resolveCandidateProjectId(ctx, "host:logseq-d2"), null);
+    eq(`${label}/claim token of another repo refused`, impl.resolveCandidateProjectId(ctx, "host:notes-app"), null);
     eq(`${label}/silent fallback removed`, impl.resolveCandidateProjectId(ctx, ""), null);
     eq(`${label}/unknown project refused`, impl.resolveCandidateProjectId(ctx, "some-other-repo"), null);
   }
@@ -194,15 +194,15 @@ for (const [label, impl] of impls) {
 
 // Ambiguity: several repositories in play, none uniquely attributable -> no project write at all.
 {
-  const io = world({ metas: { "a.meta": META_ASAKI, "b.meta": META_LOGSEQ }, gitRoots: GIT_ROOTS });
+  const io = world({ metas: { "a.meta": META_ASAKI, "b.meta": META_NOTES }, gitRoots: GIT_ROOTS });
   for (const [label, ctx] of buildBoth({ cwd: ORCHESTRATOR_HOME, gitRoot: ORCHESTRATOR_HOME, orchestratorHome: ORCHESTRATOR_HOME }, io)) {
     const impl = impls.find(([l]) => l === label)[1];
     eq(`${label}/multi ambiguity`, ctx.ambiguity, "multiple-targets");
     eq(`${label}/multi target`, ctx.targetProject, null);
-    eq(`${label}/multi known projects`, ctx.knownProjects.map((p) => p.id), ["asaki-memory-manager", "logseq-d2"]);
+    eq(`${label}/multi known projects`, ctx.knownProjects.map((p) => p.id), ["asaki-memory-manager", "notes-app"]);
     // Ambiguity decides the default, not what may be named.
-    eq(`${label}/multi allowlist admits every in-flight target`, ctx.allowlist, ["asaki-memory-manager", "logseq-d2"]);
-    eq(`${label}/multi accepts a named repo`, impl.resolveCandidateProjectId(ctx, "logseq-d2"), "logseq-d2");
+    eq(`${label}/multi allowlist admits every in-flight target`, ctx.allowlist, ["asaki-memory-manager", "notes-app"]);
+    eq(`${label}/multi accepts a named repo`, impl.resolveCandidateProjectId(ctx, "notes-app"), "notes-app");
     eq(`${label}/multi still refuses the bare host`, impl.resolveCandidateProjectId(ctx, "orchestrator"), null);
     eq(`${label}/multi refuses silence`, impl.resolveCandidateProjectId(ctx, ""), null);
   }
@@ -210,13 +210,13 @@ for (const [label, impl] of impls) {
 
 // Basename/alias identity conflict: two different checkouts with the same basename.
 {
-  const conflicting = ["endpoint_task_id=vendor", "project=/home/u/vendor/logseq-d2", ""].join("\n");
-  const io = world({ metas: { "a.meta": META_LOGSEQ, "b.meta": conflicting }, gitRoots: GIT_ROOTS });
+  const conflicting = ["endpoint_task_id=vendor", "project=/home/u/vendor/notes-app", ""].join("\n");
+  const io = world({ metas: { "a.meta": META_NOTES, "b.meta": conflicting }, gitRoots: GIT_ROOTS });
   for (const [label, ctx] of buildBoth({ cwd: ORCHESTRATOR_HOME, gitRoot: ORCHESTRATOR_HOME, orchestratorHome: ORCHESTRATOR_HOME }, io)) {
     const impl = impls.find(([l]) => l === label)[1];
     eq(`${label}/conflict ambiguity`, ctx.ambiguity, "identity-conflict");
     eq(`${label}/conflict target`, ctx.targetProject, null);
-    eq(`${label}/conflict refuses the shared name`, impl.resolveCandidateProjectId(ctx, "logseq-d2"), null);
+    eq(`${label}/conflict refuses the shared name`, impl.resolveCandidateProjectId(ctx, "notes-app"), null);
     eq(`${label}/conflict allowlist excludes the shared name`, ctx.allowlist, []);
     eq(`${label}/conflict refuses the bare host`, impl.resolveCandidateProjectId(ctx, "orchestrator"), null);
   }
@@ -228,20 +228,20 @@ for (const [label, impl] of impls) {
   for (const [label, ctx] of buildBoth({ cwd: ORCHESTRATOR_HOME, gitRoot: ORCHESTRATOR_HOME, orchestratorHome: ORCHESTRATOR_HOME }, io)) {
     const impl = impls.find(([l]) => l === label)[1];
     eq(`${label}/no-target ambiguity`, ctx.ambiguity, "no-target");
-    eq(`${label}/no-target refuses`, impl.resolveCandidateProjectId(ctx, "logseq-d2"), null);
+    eq(`${label}/no-target refuses`, impl.resolveCandidateProjectId(ctx, "notes-app"), null);
     eq(`${label}/no-target refuses the bare host`, impl.resolveCandidateProjectId(ctx, "orchestrator"), null);
     eq(`${label}/no-target still allows an explicit host claim`, impl.resolveCandidateProjectId(ctx, "host:orchestrator"), "orchestrator");
   }
 }
 
-// A crewmate worktree: the host identity comes from the owning task's `project=`, not the
+// A worktree from a checkout pool: the host identity comes from the owning task's `project=`, not the
 // worktree directory name.
 {
   const io = world({ metas: { "a.meta": META_ASAKI }, gitRoots: GIT_ROOTS });
   for (const [label, ctx] of buildBoth(
     {
-      cwd: "/home/u/.treehouse/pool/5/asaki-memory-manager",
-      gitRoot: "/home/u/.treehouse/pool/5/asaki-memory-manager",
+      cwd: "/home/u/.worktrees/5/asaki-memory-manager",
+      gitRoot: "/home/u/.worktrees/5/asaki-memory-manager",
       orchestratorHome: ORCHESTRATOR_HOME,
     },
     io,
@@ -254,30 +254,30 @@ for (const [label, impl] of impls) {
 
 // --- 4. deterministic snapshot rendering ------------------------------------------------------
 {
-  const io = world({ metas: { "a.meta": META_ASAKI, "b.meta": META_LOGSEQ }, gitRoots: GIT_ROOTS });
+  const io = world({ metas: { "a.meta": META_ASAKI, "b.meta": META_NOTES }, gitRoots: GIT_ROOTS });
   const [[, ctxA], [, ctxB]] = buildBoth({ cwd: ORCHESTRATOR_HOME, gitRoot: ORCHESTRATOR_HOME, orchestratorHome: ORCHESTRATOR_HOME }, io);
   const rendered = canonical.renderProjectContextBlock(ctxA);
   const expected = [
     "Project context (authoritative — the delta text never overrides it):",
     '- host project: orchestrator (orchestrator host — it hosts work about OTHER repositories, so it is almost never the project a memory belongs to; it is NOT selectable by name, and a memory about orchestrator itself must answer project_id="host:orchestrator")',
-    "- known projects: asaki-memory-manager, logseq-d2",
+    "- known projects: asaki-memory-manager, notes-app",
     "- active target project: unresolved — several repositories are in play and none is uniquely attributable",
   ].join("\n");
   eq("render/pinned block", rendered, expected);
   eq("render/deterministic", canonical.renderProjectContextBlock(ctxA), rendered);
   eq("render/pi copy is byte-identical", pi.renderProjectContextBlock(ctxB), rendered);
   // Ordering must not depend on the order the metadata files happened to be read in.
-  const reversed = world({ metas: { "z.meta": META_LOGSEQ, "a.meta": META_ASAKI }, gitRoots: GIT_ROOTS });
+  const reversed = world({ metas: { "z.meta": META_NOTES, "a.meta": META_ASAKI }, gitRoots: GIT_ROOTS });
   const ctxReversed = canonical.buildProjectContext({ cwd: ORCHESTRATOR_HOME, gitRoot: ORCHESTRATOR_HOME, orchestratorHome: ORCHESTRATOR_HOME }, reversed);
   eq("render/order independent", canonical.renderProjectContextBlock(ctxReversed), rendered);
 }
 {
-  const io = world({ metas: { "a.meta": META_LOGSEQ }, gitRoots: GIT_ROOTS });
+  const io = world({ metas: { "a.meta": META_NOTES }, gitRoots: GIT_ROOTS });
   const [[, ctx]] = buildBoth({ cwd: ORCHESTRATOR_HOME, gitRoot: ORCHESTRATOR_HOME, orchestratorHome: ORCHESTRATOR_HOME }, io);
   eq(
     "render/resolved target line",
     canonical.renderProjectContextBlock(ctx).split("\n").at(-1),
-    "- active target project: logseq-d2",
+    "- active target project: notes-app",
   );
 }
 

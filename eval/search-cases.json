@@ -139,7 +139,7 @@
       {
         "id": "global-style",
         "scope": "global",
-        "content": "主公 prefers concise answers and minimal changes when coding.",
+        "content": "The user prefers concise answers and minimal changes when coding.",
         "kind": "preference",
         "importance": 0.9,
         "semantic": 0.83

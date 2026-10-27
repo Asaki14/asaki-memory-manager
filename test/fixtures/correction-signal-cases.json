@@ -119,6 +119,6 @@
     "name": "non-correction: a numeric config change",
     "correction": false,
     "expectMatch": false,
-    "text": "Assistant: 把 padding 从 4 调整到 10，与 sketchybar 左侧对齐。"
+    "text": "Assistant: 把 padding 从 4 调整到 10，与左侧控件对齐。"
   }
 ]

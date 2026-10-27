@@ -26,9 +26,9 @@ English · [中文](README_CN.md)
 | Memory lifecycle | Audit or clean up stored items | Tracks recurrence, suggests idle-rule review, and offers stale-memory pruning. |
 | Cloudflare-native runtime | Self-host the service | Runs the API on Workers with D1, Vectorize, and Workers AI. |
 
-## Quick start
+## Install
 
-Requires Node.js 20+, a Cloudflare account, and the Workers, D1, Vectorize, and Workers AI services.
+Requires Node.js 22+, a Cloudflare account, and the Workers, D1, Vectorize, and Workers AI services.
 
 ```sh
 npm ci

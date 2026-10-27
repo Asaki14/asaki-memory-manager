@@ -41,17 +41,17 @@
   },
   {
     "name": "neg: assistant quoting its own newly-added prompt example while explaining it",
-    "text": "Assistant: 现在 prompt 里加了新的 few-shot 正例，比如 User: 以后都用 pnpm，不要用 npm 这种输入应该被正确抽取成用户偏好。跑了回归测试，8/8 全过。",
+    "text": "Assistant: The prompt now includes a hypothetical example: User: always use package manager X. This should be treated as a preference. The eval passed.",
     "expectFlag": false
   },
   {
     "name": "neg: assistant's own question buried inside a longer explanation",
-    "text": "Assistant: 建好了，eval:extraction 脚本已经能跑。要不要现在建这个 eval 文件？我建议现在建，因为能把踩过的坑固化成回归用例。",
+    "text": "Assistant: The sample script now runs correctly. Should I add another test case to cover the discovered edge case?",
     "expectFlag": false
   },
   {
     "name": "neg: bare next-step question after a status update",
-    "text": "Assistant: 推送完了，origin/main 已经同步。要 commit + push 吗？",
+    "text": "Assistant: The update completed successfully. Should I create a commit now?",
     "expectFlag": false
   },
   {
@@ -61,12 +61,12 @@
   },
   {
     "name": "pos: system/dotfiles troubleshooting outside a project still worth flagging",
-    "text": "Assistant: The keyboard shortcut conflict in the desktop app is fixed, verified, and covered by a regression test.",
+    "text": "Assistant: The sample app global shortcut was intercepted by the operating system; moving it to Alt+Shift+K fixed the conflict.",
     "expectFlag": true
   },
   {
     "name": "pos: problem-then-resolution pair still worth flagging",
-    "text": "User: 记忆系统漏掉了一条关键信息，关于缓存过期时间的配置项。\nAssistant: 已经把这条信息补全到对应的记忆里了，缓存过期时间统一改成 300 秒。",
+    "text": "User: The cache entry was missing an expiry value.\nAssistant: I added the missing setting and standardized the cache lifetime to five minutes.",
     "expectFlag": true
   },
   {
@@ -81,7 +81,7 @@
   },
   {
     "name": "neg: one-off push status is not durable",
-    "text": "Assistant: 已将变更推送至 origin/main，提交为 8df25dd，并通过敏感信息检查。",
+    "text": "Assistant: The changes were pushed successfully and passed the privacy check.",
     "expectFlag": false
   },
   {
@@ -96,7 +96,7 @@
   },
   {
     "name": "pos: removed package is durable current project state",
-    "text": "Assistant: Removed an unused dependency and its stale configuration references from the app, then passed the type check.",
+    "text": "Assistant: The sample app now uses its built-in CSV parser instead of csv-kit; the removed package and stale configuration references are no longer needed.",
     "expectFlag": true,
     "expectMaxImportance": 0.5
   },
@@ -128,7 +128,7 @@
   },
   {
     "name": "pos: cross-project scratchpad preference stays concise and global",
-    "text": "User: Keep one-off reports outside the project repository; reserve the repository for maintained work and project documentation.",
+    "text": "User: Put one-off reports in the scratchpad directory, not the project repository; reserve the repository for maintained work.",
     "expectFlag": true,
     "expectScope": "global",
     "expectMaxTextLength": 160,
@@ -185,7 +185,7 @@
   },
   {
     "name": "pos: Claude Code delivery behavior is app-specific and project-scoped",
-    "text": "Assistant: Claude Code 的交付文本必须放在回合最后，否则后续工具调用可能使文本不展示。",
+    "text": "Assistant: Claude Code's final response must be placed at the end of the turn, otherwise later tool calls may hide it.",
     "expectFlag": true,
     "expectScope": "project",
     "expectMaxTextLength": 160,
@@ -482,7 +482,7 @@
   {
     "name": "neg: objectless fragment after a verdict",
     "correction": false,
-    "text": "Assistant: 调整了一下实现方式。\n\nUser: 不要嵌套",
+    "text": "Assistant: Adjusted the implementation approach.\nUser: 不要嵌套",
     "expectFlag": false
   },
   {
@@ -518,7 +518,7 @@
   },
   {
     "name": "proj: orchestrator-hosted business memory lands in the business repo",
-    "text": "Assistant: catalog-app's chart export timed out and the cause was found: the renderer opened a fresh database connection for every element. Reusing the shared connection fixed it.\nUser: Sounds good.",
+    "text": "Assistant: In web-app, the diagram export now uses SVG so text remains sharp when zoomed and searchable.",
     "expectFlag": true,
     "expectScope": "project",
     "projectContext": {
@@ -526,25 +526,25 @@
       "orchestratorHost": true,
       "knownProjects": [
         {
-          "id": "catalog-app",
-          "root": "/repos/catalog-app",
+          "id": "web-app",
+          "root": "/repos/web-app",
           "source": "task"
         }
       ],
-      "targetProject": "catalog-app",
+      "targetProject": "web-app",
       "ambiguity": "",
       "allowlist": [
-        "catalog-app"
+        "web-app"
       ],
       "defaultProject": null,
       "explicit": null,
       "hostClaimToken": "host:orchestrator"
     },
-    "expectProjectId": "catalog-app"
+    "expectProjectId": "web-app"
   },
   {
     "name": "proj: a genuinely host-owned change resolves through the host claim token",
-    "text": "Assistant: the orchestrator queue now processes task files in lexical order and moves completed entries to an archive, preventing duplicate processing.",
+    "text": "Assistant: The orchestrator task metadata parser now ignores malformed comment lines.",
     "expectFlag": true,
     "expectScope": "project",
     "projectContext": {
@@ -671,7 +671,7 @@
   },
   {
     "name": "proj: correction carries the target repository, not the host",
-    "text": "Assistant: I changed catalog-app's export directory to build/.\nUser: Revert it to dist/ and leave that directory unchanged in future changes.",
+    "text": "Assistant: I changed web-app's export directory to build/.\nUser: Revert it to dist/ and leave that directory unchanged in future changes.",
     "expectFlag": true,
     "correction": true,
     "expectSignal": "correction",
@@ -681,47 +681,47 @@
       "orchestratorHost": true,
       "knownProjects": [
         {
-          "id": "catalog-app",
-          "root": "/repos/catalog-app",
+          "id": "web-app",
+          "root": "/repos/web-app",
           "source": "task"
         }
       ],
-      "targetProject": "catalog-app",
+      "targetProject": "web-app",
       "ambiguity": "",
       "allowlist": [
-        "catalog-app"
+        "web-app"
       ],
       "defaultProject": null,
       "explicit": null,
       "hostClaimToken": "host:orchestrator"
     },
-    "expectProjectId": "catalog-app"
+    "expectProjectId": "web-app"
   },
   {
     "name": "proj: ordinary single-repository session is unchanged (proven path)",
-    "text": "Assistant: service-app only sends score polling requests while the page is visible, avoiding rate limits from background tabs.",
+    "text": "Assistant: sample-app only loads extra search results when the search box is focused, avoiding unnecessary requests.",
     "expectFlag": true,
     "expectScope": "project",
     "projectContext": {
-      "hostProject": "service-app",
+      "hostProject": "sample-app",
       "orchestratorHost": false,
       "knownProjects": [
         {
-          "id": "service-app",
-          "root": "/repos/service-app",
+          "id": "sample-app",
+          "root": "/repos/sample-app",
           "source": "host"
         }
       ],
-      "targetProject": "service-app",
+      "targetProject": "sample-app",
       "ambiguity": "",
       "allowlist": [
-        "service-app"
+        "sample-app"
       ],
-      "defaultProject": "service-app",
+      "defaultProject": "sample-app",
       "explicit": null,
       "hostClaimToken": null
     },
-    "expectProjectId": "service-app"
+    "expectProjectId": "sample-app"
   },
   {
     "name": "proj: a global memory carries no project_id",
@@ -751,18 +751,18 @@
   },
   {
     "name": "neg: audit duplicate - shorter repeat of an already-recorded bash fix",
-    "text": "Assistant: 修复 asaki-memory 记忆提取全线失效的 bash 3.2 bug（${TEXT: -20000} 返回空），已推送 e07ac92 并验证部署。",
+    "text": "Assistant: The empty-substring parser bug is already captured in an active memory. This report repeats the same fix without adding a new cause or procedure.",
     "expectFlag": false
   },
   {
     "name": "neg: audit stale intermediate session-start state",
-    "text": "Assistant: Removed large memory injection at Pi session start, now only shows compact status banner.",
+    "text": "Assistant: The previous startup snapshot showed only a compact status line; the current design adds the selected context after it.",
     "expectFlag": false
   },
   {
     "name": "correction-midstate-styling-churn",
     "correction": true,
-    "text": "Prior context (ALREADY PROCESSED — antecedent only, never extract from this block):\nPrior memory candidate: 虚拟工作区高亮不要实心填色，改用半透明（透明度 0xa6，与 bracket 底色一致）\n--- current delta below ---\nUser: 不要颜色了，只加边框",
+    "text": "Prior context (ALREADY PROCESSED — antecedent only, never extract from this block):\nPrior memory candidate: highlight the active table row with a light fill\n--- current delta below ---\nUser: For this table only, remove the fill and use a border.",
     "expectSignal": "correction",
     "expectSignalSubtype": "terse_redirect",
     "expectRuleForm": "prohibition",
@@ -772,7 +772,7 @@
   {
     "name": "correction-overgeneralized-from-single-cleanup",
     "correction": true,
-    "text": "Assistant: 保留调研文件作为参考资料\nUser: 调研的文件删掉",
+    "text": "Assistant: Keep the draft available for reference.\nUser: Delete the draft.",
     "expectSignal": "correction",
     "expectSignalSubtype": "override_of_action",
     "expectRuleForm": "prohibition",
@@ -792,7 +792,7 @@
   {
     "name": "correction-transient-version-claim",
     "correction": true,
-    "text": "Assistant: Pi 0.84.1 可通过模型覆盖支持约 1.05M context；请求超过 272K tokens 后长上下文费率会提高。\nUser: nonono，是今天 tibo 发的推文，说更新了 1m context，我在 X 上看到的，你去找到并看看他到底在说些什么",
+    "text": "Assistant: Release 1.4 was described as supporting a 100k context window.\nUser: No, I saw a post saying a newer release supports a larger context. Find the source and check what it actually says.",
     "expectSignal": "correction",
     "expectSignalSubtype": "explicit_negation",
     "expectRuleForm": "retract",
@@ -802,7 +802,7 @@
   {
     "name": "correction-one-off-task-scoping",
     "correction": true,
-    "text": "Assistant: 为新增小组（王伟组、张旺阳组）请用户提供字辈，以在当前花名册更新中同步处理\nUser: 先不加这两组，把其他组坐好就可以了",
+    "text": "Assistant: I asked for extra details to add two new groups during this roster update.\nUser: Do not add groups in this change; finish organizing the existing entries first.",
     "expectSignal": "correction",
     "expectSignalSubtype": "override_of_action",
     "expectRuleForm": "prohibition",
@@ -812,7 +812,7 @@
   {
     "name": "correction-one-off-task-scoping-gitignored-step",
     "correction": true,
-    "text": "Assistant: I will update data/names-db.json as part of this task.\nUser: data/names-db.json is gitignored and absent in your worktree - skip that step.",
+    "text": "Assistant: I will update the generated-name list in src/sample.ts as part of this change.\nUser: That file is generated and absent from this worktree; skip it.",
     "expectSignal": "correction",
     "expectSignalSubtype": "override_of_action",
     "expectRuleForm": "prohibition",
@@ -832,7 +832,7 @@
   {
     "name": "correction-already-curated-settings",
     "correction": true,
-    "text": "Assistant: The settings panel now places the secondary pane below the main pane by default.\nUser: Keep the panes side by side, matching the existing layout.",
+    "text": "Assistant: The settings panel now stacks its panes vertically.\nUser: For this screen only, keep the panes side by side instead.",
     "expectSignal": "correction",
     "expectSignalSubtype": "explicit_negation",
     "expectRuleForm": "preference",
@@ -841,7 +841,7 @@
   },
   {
     "name": "outcome-shipped-status-no-durable-value",
-    "text": "Assistant: The sample app's panel placement feature is complete: unit tests and end-to-end checks passed, lint is clean, and docs are synced.",
+    "text": "Assistant: The sample app panel placement feature is complete: unit tests and end-to-end checks passed, lint is clean, and docs are synced.",
     "expectFlag": false
   },
   {
@@ -857,7 +857,7 @@
   {
     "name": "correction-durable-procedure-positive",
     "correction": true,
-    "text": "Assistant: I reported two tasks as active without checking whether their completion notifications had arrived.\nUser: Check completion notifications and process the output before reporting task progress.",
+    "text": "Assistant: I reported two tasks as active without checking whether completion notifications had arrived.\nUser: Check completion notifications and process the output before reporting task progress.",
     "expectFlag": true,
     "expectSignal": "correction",
     "expectSignalSubtype": "explicit_negation",
@@ -921,7 +921,7 @@
   },
   {
     "name": "attr: a web-app bug fix keeps the target project, not the host",
-    "text": "Assistant: web-app now retains keyboard focus after a modal closes, fixing keyboard navigation after dismissing the dialog.",
+    "text": "Assistant: web-app now preserves keyboard focus when a dialog closes.",
     "expectFlag": true,
     "expectScope": "project",
     "projectContext": {
@@ -1022,7 +1022,7 @@
   },
   {
     "name": "neg: literal UI style values belong in the file just edited",
-    "text": "Assistant: The app's dialog uses a warm background, 16 px corner radius, and 24 px spacing on every side.",
+    "text": "Assistant: The sample app dialog uses a warm background, 16 px corner radius, and 24 px spacing on every side.",
     "expectFlag": false,
     "projectContext": {
       "hostProject": "sample-host",
@@ -1104,7 +1104,7 @@
   },
   {
     "name": "attr: several targets in flight still let the named target repo win",
-    "text": "Assistant: catalog-app now renders code examples only after save, eliminating the lag caused by re-rendering on every keystroke.",
+    "text": "Assistant: web-app renders code examples only after save, eliminating the lag from re-rendering on every keystroke.",
     "expectFlag": true,
     "expectScope": "project",
     "projectContext": {
@@ -1117,8 +1117,8 @@
           "source": "task"
         },
         {
-          "id": "catalog-app",
-          "root": "/repos/catalog-app",
+          "id": "web-app",
+          "root": "/repos/web-app",
           "source": "task"
         }
       ],

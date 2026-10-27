@@ -31,7 +31,7 @@
   },
   {
     "name": "pos: assistant completed bug-fix summary",
-    "text": "Assistant: 根因排查出来了：sketchybar 的 padding_right 从 4 改成 12 之后图标不再贴边挤压，已验证生效。",
+    "text": "Assistant: Root cause found: after padding_right changed from 4 to 12, the status bar icons no longer touch the edge; verified.",
     "expectEmpty": false
   },
   {
@@ -61,7 +61,7 @@
   },
   {
     "name": "pos: system/dotfiles troubleshooting outside a project must be scoped project, not global",
-    "text": "Assistant: karabiner 配置里 caps lock 映射成 escape 后误触问题解决了，已验证生效，这是 dotfiles 仓库里的全局按键设置。",
+    "text": "Assistant: The key remapping in the dotfiles repository no longer triggers accidental Escape presses after Caps Lock is remapped; verified, and this is a global keyboard setting.",
     "expectEmpty": false,
     "expectScope": "project"
   },
@@ -73,7 +73,7 @@
   },
   {
     "name": "neg: one-off push status is not durable",
-    "text": "Assistant: 已将变更推送至 origin/main，提交为 8df25dd，并通过敏感信息检查。",
+    "text": "Assistant: 已将变更推送至 origin/main，提交为 a1b2c3d，并通过敏感信息检查。",
     "expectEmpty": true
   },
   {
@@ -122,7 +122,7 @@
   },
   {
     "name": "neg: audit legacy extraction threshold changelog",
-    "text": "Assistant: 应主公要求（认为不合理），移除了记忆抽取的60字符长度门槛，保留敏感词检测，优化了内容信号识别逻辑。",
+    "text": "Assistant: 应用户要求（认为不合理），移除了记忆抽取的60字符长度门槛，保留敏感词检测，优化了内容信号识别逻辑。",
     "expectEmpty": true
   },
   {

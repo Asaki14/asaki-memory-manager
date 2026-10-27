@@ -186,13 +186,13 @@ const promotionRow = {
   ...correctionRow,
   supersedes_candidates: [],
   promotion_candidates: [
-    { memory_id: 'mem_p2', content: '不要在未获得确认前自动 commit 任何仓库', score: 0.71, target_project_id: 'sport-live', target_kind: 'rule', suggested_action: 'promote_to_global' },
+    { memory_id: 'mem_p2', content: '不要在未获得确认前自动 commit 任何仓库', score: 0.71, target_project_id: 'fitness-app', target_kind: 'rule', suggested_action: 'promote_to_global' },
   ],
 };
 const promotionBlock = [
   '1. [correction · override_of_action · prohibition] 不要在未获得确认前自动 commit 本仓库的改动',
   '   ⤷ agent: 直接跑了 git commit -m "wip"   →   captain: 「别再自动 commit 了」   (antecedent: trace)',
-  '   ⤷ promote: same rule in project sport-live as mem_p2 [kind=rule] "不要在未获得确认前自动 commit 任何仓库"  (score=0.71 suggest: promote_to_global)',
+  '   ⤷ promote: same rule in project fitness-app as mem_p2 [kind=rule] "不要在未获得确认前自动 commit 任何仓库"  (score=0.71 suggest: promote_to_global)',
   '   ⤷ contradicts pending review rev_44b',
   '   id=rev_91c scope=project kind=rule importance=0.90 confidence=0.70',
   '   source=claude-code:stop-classifier created_at=2026-07-31T02:11Z',

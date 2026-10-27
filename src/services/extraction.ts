@@ -59,8 +59,8 @@ Output: {"candidates":[{"content":"用户偏好使用 pnpm，不使用 npm","kin
 Input: Assistant: 根因是同时跑了两个 daemon 互相抢焦点，已加 pkill 守卫脚本防止野实例重新抢焦。
 Output: {"candidates":[{"content":"Focus-stealing bug 根因是两个 daemon 同时运行互相抢焦点；已加 pkill 守卫脚本防止野实例。","kind":"bug_fix","importance":0.7,"scope":"project"}]}
 
-Input: Assistant: sketchybar 配置里 padding_right 改成 12 后图标不贴边了，已验证生效，这是 dotfiles 仓库里的全局设置。
-Output: {"candidates":[{"content":"sketchybar padding_right 改为 12 解决图标贴边问题，已验证生效。","kind":"bug_fix","importance":0.6,"scope":"project"}]}
+Input: Assistant: The status bar item's padding_right changed to 12, so the icon no longer touches the edge. Verified; this is a global setting in the dotfiles repository.
+Output: {"candidates":[{"content":"Status bar item padding_right set to 12 fixes icon edge clipping; verified.","kind":"bug_fix","importance":0.6,"scope":"project"}]}
 
 Input: User: forget that I prefer dark mode
 Output: {"candidates":[{"content":"forget that I prefer dark mode","kind":"preference","importance":0.5,"scope":"global"}]}
@@ -75,7 +75,7 @@ Output: {"candidates":[]}
 Input: Assistant: 建好了，eval:extraction 脚本已经能跑。要不要现在建这个 eval 文件？我建议现在建，因为能把踩过的坑固化成回归用例。
 Output: {"candidates":[]}
 
-Input: Assistant: 已将变更推送至 origin/main，提交为 8df25dd，并通过敏感信息检查。
+Input: Assistant: 已将变更推送至 origin/main，提交为 a1b2c3d，并通过敏感信息检查。
 Output: {"candidates":[]}
 
 Input: Assistant: Node.js new URL().hostname 对 IPv6 loopback 返回 '[::1]'。

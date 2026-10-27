@@ -1850,7 +1850,7 @@ Two contrastive examples:
 - "FORGET_SIGNALS 正则用于识别类似 \"forget that I prefer dark mode\" 这种表达" -> flag=false (documentation-style explanation of code/prompt behavior, not an actual forget request).
 - User says "forget that I prefer dark mode" -> flag=true (actual forget/retract request).
 - "prompt 里加了 few-shot 正例，比如 User: 以后都用 pnpm" -> flag=false (prompt/eval calibration quoting a hypothetical user input).
-- "已将变更推送至 origin/main，提交为 8df25dd" -> flag=false (one-off delivery status, not durable memory).
+- "已将变更推送至 origin/main，提交为 a1b2c3d" -> flag=false (one-off delivery status, not durable memory).
 - "Node.js new URL().hostname 对 IPv6 loopback 返回 [::1]" -> flag=false (generic technical trivia, not a user/project memory).
 - "The payment portal page is a client-rendered app; use the official API when HTML scraping misses prices" -> flag=true, scope=project (durable integration learning).
 - "Removed an unused package from the app configuration" -> flag=true, scope=project (durable current configuration state).
@@ -1954,7 +1954,7 @@ Rule phrasing per rule_form:
 
 Two invariants:
 1. The verdict is never the memory. "不对" / "何必" may appear only in correction.captain_verdict, never in text.
-2. The rule must survive the death of the conversation: no 这个 / 该文件 / 上面那版 / 主公说的 in text.
+2. The rule must survive the death of the conversation: no 这个 / 该文件 / 上面那版 / 用户说的 in text.
 
 Apply this checklist to every candidate, correction or not:
 1. Durable — will this still matter later, not just for the current task.
@@ -1999,7 +1999,7 @@ Non-correction examples (unchanged rules):
 - "FORGET_SIGNALS 正则用于识别类似 \"forget that I prefer dark mode\" 这种表达" -> flag=false (documentation-style explanation of code/prompt behavior, not an actual forget request).
 - User says "forget that I prefer dark mode" -> flag=true (actual forget/retract request).
 - "prompt 里加了 few-shot 正例，比如 User: 以后都用 pnpm" -> flag=false (prompt/eval calibration quoting a hypothetical user input).
-- "已将变更推送至 origin/main，提交为 8df25dd" -> flag=false (one-off delivery status, not durable memory).
+- "已将变更推送至 origin/main，提交为 a1b2c3d" -> flag=false (one-off delivery status, not durable memory).
 - "Node.js new URL().hostname 对 IPv6 loopback 返回 [::1]" -> flag=false (generic technical trivia, not a user/project memory).
 - "The payment portal page is a client-rendered app; use the official API when HTML scraping misses prices" -> flag=true, scope=project (durable integration learning).
 - "Removed an unused package from the app configuration" -> flag=true, scope=project (durable current configuration state).
@@ -2551,7 +2551,7 @@ Safety:
     promptSnippet: "Save durable task outcomes and decisions to Asaki personal memory after significant work.",
     promptGuidelines: [
       "The current conversation agent is the primary reviewed writer for durable memory. The active background path is the local classifier, which may queue candidates for human review but never auto-activates them; cloud/server extraction is deprecated and must not receive full conversation transcripts.",
-      "This means recording deliberately, not more. Before calling, check ALL of: (1) durable — a stated preference, a made decision, a completed bug fix/task outcome, an established rule/convention, or an explicit forget/retract request, not a question, chit-chat, a one-off command, or something with no future value; (2) actually happened — a completed fact, not a proposed plan, an open 'should we do X? I'd recommend X' deliberation, or a present-tense explanation of how something works (a past-tense 'we changed X, verified it' DOES qualify); (3) not noise — skip illustrative/hypothetical examples and quoted code/CLI output, and when a problem and its fix both appear in the same exchange, record only the resolved outcome; (4) not a duplicate or stale-making — asaki_memory_search first: update/skip a near-duplicate, and separately, if this change makes an OLDER differently-worded memory factually wrong (e.g. you just disabled a mechanism an old memory still describes as active), update that old memory too; (5) self-contained — no pronoun or bare reference (this/that/该/这个/主公) whose target isn't named in the same sentence, understandable with zero conversation context.",
+      "This means recording deliberately, not more. Before calling, check ALL of: (1) durable — a stated preference, a made decision, a completed bug fix/task outcome, an established rule/convention, or an explicit forget/retract request, not a question, chit-chat, a one-off command, or something with no future value; (2) actually happened — a completed fact, not a proposed plan, an open 'should we do X? I'd recommend X' deliberation, or a present-tense explanation of how something works (a past-tense 'we changed X, verified it' DOES qualify); (3) not noise — skip illustrative/hypothetical examples and quoted code/CLI output, and when a problem and its fix both appear in the same exchange, record only the resolved outcome; (4) not a duplicate or stale-making — asaki_memory_search first: update/skip a near-duplicate, and separately, if this change makes an OLDER differently-worded memory factually wrong (e.g. you just disabled a mechanism an old memory still describes as active), update that old memory too; (5) self-contained — no pronoun or bare reference (this/that/该/这个/用户) whose target isn't named in the same sentence, understandable with zero conversation context.",
       "If nothing in the exchange clears this bar, call nothing — silence is a correct outcome, not a shortfall.",
       "Keep each memory concise: preference/rule should be roughly 40-160 chars; decision/workflow/bug_fix/task_learning should be 1-2 sentences and at most roughly 200-300 chars. Summarize the durable takeaway only — never paste multi-paragraph implementation logs, changelogs, or step-by-step narratives.",
       "Do not store secrets, raw credentials, private tokens, or sensitive transient data with asaki_memory_add.",

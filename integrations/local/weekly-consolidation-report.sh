@@ -1,9 +1,8 @@
 #!/bin/bash
 # Asaki Memory weekly consolidation report — local runner (source of truth).
 #
-# Ported from the retired cloud routine `asaki-memory-weekly-consolidation-report`
-# (trig_01TySBjA96EWNeUJnmV63DcY), which died on the cloud sandbox's egress proxy
-# because its credential store is UI-only. Same job, same READ-ONLY contract:
+# Ported from a retired cloud routine, which died on the sandbox's egress proxy
+# because its credential store was UI-only. Same job, same READ-ONLY contract:
 #   1. fetch pending reviews + all active global-scope memories,
 #   2. have a headless `claude -p` analyse them for duplicates / contradictions /
 #      staleness / wrong scope / noise,
@@ -31,8 +30,8 @@ log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 die() { log "ERROR: $*"; exit 1; }
 
 # --- credentials -------------------------------------------------------------
-# A launchd job starts with an empty environment, so fall back to the captain's
-# login shell, which sources ~/.config/fish/conf.d/api_keys.local.fish. The value
+# A launchd job starts with an empty environment, so fall back to the user's
+# login shell, which sources the fish key file. The value
 # is captured straight into a variable; it is never echoed to stdout/stderr.
 if [ -z "${ASAKI_MEMORY_API_KEY:-}" ] && [ -x "$FISH_BIN" ]; then
   ASAKI_MEMORY_API_KEY="$("$FISH_BIN" -l -c 'if set -q ASAKI_MEMORY_API_KEY; echo -n $ASAKI_MEMORY_API_KEY; end' 2>/dev/null)"

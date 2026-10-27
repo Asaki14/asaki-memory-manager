@@ -24,13 +24,13 @@
 
 
 1. ~~`expires_at` 字段没有被任何查询读取~~ — 已完成（选方向 b：删掉）
-   - 生产 D1 核实过 `expires_at IS NOT NULL` 行数为 0（402 条记忆全没设过），装饰性死字段，直接删。
+   - `expires_at` 是装饰性死字段（无查询读取），直接删。
    - `migrations/0004_drop_expires_at.sql`：`ALTER TABLE memories DROP COLUMN expires_at`（`0001_init.sql` 保留原样不改历史迁移）。`src/types.ts`（`MemoryRow`/`CreateMemoryInput`/`UpdateMemoryInput`）、`src/services/candidateDecision.ts`、`src/utils/validation.ts`、`src/services/memories.ts` 的读写路径、`scripts/eval-*.ts` 里的 fixture 一并清掉。
    - 本地 `db:migrate:local` 跑过，`PRAGMA table_info(memories)` 确认列已删；`npm run smoke:management` 全绿。
 
 2. ~~`projects` / `memory_sources` / `api_keys` 三张死表~~ — 已完成
    - `migrations/0003_drop_unused_tables.sql`：`DROP TABLE IF EXISTS` 三张表（这三张表本身没有专属索引需要清理）。本地 `db:migrate:local` 跑过，`sqlite_master` 确认三表已删、`memories`/`memory_events`/`memory_reviews` 还在；本地 `wrangler dev` 跑过一遍 create/delete 回归，行为不受影响。
-   - 已推到远程：`npm run db:migrate:remote` 跑过，生产 D1 `sqlite_master` 确认三表已删。
+   - 已推到远程：`npm run db:migrate:remote` 跑过。
 
 3. ~~README "team agents" 措辞跟实际鉴权模型不符~~ — 已解决（改定位而不是改措辞）
    - 项目定位已明确改为个人单用户工具，不再服务团队/多用户场景，`README.md`/`AGENTS.md`/`package.json` 的描述已同步去掉"team"相关措辞。鉴权模型（单一共享 `ADMIN_API_KEY`）跟"个人单用户"定位天然一致，不再需要解释信任边界给团队用户。
@@ -45,16 +45,16 @@
 - `asaki_memory_get(ids)` + digest 紧凑 id 索引（#23）：新增 `POST /v1/memories/get`（最多 20 个 id、不截断正文、刷新 `last_accessed_at`），digest 被裁掉的记忆渲染成索引行，未展开的记忆仍可寻址。
 - 分类器负例固化（#24）：归属漂移与完工日志两类漏判进 `test/fixtures/classifier-cases.json`，few-shot 三份副本同步。
 
-0. ~~全仓缺陷审计与修复（2026-07-11）~~ — 已完成，已部署生产（Worker + `@asaki14/pi-memory@0.1.1`）
+0. ~~全仓缺陷审计与修复（2026-07-11）~~ — 已完成，已部署
    - 高危三项：软删后重激活不重建向量索引（`updateMemory` 的 `shouldReindex` 补重激活条件，否则该记忆永久丢出向量检索且 backfill 修不到）；Claude Code Stop-hook 分类器分支 `STATE_FILE` 在 HTTP 写入前推进，写入失败即静默丢候选（改为最终结局确定后才推进 + `report_and_exit` 补 `failed` 分支）；`POST /v1/memories` 与 `PATCH /v1/memories/:id` 漏限流（补齐，README 同步）。
    - 中低危：remote MCP 对 JSON-RPC 错误改回 HTTP 200 封套（SDK 客户端把非 2xx 当传输错误硬抛）；review resolve "add" 用 `mutated` 标记防"记忆已建但回滚 pending → 重试出重复孤儿"；PATCH 停用（archived/deleted）时清 Vectorize 向量（新共享 `deleteVector()`）；forget/矛盾信号转 review 但未入队时如实返回 `ignore` 而非假报；Stop-hook 锁加 60s mtime 过期回收（SIGKILL/超时残留不再永久禁用采集）；新增 `UserFacingError`（`src/utils/errors.ts`）白名单，未知异常一律 sanitized 500；bearer 校验改 `crypto.subtle.timingSafeEqual`；delete 目标消失不再把"forget X"指令误存为新记忆；`memory_events.created_at` 改显式 ISO（原 SQL default 格式与其他表不可比）；`isVisibleInScope` 显式 scope 缺 id 时改排除；Pi 扩展 add/review_create/update 三工具补本地敏感内容门（对齐 MCP stdio 版）；backfill/prune 脚本数字参数校验。
-   - 验证：typecheck、`eval:candidates` 15/15、本地 wrangler dev 端到端（MCP 状态码、重激活 reindex、UserFacingError 404/400、事件时间戳格式）、生产 `smoke:management` 全绿。
+   - 验证：typecheck、`eval:candidates` 15/15、本地 wrangler dev 端到端（MCP 状态码、重激活 reindex、UserFacingError 404/400、事件时间戳格式）、`smoke:management` 全绿。
    - 明确不修两项：词法兜底预取窗口召回上限（个人规模 + 已砍 FTS，见"已评估并砍掉"）；批量限流先扣后 429（绑定无 peek API，单用户无实际影响）。
 
 1. ~~云端抽取降级为 shadow-run 校准工具~~ — 已完成
    - `scripts/shadow-run-extraction.ts`（`npm run shadow-run:extraction -- <transcript.jsonl> --user <id> --project <id>`）：读取 Claude Code transcript，调 `/v1/memories/extract`（新增 `dry_run` 参数，见 `src/index.ts`）拿云端候选但不写库，再跟同窗口内 agent 直接 `asaki_memory_add` 的记忆做 `lexicalSimilarity` diff，只读输出 covered/gap 报告；`--create-reviews` 可选择把 gap 候选推进 review 队列（默认不推，只报告）。
    - 已用本地 `wrangler dev` 验证：dry_run 不写库、直接 add 的记忆能被正确识别为窗口内的 direct add；diff 算法单独验证过 covered/gap 判定正确。
-   - 历史统计曾显示云端 auto-extract 成为主要来源，因此已关闭 `ASAKI_MEMORY_AUTO_EXTRACT`。当前生产记忆绝大部分来自本地 classifier；classifier 候选统一进 review queue，server extraction 已弃用并只保留兼容入口。`shadow-run-extraction.ts` 仅用于遗留兼容调查，不再作为日常审计通路。
+   - 历史统计曾显示云端 auto-extract 成为主要来源，因此已关闭 `ASAKI_MEMORY_AUTO_EXTRACT`。记忆来源以本地 classifier 为主；classifier 候选统一进 review queue，server extraction 已弃用并只保留兼容入口。`shadow-run-extraction.ts` 仅用于遗留兼容调查，不再作为日常审计通路。
 
 2. ~~观测补字段~~ — 部分完成
    - `search` 事件（`src/services/memories.ts:223-233`）现在记录 `query`/`top_k`/`min_score`/`result_count`/`result_ids`/`score_details`。本地 `wrangler dev` + 直接查 D1 `memory_events` 表验证过字段真落地。
@@ -73,11 +73,11 @@
 4. ~~Vectorize 索引失败无重试/backfill~~ — 已完成
    - 新增 `POST /v1/memories/backfill-index`（`src/services/memories.ts` 的 `backfillPendingIndex()`，`upsertVector()` 同步导出复用）：查 `index_status IN ('pending','failed')` 的 active 记忆（默认 limit 50，上限 500），逐条重新生成 embedding + upsert，成功则落 `index_status='indexed'`，返回 `{ checked, indexed, remaining, remaining_ids }`。
    - `scripts/backfill-index.ts`（`npm run backfill:index -- [--limit n] [--max-rounds n]`）：跟 `shadow-run-extraction.ts` 一样走 HTTP 打已部署的 Worker（脚本本身摸不到 D1/Vectorize/AI binding），循环调用直到队列清空或到 `--max-rounds`。
-   - 本地 `wrangler dev` 验证过：endpoint 正确捞出 pending 记忆、脚本正确分轮调用并汇总 checked/indexed 计数、`remaining_ids` 透传正确；受限于本地 dev 没有真实 Workers AI 凭证，`indexed` 计数在本地恒为 0（预期内——生产上跑 `npm run backfill:index` 才会真的重新生成 embedding），逻辑本身（查询条件、状态回写、分页）已核实无误。
+   - 本地 `wrangler dev` 验证过：endpoint 正确捞出 pending 记忆、脚本正确分轮调用并汇总 checked/indexed 计数、`remaining_ids` 透传正确；受限于本地 dev 没有真实 Workers AI 凭证，`indexed` 计数在本地恒为 0（预期内——部署环境中运行 `npm run backfill:index` 才会真的重新生成 embedding），逻辑本身（查询条件、状态回写、分页）已核实无误。
    - 仍是手动触发，不做 cron/自动重试——跟 roadmap 既定方向一致。
 
-6. ~~记忆生命周期：强化/复发 + 跨项目提升建议 + 溯源~~ — 已实现并本地验证，**随下次发布进生产**（captain 2026-07-31 拍板项 4/8/9）
-   - 迁移 `0006_memory_metadata.sql` 加 `memories.metadata_json` 一列（自由 JSON，跟 `memory_reviews.candidate_json` 同思路），承载 `reinforcement`（复发计数 + 最近强化时间）与 `correction_origin`（纠正现场，agent 行为/主公原话各 120 字符）。
+6. ~~记忆生命周期：强化/复发 + 跨项目提升建议 + 溯源~~ — 已实现并本地验证，**随下次发布生效**（设计决策 2026-07-31，项 4/8/9）
+   - 迁移 `0006_memory_metadata.sql` 加 `memories.metadata_json` 一列（自由 JSON，跟 `memory_reviews.candidate_json` 同思路），承载 `reinforcement`（复发计数 + 最近强化时间）与 `correction_origin`（纠正现场，agent 行为与用户原话各 120 字符）。
    - 强化：纠正候选命中已 ACTIVE 的 `rule`/`preference` 时不再只是静默去重，而是 importance +0.05（上限 0.95，绝不下调人工设的更高值）+ 复发计数 +1，落 `reinforce` 事件；方向由"哪个查询命中"界定——候选自身文本命中＝同向（强化/提升），`supersedes_query` 命中＝反向（取代）。
    - 系统健康：新增只读 `POST /v1/memories/lifecycle`（`src/services/memoryLifecycle.ts`）返回 repeat_rate、逐条复发计数、以及长期无信号（默认 30 天，≈两个 14 天审计周期）的常驻规则；后者只交人工裁决 keep/retire，永不自动删也不降权出注入，`prune-stale` 因此显式排除 `rule`/`preference`。
    - 跨项目提升：project 纠正候选若在**别的项目**已有近似规则，review 行附 `⤷ promote:` 建议，人工可用 `asaki_memory_review_resolve {action:"add", promote_to_global:true}` 一键以 global 落库；不自动改 scope。
@@ -99,7 +99,7 @@
 
 - **D1 FTS5 / BM25 全文索引**：当前 keyword score（token recall + jaccard）配合 entity match 已 51/51 eval 通过、margin 健康。BM25 的价值在语料量大时才明显，个人规模用不上，只会换来迁移和混合召回的复杂度。
 - **Rank fusion（RRF）升级**：手写加权公式已调好，且刚为 `score_details` 投入了调试展示（见上）。RRF 是纯排名法，会丢弃绝对分数、削弱刚建的可调试性，不是"更先进"就该换。
-- **Structured memory extraction（subject/predicate/object）**：与既定方向相反——项目正把云端 LLM 从"生产写手"降级为"事后阅卷"（见"近期完成"第 1 项），这条却是给云端 LLM 加更多结构化写权限。agent 侧已经自己蒸馏内容再提交，没必要在后端再加一层结构化。
+- **Structured memory extraction（subject/predicate/object）**：与既定方向相反——项目正把云端 LLM 从"写入方"降级为"事后复核"（见"近期完成"第 1 项），这条却是给云端 LLM 加更多结构化写权限。agent 侧已经自己蒸馏内容再提交，没必要在后端再加一层结构化。
 - **离线 replay 系统**：给多租户产品用的重投入，个人工具规模用不上；观测的廉价部分（字段级）已经够用，见"近期完成"第 2 项。
 
 ## 当前不要做

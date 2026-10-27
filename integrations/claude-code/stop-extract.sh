@@ -666,7 +666,7 @@ Two contrastive examples:
 - "FORGET_SIGNALS 正则用于识别类似 \"forget that I prefer dark mode\" 这种表达" -> flag=false (documentation-style explanation of code/prompt behavior, not an actual forget request).
 - User says "forget that I prefer dark mode" -> flag=true (actual forget/retract request).
 - "prompt 里加了 few-shot 正例，比如 User: 以后都用 pnpm" -> flag=false (prompt/eval calibration quoting a hypothetical user input).
-- "已将变更推送至 origin/main，提交为 8df25dd" -> flag=false (one-off delivery status, not durable memory).
+- "已将变更推送至 origin/main，提交为 a1b2c3d" -> flag=false (one-off delivery status, not durable memory).
 - "Node.js new URL().hostname 对 IPv6 loopback 返回 '[::1]'" -> flag=false (generic technical trivia, not a user/project memory).
 - "The payment portal page is a client-rendered app; use the official API when HTML scraping misses prices" -> flag=true, scope=project (durable integration learning).
 - "Removed an unused package from the app configuration" -> flag=true, scope=project (durable current configuration state).
@@ -769,7 +769,7 @@ Rule phrasing per rule_form:
 
 Two invariants:
 1. The verdict is never the memory. "不对" / "何必" may appear only in correction.captain_verdict, never in text.
-2. The rule must survive the death of the conversation: no 这个 / 该文件 / 上面那版 / 主公说的 in text.
+2. The rule must survive the death of the conversation: no 这个 / 该文件 / 上面那版 / 用户说的 in text.
 
 Apply this checklist to every candidate, correction or not:
 1. Durable — will this still matter later, not just for the current task.
@@ -814,7 +814,7 @@ Non-correction examples (unchanged rules):
 - "FORGET_SIGNALS 正则用于识别类似 \"forget that I prefer dark mode\" 这种表达" -> flag=false (documentation-style explanation of code/prompt behavior, not an actual forget request).
 - User says "forget that I prefer dark mode" -> flag=true (actual forget/retract request).
 - "prompt 里加了 few-shot 正例，比如 User: 以后都用 pnpm" -> flag=false (prompt/eval calibration quoting a hypothetical user input).
-- "已将变更推送至 origin/main，提交为 8df25dd" -> flag=false (one-off delivery status, not durable memory).
+- "已将变更推送至 origin/main，提交为 a1b2c3d" -> flag=false (one-off delivery status, not durable memory).
 - "Node.js new URL().hostname 对 IPv6 loopback 返回 [::1]" -> flag=false (generic technical trivia, not a user/project memory).
 - "The payment portal page is a client-rendered app; use the official API when HTML scraping misses prices" -> flag=true, scope=project (durable integration learning).
 - "Removed an unused package from the app configuration" -> flag=true, scope=project (durable current configuration state).

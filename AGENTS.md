@@ -7,6 +7,9 @@ Asaki Memory Manager is a Cloudflare-native personal memory layer for AI agents.
 ## Repository map
 
 - `src/index.ts`: Hono routes, authentication, and request limits.
+- `src/mcp.ts`: remote MCP tool definitions and response formatting.
+- `src/types.ts`: shared row and request types.
+- `src/ai/`: Workers AI embedding calls.
 - `src/services/`: memory CRUD, search, candidate review, lifecycle, and session-context selection.
 - `src/utils/`: request validation, sensitive-content checks, and public errors.
 - `migrations/`: D1 schema history.
@@ -14,8 +17,10 @@ Asaki Memory Manager is a Cloudflare-native personal memory layer for AI agents.
 - `integrations/pi/asaki-memory.ts`: optional Pi extension; its project-context implementation mirrors Claude Code.
 - `integrations/mcp/`: stdio MCP server.
 - `integrations/codex/`: Codex hook integration.
+- `integrations/local/`: optional macOS LaunchAgent for the scheduled weekly report.
 - `test/fixtures/`: offline regression inputs.
 - `scripts/eval-*.{mjs,ts,sh}`: offline evals; `package.json` defines commands.
+- `eval/`: search-scoring fixtures for `npm run eval:search`.
 - `wrangler.example.jsonc`: generic Cloudflare binding template.
 - `docs/`: API, configuration, architecture, and security references.
 

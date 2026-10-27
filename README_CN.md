@@ -26,14 +26,20 @@
 | 生命周期管理 | 检查或清理记忆 | 记录规则复现情况、提示检查长期未使用的规则，并支持过期记忆清理。 |
 | Cloudflare 原生运行 | 自行托管服务 | 使用 Workers、D1、Vectorize 和 Workers AI。 |
 
-## 快速开始
+## 安装
 
-需要 Node.js 20+、Cloudflare 账号，以及 Workers、D1、Vectorize、Workers AI 服务。先按[配置指南](docs/configuration.md)创建资源并设置密钥。
+需要 Node.js 22+、Cloudflare 账号，以及 Workers、D1、Vectorize、Workers AI 服务。详细资源说明见[配置指南](docs/configuration.md)。
 
 ```sh
 npm ci
+npx wrangler login
+npx wrangler d1 create asaki-memory-manager
+npx wrangler vectorize create asaki-memory-manager --dimensions 1024 --metric cosine
+for p in user_id scope project_id session_id kind; do
+  npx wrangler vectorize create-metadata-index asaki-memory-manager --propertyName "$p" --type string
+done
 cp wrangler.example.jsonc wrangler.jsonc
-# 在 wrangler.jsonc 中填写 D1 database_id，并创建对应的 D1 和 Vectorize 资源。
+# 在 wrangler.jsonc 中填写 D1 database_id。
 npm run db:migrate:remote
 npx wrangler secret put ADMIN_API_KEY
 npm run deploy
