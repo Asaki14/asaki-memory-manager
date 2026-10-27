@@ -1,18 +1,12 @@
 <div align="center">
-
-<img src="assets/logo.svg" width="112" alt="Asaki Memory Manager logo">
-
-# Asaki Memory Manager
-
-**Durable, searchable memory for AI agents, built on Cloudflare.**
-
-English · [中文](README_CN.md)
-
-[![CI](https://github.com/Asaki14/asaki-memory-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/Asaki14/asaki-memory-manager/actions/workflows/ci.yml)
-[![GitHub stars](https://img.shields.io/github/stars/Asaki14/asaki-memory-manager?style=flat-square)](https://github.com/Asaki14/asaki-memory-manager/stargazers)
-[![Version](https://img.shields.io/github/v/tag/Asaki14/asaki-memory-manager?sort=semver&style=flat-square)](https://github.com/Asaki14/asaki-memory-manager/tags)
-[![License](https://img.shields.io/github/license/Asaki14/asaki-memory-manager?style=flat-square)](LICENSE)
-
+  <img src="https://raw.githubusercontent.com/Asaki14/asaki-memory-manager/main/assets/logo.svg" width="120" alt="Asaki Memory Manager logo" />
+  <h1>Asaki Memory Manager</h1>
+  <p><b>Durable, searchable memory for AI agents, built on Cloudflare.</b></p>
+  <p>English · <a href="README_CN.md">中文</a></p>
+  <a href="https://github.com/Asaki14/asaki-memory-manager/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Asaki14/asaki-memory-manager/ci.yml?branch=main&style=flat-square&label=tests" alt="Tests"></a>
+  <a href="https://github.com/Asaki14/asaki-memory-manager/stargazers"><img src="https://img.shields.io/github/stars/Asaki14/asaki-memory-manager?style=flat-square" alt="Stars"></a>
+  <a href="https://github.com/Asaki14/asaki-memory-manager/tags"><img src="https://img.shields.io/github/v/tag/Asaki14/asaki-memory-manager?sort=semver&label=version&style=flat-square" alt="Version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License"></a>
 </div>
 
 ## Features
