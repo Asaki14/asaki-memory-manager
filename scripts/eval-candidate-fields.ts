@@ -25,13 +25,13 @@ function check(name: string, actual: unknown, expected: unknown): void {
 }
 
 function validated(overrides: Record<string, unknown>): Record<string, unknown> {
-  const result = validateCreateMemory({ content: 'captain corrected the agent', user_id: 'eval-user', ...overrides });
+  const result = validateCreateMemory({ content: 'user corrected the agent', user_id: 'eval-user', ...overrides });
   if (!result.ok) throw new Error(`unexpected validation failure: ${result.error}`);
   return result.data as unknown as Record<string, unknown>;
 }
 
 function rejected(overrides: Record<string, unknown>): string | null {
-  const result = validateCreateMemory({ content: 'captain corrected the agent', user_id: 'eval-user', ...overrides });
+  const result = validateCreateMemory({ content: 'user corrected the agent', user_id: 'eval-user', ...overrides });
   return result.ok ? null : result.error;
 }
 
@@ -97,16 +97,16 @@ check('out-of-range confidence still rejects', rejected({ confidence: -1 }), 'co
 
 // --- evidence strings: coerced and capped, never rejected for length --------------------------
 const long = 'x'.repeat(400);
-const cappedCorrection = validated({ correction: { agent_did: long, captain_verdict: long, redirect_target: long } }).correction as Record<string, string>;
+const cappedCorrection = validated({ correction: { agent_did: long, user_verdict: long, redirect_target: long } }).correction as Record<string, string>;
 check('agent_did capped at 300', cappedCorrection.agent_did.length, 300);
-check('captain_verdict capped at 300', cappedCorrection.captain_verdict.length, 300);
+check('user_verdict capped at 300', cappedCorrection.user_verdict.length, 300);
 check('redirect_target capped at 300', cappedCorrection.redirect_target.length, 300);
 check('missing correction members coerced to empty strings', validated({ correction: { agent_did: '跑了 git commit' } }).correction, {
   agent_did: '跑了 git commit',
-  captain_verdict: '',
+  user_verdict: '',
   redirect_target: '',
 });
-check('non-object correction coerced, not rejected', validated({ correction: 'nope' }).correction, { agent_did: '', captain_verdict: '', redirect_target: '' });
+check('non-object correction coerced, not rejected', validated({ correction: 'nope' }).correction, { agent_did: '', user_verdict: '', redirect_target: '' });
 check('supersedes_query capped at 300', (validated({ supersedes_query: long }).supersedes_query as string).length, 300);
 check('empty supersedes_query becomes null', validated({ supersedes_query: '   ' }).supersedes_query, null);
 check('supersedes_pending_review_id capped at 64', (validated({ supersedes_pending_review_id: long }).supersedes_pending_review_id as string).length, 64);
@@ -117,9 +117,9 @@ check('project_context does not touch project_id', validated({ project_context: 
 // --- the sensitive gate covers all four evidence strings, incl. supersedes_query ---------------
 const secret = 'export DATABASE_PASSWORD=supersecret123';
 const sensitiveError = 'content looks like it contains a secret or credential; refusing to store it.';
-check('gate: agent_did', rejected({ correction: { agent_did: secret, captain_verdict: '', redirect_target: '' } }), sensitiveError);
-check('gate: captain_verdict', rejected({ correction: { agent_did: '', captain_verdict: secret, redirect_target: '' } }), sensitiveError);
-check('gate: redirect_target', rejected({ correction: { agent_did: '', captain_verdict: '', redirect_target: secret } }), sensitiveError);
+check('gate: agent_did', rejected({ correction: { agent_did: secret, user_verdict: '', redirect_target: '' } }), sensitiveError);
+check('gate: user_verdict', rejected({ correction: { agent_did: '', user_verdict: secret, redirect_target: '' } }), sensitiveError);
+check('gate: redirect_target', rejected({ correction: { agent_did: '', user_verdict: '', redirect_target: secret } }), sensitiveError);
 check('gate: supersedes_query', rejected({ supersedes_query: secret }), sensitiveError);
 // Gate runs on the original string, before truncation, so a cap cannot bisect a credential into a
 // non-matching prefix.
@@ -139,7 +139,7 @@ const batch = validateProcessCandidates({
       signal_subtype: 'override_of_action',
       rule_form: 'prohibition',
       antecedent_source: 'trace',
-      correction: { agent_did: '直接跑了 git commit -m "wip"', captain_verdict: '别再自动 commit 了', redirect_target: '' },
+      correction: { agent_did: '直接跑了 git commit -m "wip"', user_verdict: '别再自动 commit 了', redirect_target: '' },
       supersedes_query: '每次编辑完成后自动 commit 并推送',
       project_context: 'asaki-memory-manager',
     },
@@ -155,7 +155,7 @@ check('batch: importance derived', item.importance, 0.9);
 check('batch: confidence derived', item.confidence, 0.7);
 check('batch: candidate_json round-trip keeps fields', JSON.parse(JSON.stringify(item)).correction, {
   agent_did: '直接跑了 git commit -m "wip"',
-  captain_verdict: '别再自动 commit 了',
+  user_verdict: '别再自动 commit 了',
   redirect_target: '',
 });
 

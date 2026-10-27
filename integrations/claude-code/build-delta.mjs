@@ -91,7 +91,7 @@ export const CLAUDE_TRACE_TOOLS = {
   Grep: { arg: 'pattern', shape: 'text' },
 };
 
-// User-explicit exclusion marker (research report §四 P2-A, captain ruling c 2026-08-28): text the
+// User-explicit exclusion marker: text the
 // user wraps in `<private>…</private>` is removed from the delta BEFORE any gate, prompt, tail
 // file or HTTP request sees it. Independent of the credential gate above — both stay on.
 // Semantics, deliberately conservative:

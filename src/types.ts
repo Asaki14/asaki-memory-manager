@@ -27,7 +27,7 @@ export type CandidateAntecedentSource = 'prose' | 'trace' | 'prior_tail' | 'cand
 
 export interface CandidateCorrectionEvidence {
   agent_did: string;
-  captain_verdict: string;
+  user_verdict: string;
   redirect_target: string;
 }
 
@@ -101,7 +101,7 @@ export interface GetMemoriesInput {
   user_id: string;
   ids: string[];
   // Internal-only, same contract as SearchMemoriesInput.track_access: a read by id IS a retrieval,
-  // so it refreshes last_accessed_at by default (captain decision a, 2026-08-28). Never read off a
+  // so it refreshes last_accessed_at by default. Never read off a
   // request body — validateGetMemories returns an explicit whitelist.
   track_access?: boolean;
 }
@@ -147,11 +147,11 @@ export interface MemoryReinforcement {
 }
 
 // Compressed correction provenance written when a correction review is resolved into an active
-// memory (captain decision 9): each quote is capped at 120 chars so the memory carries its origin
+// memory: each quote is capped at 120 chars so the memory carries its origin
 // after the review row stops being consulted, without becoming a transcript.
 export interface MemoryCorrectionOrigin {
   agent_did: string;
-  captain_verdict: string;
+  user_verdict: string;
   signal_subtype?: CandidateSignalSubtype | '' | null;
   antecedent_source?: CandidateAntecedentSource | null;
   review_id: string;
@@ -233,7 +233,7 @@ export interface MemoryReviewRow extends Omit<MemoryReviewRecord, 'candidate_jso
   }> | null;
   // Display-time only (no column, no migration): the same rule already exists as a project-scoped
   // rule/preference in a DIFFERENT project, so this project correction is probably a global rule
-  // (captain decision 8). A suggestion only — resolving with `promote_to_global` is the human's
+  // A suggestion only — resolving with `promote_to_global` is the human's
   // call. `null` means "eligible but not computed" (per-response cap hit), same as above.
   promotion_candidates?: Array<{
     memory_id: string;

@@ -172,7 +172,7 @@ check(
   [pi.PRIOR_BLOCK_HEADER, 'Tool: edit src/a.ts', pi.CURRENT_DELTA_DELIMITER, 'User: 不对', 'Tool: edit src/a.ts'].join('\n\n'),
 );
 
-// --- `<private>…</private>` user-explicit exclusion (report §四 P2-A, captain ruling c) ---------
+// --- `<private>…</private>` user-explicit exclusion ---------------------------------------------
 // Three shapes matter: a mixed turn keeps only the non-private half; a fully private turn drops
 // the WHOLE delta and (uniquely among skips) tells the caller to advance its offset; an unclosed
 // marker strips to the end of the segment.

@@ -50,7 +50,7 @@ const correctionRow = {
     antecedent_source: 'trace',
     correction: {
       agent_did: '直接跑了 git commit -m "wip"',
-      captain_verdict: '「别再自动 commit 了」',
+      user_verdict: '「别再自动 commit 了」',
       redirect_target: '等确认后再 commit',
     },
     supersedes_query: '每次编辑完成后自动 commit 并推送',
@@ -71,7 +71,7 @@ const correctionRow = {
 
 const correctionBlock = [
   '1. [correction · override_of_action · prohibition] 不要在未获得确认前自动 commit 本仓库的改动',
-  '   ⤷ agent: 直接跑了 git commit -m "wip"   →   captain: 「别再自动 commit 了」   (antecedent: trace)',
+  '   ⤷ agent: 直接跑了 git commit -m "wip"   →   user: 「别再自动 commit 了」   (antecedent: trace)',
   '   ⤷ supersedes: mem_7f3a [scope=global kind=fact confidence=0.95] "每次编辑完成后自动 commit 并推送"  (score=0.62 suggest: update)',
   '   ⤷ contradicts pending review rev_44b',
   '   id=rev_91c scope=project kind=rule importance=0.90 confidence=0.70',
@@ -87,7 +87,7 @@ check('correction block is identical across both copies', mcpFormat(correctionRo
 const pendingRow = { ...correctionRow, status: 'pending', supersedes_candidates: null };
 const pendingBlock = [
   '1. [correction · override_of_action · prohibition] 不要在未获得确认前自动 commit 本仓库的改动',
-  '   ⤷ agent: 直接跑了 git commit -m "wip"   →   captain: 「别再自动 commit 了」   (antecedent: trace)',
+  '   ⤷ agent: 直接跑了 git commit -m "wip"   →   user: 「别再自动 commit 了」   (antecedent: trace)',
   '   ⤷ supersedes: not computed (suggestion cap reached on this page; re-list with a narrower filter)',
   '   ⤷ contradicts pending review rev_44b',
   '   id=rev_91c status=pending scope=project kind=rule importance=0.90 confidence=0.70',
@@ -104,7 +104,7 @@ const bareCorrection = {
 };
 const bareBlock = [
   '[correction · unspecified · unspecified] 别再自动 commit',
-  '   ⤷ agent: (unrecorded)   →   captain: (unrecorded)   (antecedent: none)',
+  '   ⤷ agent: (unrecorded)   →   user: (unrecorded)   (antecedent: none)',
   '   id=rev_bare scope=global kind=rule importance=0.80 confidence=1.00',
 ].join('\n');
 check('mcp / correction without evidence', mcpFormat(bareCorrection), bareBlock);
@@ -153,7 +153,7 @@ check(
   mcpFormat({ ...correctionRow, status: 'resolved', resolved_action: 'update', memory_id: 'mem_7f3a', supersedes_candidates: undefined }),
   [
     '[correction · override_of_action · prohibition] 不要在未获得确认前自动 commit 本仓库的改动',
-    '   ⤷ agent: 直接跑了 git commit -m "wip"   →   captain: 「别再自动 commit 了」   (antecedent: trace)',
+    '   ⤷ agent: 直接跑了 git commit -m "wip"   →   user: 「别再自动 commit 了」   (antecedent: trace)',
     '   ⤷ contradicts pending review rev_44b',
     '   id=rev_91c status=resolved action=update memory_id=mem_7f3a scope=project kind=rule importance=0.90 confidence=0.70',
     '   source=claude-code:stop-classifier created_at=2026-07-31T02:11Z',
@@ -171,14 +171,14 @@ const longRow = {
 };
 const longBlock = [
   '[correction · explicit_negation · retract] 不要再用旧规则',
-  '   ⤷ agent: (unrecorded)   →   captain: (unrecorded)   (antecedent: prose)',
+  '   ⤷ agent: (unrecorded)   →   user: (unrecorded)   (antecedent: prose)',
   `   ⤷ supersedes: mem_long [scope=project kind=rule confidence=0.60] "${'x'.repeat(160)}…"  (score=0.50 suggest: delete)`,
   '   id=rev_04 scope=project kind=rule importance=0.90 confidence=0.85',
 ].join('\n');
 check('mcp / long supersession target is truncated', mcpFormat(longRow), longBlock);
 check('pi / long supersession target is truncated', piFormat(longRow), longBlock);
 
-// --- 5. the global-promotion suggestion (captain decision 8) -----------------------------------
+// --- 5. the global-promotion suggestion -----------------------------------------------------------
 // A project correction whose rule already exists in ANOTHER project renders one `⤷ promote:` line per
 // suggestion, between the supersession lines and the contradicts line. Same three-state contract as
 // supersedes: array -> lines, null -> "not computed", absent -> nothing at all.
@@ -191,7 +191,7 @@ const promotionRow = {
 };
 const promotionBlock = [
   '1. [correction · override_of_action · prohibition] 不要在未获得确认前自动 commit 本仓库的改动',
-  '   ⤷ agent: 直接跑了 git commit -m "wip"   →   captain: 「别再自动 commit 了」   (antecedent: trace)',
+  '   ⤷ agent: 直接跑了 git commit -m "wip"   →   user: 「别再自动 commit 了」   (antecedent: trace)',
   '   ⤷ promote: same rule in project fitness-app as mem_p2 [kind=rule] "不要在未获得确认前自动 commit 任何仓库"  (score=0.71 suggest: promote_to_global)',
   '   ⤷ contradicts pending review rev_44b',
   '   id=rev_91c scope=project kind=rule importance=0.90 confidence=0.70',
@@ -203,7 +203,7 @@ check('pi / promotion suggestion', piFormat(promotionRow, 0), promotionBlock);
 const promotionCapRow = { ...correctionRow, supersedes_candidates: undefined, promotion_candidates: null };
 const promotionCapBlock = [
   '[correction · override_of_action · prohibition] 不要在未获得确认前自动 commit 本仓库的改动',
-  '   ⤷ agent: 直接跑了 git commit -m "wip"   →   captain: 「别再自动 commit 了」   (antecedent: trace)',
+  '   ⤷ agent: 直接跑了 git commit -m "wip"   →   user: 「别再自动 commit 了」   (antecedent: trace)',
   '   ⤷ promote: not computed (suggestion cap reached on this page; re-list with a narrower filter)',
   '   ⤷ contradicts pending review rev_44b',
   '   id=rev_91c scope=project kind=rule importance=0.90 confidence=0.70',
@@ -216,7 +216,7 @@ check('pi / promotion cap reached', piFormat(promotionCapRow), promotionCapBlock
 check('mcp / no promotion key leaves the block unchanged', mcpFormat(correctionRow, 0), correctionBlock);
 check('pi / no promotion key leaves the block unchanged', piFormat(correctionRow, 0), correctionBlock);
 
-// --- 6. the lifecycle report (captain decision 4) ----------------------------------------------
+// --- 6. the lifecycle report ----------------------------------------------------------------------
 const lifecycleData = {
   idle_days_threshold: 30,
   standing_rules: { active: 17, reinforced: 3, total_reinforcements: 5, repeat_rate: 0.176 },

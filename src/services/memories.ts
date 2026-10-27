@@ -582,7 +582,7 @@ export async function purgeMemory(env: Env, id: string, userId: string, reason: 
     }
   }
 
-  // metadata_json is blanked with the content: a correction-sourced memory carries the captain's
+  // metadata_json is blanked with the content: a correction-sourced memory carries the user's
   // verdict quote in `correction_origin` (see services/memoryLifecycle.ts), so leaving it behind
   // would keep the very text purge exists to destroy.
   const updatedAt = nowIso();
@@ -615,9 +615,9 @@ export async function purgeMemory(env: Env, id: string, userId: string, reason: 
 
 export type StaleMemoryCandidate = Pick<MemoryRow, 'id' | 'user_id' | 'scope' | 'content' | 'kind' | 'importance' | 'last_accessed_at' | 'created_at'>;
 
-// Standing rules (`rule`/`preference`) are deliberately EXCLUDED from this bulk path: captain
-// decision 4 (2026-07-31) puts long-idle standing rules in front of a human as "possibly stale, judge
-// keep/retire" items — never on an automatic delete list, and never demoted out of session injection.
+// Standing rules (`rule`/`preference`) are deliberately EXCLUDED from this bulk path: long-idle
+// standing rules go in front of a human as "possibly stale, judge keep/retire" items — never
+// on an automatic delete list, and never demoted out of session injection.
 // They surface via lifecycleReport()'s `idle_rules` instead (POST /v1/memories/lifecycle). Injection
 // also does not refresh last_accessed_at, so a rule obeyed every session looks untouched here — one
 // more reason this path must not judge them.

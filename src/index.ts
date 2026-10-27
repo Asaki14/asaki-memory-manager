@@ -242,7 +242,7 @@ app.post('/v1/memories/prune-stale', async (c) => {
   return c.json(result);
 });
 
-// Read-only lifecycle/system-health surface (captain decision 4): per-rule recurrence counts, the
+// Read-only lifecycle/system-health surface: per-rule recurrence counts, the
 // repeat rate they aggregate into, and the long-idle standing rules a human has to judge keep/retire.
 // It never mutates or deletes anything — idle rules stay active and injected until a human decides.
 app.post('/v1/memories/lifecycle', async (c) => {

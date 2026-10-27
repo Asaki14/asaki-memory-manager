@@ -195,7 +195,7 @@ export function buildProjectContext(input = {}, io = defaultIo) {
   const orchestrator = isOrchestratorHost(hostRoot, orchestratorHome, io);
   const taskTargets = orchestrator || orchestratorHome ? collectTaskTargets(orchestratorHome, io) : [];
 
-  // A crewmate runs inside a disposable worktree whose directory name may not match the
+  // A worker subagent runs inside a disposable worktree whose directory name may not match the
   // repository it belongs to. When a task metadata file claims this exact worktree, take that
   // task's `project=` as the authority for the host identity.
   if (!orchestrator) {

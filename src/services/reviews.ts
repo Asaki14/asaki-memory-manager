@@ -78,7 +78,7 @@ export async function findSupersedeCandidates(
     }));
 }
 
-// Display-time global-promotion hint (captain decision 8): the same rule this project correction
+// Display-time global-promotion hint: the same rule this project correction
 // states already exists as a project-scoped rule/preference in a DIFFERENT project, which is the
 // evidence that it is really a global rule.
 //
@@ -204,7 +204,7 @@ export async function createMemoryReviews(env: Env, candidates: ProcessMemoryCan
     const activeDuplicate = active?.action === 'ignore' ? active.match : undefined;
     if (activeDuplicate) {
       skippedDuplicateIds.push(activeDuplicate.id);
-      // Recurrence (captain decision 4): a correction restating a rule that is already ACTIVE means
+      // Recurrence: a correction restating a rule that is already ACTIVE means
       // the agent repeated a mistake that rule covers. Nothing is queued — the human already made
       // this rule — but the rule gets a bounded importance bump and a recurrence counter, which is
       // what makes repeat rate measurable (lifecycleReport()). Same-direction by construction: it is
@@ -516,7 +516,7 @@ export async function listMemoryReviews(env: Env, input: { user_id: string; stat
 export async function resolveMemoryReview(env: Env, id: string, input: { user_id: string; action: 'add' | 'merge' | 'update' | 'delete' | 'ignore'; memory_id?: string | null; reason?: string | null; promote_to_global?: boolean; content?: string; kind?: MemoryKind; importance?: number; confidence?: number }): Promise<{ review: MemoryReviewRow; memory?: Awaited<ReturnType<typeof createMemory>>; promoted_to_global?: boolean }> {
   const existing = await env.DB.prepare('SELECT * FROM memory_reviews WHERE id = ?1 AND user_id = ?2').bind(id, input.user_id).first<MemoryReviewRecord>();
   if (!existing) throw new UserFacingError('Review not found.');
-  // `promote_to_global` accepts the row's promotion suggestion (captain decision 8) in the same call
+  // `promote_to_global` accepts the row's promotion suggestion in the same call
   // that activates it. Only meaningful for `add`: merge/update write into an EXISTING memory, and
   // rescoping someone else's memory as a side effect of resolving a review is exactly the silent
   // rescope the decision forbids — those stay an explicit asaki_memory_update.
@@ -623,7 +623,7 @@ export async function resolveMemoryReview(env: Env, id: string, input: { user_id
     throw error;
   }
 
-  // Provenance on activation (captain decision 9): a correction that just became (or rewrote) an
+  // Provenance on activation: a correction that just became (or rewrote) an
   // active memory stamps the compressed correction moment onto that memory, so its origin survives
   // after nobody consults review rows any more. `delete` is excluded on purpose — there is no
   // activated memory to carry provenance, only a retired one. Best-effort inside

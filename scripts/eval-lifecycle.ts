@@ -1,4 +1,4 @@
-// Offline unit coverage for the memory-lifecycle logic (captain decisions 4 + 8 + 9, 2026-07-31):
+// Offline unit coverage for the memory-lifecycle logic:
 // reinforcement/recurrence bookkeeping, the correction-provenance stamp, the cross-project promotion
 // lookup, the lifecycle report's arithmetic, and the invariant that standing rules are never on an
 // automatic delete path. Uses a fake D1 that records every statement — no Worker, no real D1, no
@@ -108,7 +108,7 @@ function correctionCandidate(overrides: Record<string, unknown> = {}) {
     signal_subtype: 'override_of_action',
     rule_form: 'prohibition',
     antecedent_source: 'trace',
-    correction: { agent_did: '直接跑了 git commit', captain_verdict: '别再自动 commit 了', redirect_target: '等确认后再 commit' },
+    correction: { agent_did: '直接跑了 git commit', user_verdict: '别再自动 commit 了', redirect_target: '等确认后再 commit' },
     ...overrides,
   } as any;
 }
@@ -164,9 +164,9 @@ check('malformed metadata parses as empty', Object.keys(parseMemoryMetadata('{no
 // --- 4. provenance on activation --------------------------------------------------------------
 {
   const long = 'x'.repeat(300);
-  const origin = correctionOriginPatch(correctionCandidate({ correction: { agent_did: long, captain_verdict: long, redirect_target: long } }), 'rev-1', '2026-07-31T00:00:00.000Z');
+  const origin = correctionOriginPatch(correctionCandidate({ correction: { agent_did: long, user_verdict: long, redirect_target: long } }), 'rev-1', '2026-07-31T00:00:00.000Z');
   check('agent_did is capped at 120 chars', origin.agent_did.length === 120, String(origin.agent_did.length));
-  check('captain_verdict is capped at 120 chars', origin.captain_verdict.length === 120, String(origin.captain_verdict.length));
+  check('user_verdict is capped at 120 chars', origin.user_verdict.length === 120, String(origin.user_verdict.length));
   check('origin keeps the review id and evidence provenance', origin.review_id === 'rev-1' && origin.antecedent_source === 'trace' && origin.signal_subtype === 'override_of_action', JSON.stringify(origin));
   check('redirect_target is not stored on the memory', !('redirect_target' in origin), JSON.stringify(origin));
 }
@@ -177,7 +177,7 @@ check('malformed metadata parses as empty', Object.keys(parseMemoryMetadata('{no
   check('provenance is written to metadata_json', origin !== null && update !== undefined, JSON.stringify({ origin, recorded }));
   check(
     'provenance merges rather than replaces existing metadata keys',
-    typeof update?.bindings[0] === 'string' && JSON.parse(update.bindings[0] as string).correction_origin.captain_verdict === '别再自动 commit 了',
+    typeof update?.bindings[0] === 'string' && JSON.parse(update.bindings[0] as string).correction_origin.user_verdict === '别再自动 commit 了',
     String(update?.bindings[0])
   );
 }

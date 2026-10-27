@@ -126,7 +126,7 @@ environment (never hardcoded / never committed). Set them once in
 
   - `ASAKI_MEMORY_CORRECTION_MODE` (default `1`) — runs the classifier on the correction
     prompt/schema: it detects the user correcting the agent, records the
-    contrast pair (`agent_did` / `captain_verdict` / `redirect_target`), infers
+    contrast pair (`agent_did` / `user_verdict` / `redirect_target`), infers
     a durable rule, and sends the extra evidence fields on the candidate. It
     also replays the last ~8 lines of the previous processed delta as a
     labelled `Prior context (ALREADY PROCESSED ...)` block, and lets one

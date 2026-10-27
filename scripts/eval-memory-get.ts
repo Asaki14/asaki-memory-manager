@@ -1,6 +1,6 @@
 // Offline unit coverage for the batch read-by-id path: validateGetMemories()'s bounds and
 // getMemoriesByIds()'s user scoping, request-order preservation, `missing` reporting, the
-// last_accessed_at write (captain decision a, 2026-08-28) and the audit event. Uses a fake D1 —
+// last_accessed_at write and the audit event. Uses a fake D1 —
 // no Worker, no real D1, no network.
 import { registerTsResolver } from './node-ts-resolver.mjs';
 

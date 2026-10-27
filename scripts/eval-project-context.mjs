@@ -246,9 +246,9 @@ for (const [label, impl] of impls) {
     },
     io,
   )) {
-    eq(`${label}/crewmate host project`, ctx.hostProject, "asaki-memory-manager");
-    eq(`${label}/crewmate target`, ctx.targetProject, "asaki-memory-manager");
-    check(`${label}/crewmate is not an orchestrator host`, ctx.orchestratorHost === false);
+    eq(`${label}/worker subagent host project`, ctx.hostProject, "asaki-memory-manager");
+    eq(`${label}/worker subagent target`, ctx.targetProject, "asaki-memory-manager");
+    check(`${label}/worker subagent is not an orchestrator host`, ctx.orchestratorHost === false);
   }
 }
 

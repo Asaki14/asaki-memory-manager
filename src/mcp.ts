@@ -43,8 +43,8 @@ function truncateText(text: string, maxChars: number): string {
 // see CORRECTION_ORIGIN_MAX_CHARS) stays in metadata_json and on the GET /v1/memories/:id row.
 const MEMORY_ORIGIN_QUOTE_CHARS = 60;
 
-// Lifecycle tail for memory lines: recurrence counter and correction provenance (captain decisions 4
-// + 9), both read out of metadata_json. Absent metadata renders nothing, so pre-0006 rows and plain
+// Lifecycle tail for memory lines: recurrence counter and correction provenance,
+// both read out of metadata_json. Absent metadata renders nothing, so pre-0006 rows and plain
 // memories keep today's line. KEEP IN SYNC with formatMemoryLine() in integrations/pi/asaki-memory.ts.
 function lifecycleSuffix(item: Record<string, unknown>): string {
   if (typeof item.metadata_json !== 'string' || !item.metadata_json.trim()) return '';
@@ -63,7 +63,7 @@ function lifecycleSuffix(item: Record<string, unknown>): string {
   const origin = meta.correction_origin;
   if (origin && typeof origin === 'object') {
     const agent = truncateText(String(origin.agent_did ?? ''), MEMORY_ORIGIN_QUOTE_CHARS);
-    const verdict = truncateText(String(origin.captain_verdict ?? ''), MEMORY_ORIGIN_QUOTE_CHARS);
+    const verdict = truncateText(String(origin.user_verdict ?? ''), MEMORY_ORIGIN_QUOTE_CHARS);
     out += ` origin="${agent} → ${verdict}"`;
   }
   return out;
@@ -100,7 +100,7 @@ const SUPERSEDE_CONTENT_CHARS = 160;
 
 // Correction-aware review presentation. A `signal: "correction"` candidate is rendered as a block
 // instead of one line: the rule he is accepting or rejecting first, then the moment that produced it
-// (what the agent did → the captain's verdict) plus WHERE the antecedent came from, so a
+// (what the agent did → the user's verdict) plus WHERE the antecedent came from, so a
 // trace-inferred rule visibly reads weaker than a prose-inferred one, then the supersession
 // suggestion carrying the target's CURRENT scope/kind/confidence — resolving a review never
 // rescopes the target automatically, and a 0.95 → 0.70 confidence overwrite has to be visible at
@@ -122,7 +122,7 @@ function correctionBlockLines(item: Record<string, unknown>, candidate: Record<s
   const correction = candidate.correction && typeof candidate.correction === 'object' ? (candidate.correction as Record<string, unknown>) : {};
   const antecedent = typeof candidate.antecedent_source === 'string' && candidate.antecedent_source ? candidate.antecedent_source : 'none';
 
-  const lines = [`   ⤷ agent: ${text(correction.agent_did)}   →   captain: ${text(correction.captain_verdict)}   (antecedent: ${antecedent})`];
+  const lines = [`   ⤷ agent: ${text(correction.agent_did)}   →   user: ${text(correction.user_verdict)}   (antecedent: ${antecedent})`];
 
   const supersedes = item.supersedes_candidates;
   if (supersedes === null) {
@@ -200,7 +200,7 @@ export function formatReviewLine(item: Record<string, unknown>, index?: number):
   return `${prefix}${shownContent}${id}${status}${action}${memoryId}${scope}${kind}${source}${createdAt}${updatedAt}${dup}`;
 }
 
-// Lifecycle/system-health report rendering (captain decision 4). Two sections that answer two
+// Lifecycle/system-health report rendering. Two sections that answer two
 // different questions: recurrence = rules the agent had to be corrected on AGAIN (the repeat-rate
 // signal), idle = standing rules with no reinforcement and no retrieval hit, which a HUMAN judges
 // keep/retire. Nothing here is actionable by the agent alone — no line proposes a delete.

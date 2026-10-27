@@ -738,7 +738,7 @@ Input shape. The delta may contain:
 
 Correction reasoning — build the contrast pair BEFORE writing the rule:
 1. correction.agent_did — what the agent produced or attempted, taken from assistant prose, a "Tool:" line, the prior block, or the prior memory candidate.
-2. correction.captain_verdict — the user words, verbatim, trimmed.
+2. correction.user_verdict — the user words, verbatim, trimmed.
 3. correction.redirect_target — what the user pointed to instead (empty for a pure prohibition).
 
 Temporal attribution: agent_did MUST come from a line appearing BEFORE the verdict in reading order. "Tool:" lines appearing AFTER the verdict in the current delta are the agent repairing itself and must never be used as agent_did. If the only candidate action is post-verdict, treat the antecedent as unrecoverable.
@@ -768,7 +768,7 @@ Rule phrasing per rule_form:
 - retract → still phrased as a usable negative rule, never the bare verdict.
 
 Two invariants:
-1. The verdict is never the memory. "不对" / "何必" may appear only in correction.captain_verdict, never in text.
+1. The verdict is never the memory. "不对" / "何必" may appear only in correction.user_verdict, never in text.
 2. The rule must survive the death of the conversation: no 这个 / 该文件 / 上面那版 / 用户说的 in text.
 
 Apply this checklist to every candidate, correction or not:
@@ -868,12 +868,12 @@ Classify (only meaningful when flag=true):
 
 Be conservative: when genuinely unsure, prefer flag=false — a missed candidate falls back to the existing prompt-based reminder, a false alarm costs the main agent one wasted turn.
 
-Output your FINAL answer as compact JSON only, no other prose before or after it: {"flag":true|false,"signal":"correction|preference|outcome|none","signal_subtype":"<subtype if signal=correction, else empty string>","text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","project_id":"<one known project id when scope=project, else empty string>","rule_form":"<prohibition|preference|procedure|retract, empty string when not a rule-shaped candidate>","antecedent_source":"prose|trace|prior_tail|candidate|none","correction":{"agent_did":"","captain_verdict":"","redirect_target":""},"supersedes_query":"","reason":"<short reason, especially when flag=false>"}'
+Output your FINAL answer as compact JSON only, no other prose before or after it: {"flag":true|false,"signal":"correction|preference|outcome|none","signal_subtype":"<subtype if signal=correction, else empty string>","text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","project_id":"<one known project id when scope=project, else empty string>","rule_form":"<prohibition|preference|procedure|retract, empty string when not a rule-shaped candidate>","antecedent_source":"prose|trace|prior_tail|candidate|none","correction":{"agent_did":"","user_verdict":"","redirect_target":""},"supersedes_query":"","reason":"<short reason, especially when flag=false>"}'
   # additionalProperties:false forces every field to be emitted; importance/confidence are
   # deliberately absent — the server derives both (plan §6.1/§9.1).
   # KEEP IN SYNC with CORRECTION_SCHEMA in scripts/eval-classifier.sh and the ClassifierResult
   # parse in integrations/pi/asaki-memory.ts.
-  CORRECTION_SCHEMA='{"type":"object","properties":{"flag":{"type":"boolean"},"signal":{"type":"string"},"signal_subtype":{"type":"string"},"text":{"type":"string"},"type":{"type":"string"},"scope":{"type":"string"},"project_id":{"type":"string"},"rule_form":{"type":"string"},"antecedent_source":{"type":"string"},"correction":{"type":"object","properties":{"agent_did":{"type":"string"},"captain_verdict":{"type":"string"},"redirect_target":{"type":"string"}},"required":["agent_did","captain_verdict","redirect_target"],"additionalProperties":false},"supersedes_query":{"type":"string"},"reason":{"type":"string"}},"required":["flag","signal","signal_subtype","text","type","scope","project_id","rule_form","antecedent_source","correction","supersedes_query","reason"],"additionalProperties":false}'
+  CORRECTION_SCHEMA='{"type":"object","properties":{"flag":{"type":"boolean"},"signal":{"type":"string"},"signal_subtype":{"type":"string"},"text":{"type":"string"},"type":{"type":"string"},"scope":{"type":"string"},"project_id":{"type":"string"},"rule_form":{"type":"string"},"antecedent_source":{"type":"string"},"correction":{"type":"object","properties":{"agent_did":{"type":"string"},"user_verdict":{"type":"string"},"redirect_target":{"type":"string"}},"required":["agent_did","user_verdict","redirect_target"],"additionalProperties":false},"supersedes_query":{"type":"string"},"reason":{"type":"string"}},"required":["flag","signal","signal_subtype","text","type","scope","project_id","rule_form","antecedent_source","correction","supersedes_query","reason"],"additionalProperties":false}'
 
   if is_flag_enabled "$CORRECTION_MODE"; then
     ACTIVE_SYSTEM_PROMPT="$CORRECTION_SYSTEM_PROMPT"
@@ -988,7 +988,7 @@ ${CORRECTION_SIGNAL_LINES}
           --arg rule_form "$(echo "$RESP_SINGLE_LINE" | jq -r '.rule_form // ""')" \
           --arg antecedent_source "$(echo "$RESP_SINGLE_LINE" | jq -r '.antecedent_source // ""')" \
           --arg agent_did "$(echo "$RESP_SINGLE_LINE" | jq -r '.correction.agent_did // ""')" \
-          --arg captain_verdict "$(echo "$RESP_SINGLE_LINE" | jq -r '.correction.captain_verdict // ""')" \
+          --arg user_verdict "$(echo "$RESP_SINGLE_LINE" | jq -r '.correction.user_verdict // ""')" \
           --arg redirect_target "$(echo "$RESP_SINGLE_LINE" | jq -r '.correction.redirect_target // ""')" \
           --arg supersedes_query "$(echo "$RESP_SINGLE_LINE" | jq -r '.supersedes_query // ""')" '
           {user_id: $user, source: "claude-code:stop-classifier",
@@ -996,7 +996,7 @@ ${CORRECTION_SIGNAL_LINES}
                          project_context: (if $project == "" then null else $project end),
                          signal: $signal, signal_subtype: $signal_subtype, rule_form: $rule_form,
                          antecedent_source: $antecedent_source,
-                         correction: {agent_did: $agent_did, captain_verdict: $captain_verdict, redirect_target: $redirect_target},
+                         correction: {agent_did: $agent_did, user_verdict: $user_verdict, redirect_target: $redirect_target},
                          supersedes_query: $supersedes_query}
                         + (if $scope == "project" then {project_id: $project} else {} end)]}')
       else

@@ -115,7 +115,7 @@ create_correction() {
       '{candidates:[{content:$content, kind:"rule", importance:0.8, confidence:0.7, scope:"global",
                      signal:$signal, signal_subtype:$subtype, rule_form:"prohibition",
                      antecedent_source:"prose", supersedes_query:$supersedes,
-                     correction:{agent_did:"用了 npm", captain_verdict:"别再用 npm 了", redirect_target:"改用 pnpm"}}],
+                     correction:{agent_did:"用了 npm", user_verdict:"别再用 npm 了", redirect_target:"改用 pnpm"}}],
         user_id:$user, source:$source}')"
 }
 

@@ -108,8 +108,8 @@ export async function findLexicalMatch(env: Env, candidate: ProcessMemoryCandida
   return best && best.similarity >= 0.5 ? best : undefined;
 }
 
-// Cross-project sibling of findLexicalMatch(), for the global-promotion suggestion (captain decision
-// 8): does this project rule already exist as a project rule in a DIFFERENT project? searchMemories()
+// Cross-project sibling of findLexicalMatch(), for the global-promotion suggestion:
+// does this project rule already exist as a project rule in a DIFFERENT project? searchMemories()
 // cannot answer that — isVisibleInScope() only ever admits the caller's own project — so this is a
 // deliberate, narrow D1 scan: active project-scoped rule/preference rows outside `excludeProjectId`,
 // bounded to the same 100 most-recently-touched rows findLexicalMatch() uses.

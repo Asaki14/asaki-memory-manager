@@ -1,5 +1,5 @@
 // Memory lifecycle: reinforcement + recurrence tracking, correction provenance, and the
-// idle-standing-rule / repeat-rate report (captain decisions 4 + 9, 2026-07-31).
+// idle-standing-rule / repeat-rate report.
 //
 // Everything here writes to (or reads) memories.metadata_json (migration 0006). Nothing here ever
 // deletes, archives, or demotes a memory: a long-idle standing rule is REPORTED for human judgment
@@ -39,7 +39,7 @@ export const DEFAULT_IDLE_RULE_DAYS = 30;
 
 // Correction quotes stored on the memory itself are capped harder than the 300 chars allowed in
 // candidate_json (validation.ts EVIDENCE_MAX_CHARS): the memory carries provenance, not a
-// transcript. Captain decision 9 fixes this number at 120.
+// transcript. This number is fixed at 120.
 export const CORRECTION_ORIGIN_MAX_CHARS = 120;
 
 export function parseMemoryMetadata(raw: string | null | undefined): MemoryMetadata {
@@ -85,7 +85,7 @@ function truncateQuote(value: unknown): string {
 export function correctionOriginPatch(candidate: ProcessMemoryCandidateInput, reviewId: string, at: string): MemoryCorrectionOrigin {
   return {
     agent_did: truncateQuote(candidate.correction?.agent_did),
-    captain_verdict: truncateQuote(candidate.correction?.captain_verdict),
+    user_verdict: truncateQuote(candidate.correction?.user_verdict),
     signal_subtype: candidate.signal_subtype ?? null,
     antecedent_source: candidate.antecedent_source ?? null,
     review_id: reviewId,

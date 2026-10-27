@@ -852,7 +852,7 @@ function buildProjectContext(
   const orchestrator = isOrchestratorHost(hostRoot, orchestratorHome, io);
   const taskTargets = orchestrator || orchestratorHome ? collectTaskTargets(orchestratorHome, io) : [];
 
-  // A crewmate runs inside a disposable worktree whose directory name may not match the
+  // A worker subagent runs inside a disposable worktree whose directory name may not match the
   // repository it belongs to. When a task metadata file claims this exact worktree, take that
   // task's `project=` as the authority for the host identity.
   if (!orchestrator) {
@@ -1110,7 +1110,7 @@ function lifecycleSuffix(item: any): string {
   const origin = meta.correction_origin;
   if (origin && typeof origin === "object") {
     const agent = truncateText(String(origin.agent_did ?? ""), MEMORY_ORIGIN_QUOTE_CHARS);
-    const verdict = truncateText(String(origin.captain_verdict ?? ""), MEMORY_ORIGIN_QUOTE_CHARS);
+    const verdict = truncateText(String(origin.user_verdict ?? ""), MEMORY_ORIGIN_QUOTE_CHARS);
     out += ` origin="${agent} → ${verdict}"`;
   }
   return out;
@@ -1147,7 +1147,7 @@ const SUPERSEDE_CONTENT_CHARS = 160;
 
 // Correction-aware review presentation. A `signal: "correction"` candidate is rendered as a block
 // instead of one line: the rule he is accepting or rejecting first, then the moment that produced it
-// (what the agent did → the captain's verdict) plus WHERE the antecedent came from, so a
+// (what the agent did → the user's verdict) plus WHERE the antecedent came from, so a
 // trace-inferred rule visibly reads weaker than a prose-inferred one, then the supersession
 // suggestion carrying the target's CURRENT scope/kind/confidence — resolving a review never
 // rescopes the target automatically, and a 0.95 → 0.70 confidence overwrite has to be visible at
@@ -1166,7 +1166,7 @@ function correctionBlockLines(item: any, candidate: any): string[] | null {
   const correction = candidate.correction && typeof candidate.correction === "object" ? candidate.correction : {};
   const antecedent = typeof candidate.antecedent_source === "string" && candidate.antecedent_source ? candidate.antecedent_source : "none";
 
-  const lines = [`   ⤷ agent: ${text(correction.agent_did)}   →   captain: ${text(correction.captain_verdict)}   (antecedent: ${antecedent})`];
+  const lines = [`   ⤷ agent: ${text(correction.agent_did)}   →   user: ${text(correction.user_verdict)}   (antecedent: ${antecedent})`];
 
   const supersedes = item.supersedes_candidates;
   if (supersedes === null) {
@@ -1544,7 +1544,7 @@ function cleanMemoryText(text: string): string {
   return text.replace(/\r/g, "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-// User-explicit exclusion marker (research report §四 P2-A, captain ruling c 2026-08-28).
+// User-explicit exclusion marker.
 // KEEP IN SYNC (behaviourally) with stripPrivate() in integrations/claude-code/build-delta.mjs:
 // case-insensitive, multi-line, any number of blocks; an UNCLOSED `<private>` strips to the end of
 // that segment; an orphan `</private>` drops the tag text only. Independent of the credential gate
@@ -1815,7 +1815,7 @@ type ClassifierResult = {
   signal_subtype: string;
   rule_form: string;
   antecedent_source: string;
-  correction: { agent_did: string; captain_verdict: string; redirect_target: string };
+  correction: { agent_did: string; user_verdict: string; redirect_target: string };
   supersedes_query: string;
 };
 
@@ -1923,7 +1923,7 @@ Input shape. The delta may contain:
 
 Correction reasoning — build the contrast pair BEFORE writing the rule:
 1. correction.agent_did — what the agent produced or attempted, taken from assistant prose, a "Tool:" line, the prior block, or the prior memory candidate.
-2. correction.captain_verdict — the user words, verbatim, trimmed.
+2. correction.user_verdict — the user words, verbatim, trimmed.
 3. correction.redirect_target — what the user pointed to instead (empty for a pure prohibition).
 
 Temporal attribution: agent_did MUST come from a line appearing BEFORE the verdict in reading order. "Tool:" lines appearing AFTER the verdict in the current delta are the agent repairing itself and must never be used as agent_did. If the only candidate action is post-verdict, treat the antecedent as unrecoverable.
@@ -1953,7 +1953,7 @@ Rule phrasing per rule_form:
 - retract → still phrased as a usable negative rule, never the bare verdict.
 
 Two invariants:
-1. The verdict is never the memory. "不对" / "何必" may appear only in correction.captain_verdict, never in text.
+1. The verdict is never the memory. "不对" / "何必" may appear only in correction.user_verdict, never in text.
 2. The rule must survive the death of the conversation: no 这个 / 该文件 / 上面那版 / 用户说的 in text.
 
 Apply this checklist to every candidate, correction or not:
@@ -2053,7 +2053,7 @@ Classify (only meaningful when flag=true):
 
 Be conservative: when genuinely unsure, prefer flag=false — a missed candidate falls back to the existing prompt-based reminder, a false alarm costs the main agent one wasted turn.
 
-Output your FINAL answer as compact JSON only, no other prose before or after it: {"flag":true|false,"signal":"correction|preference|outcome|none","signal_subtype":"<subtype if signal=correction, else empty string>","text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","project_id":"<one known project id when scope=project, else empty string>","rule_form":"<prohibition|preference|procedure|retract, empty string when not a rule-shaped candidate>","antecedent_source":"prose|trace|prior_tail|candidate|none","correction":{"agent_did":"","captain_verdict":"","redirect_target":""},"supersedes_query":"","reason":"<short reason, especially when flag=false>"}`;
+Output your FINAL answer as compact JSON only, no other prose before or after it: {"flag":true|false,"signal":"correction|preference|outcome|none","signal_subtype":"<subtype if signal=correction, else empty string>","text":"<distilled sentence if flag=true, else empty string>","type":"<type if flag=true, else empty string>","scope":"<scope if flag=true, else empty string>","project_id":"<one known project id when scope=project, else empty string>","rule_form":"<prohibition|preference|procedure|retract, empty string when not a rule-shaped candidate>","antecedent_source":"prose|trace|prior_tail|candidate|none","correction":{"agent_did":"","user_verdict":"","redirect_target":""},"supersedes_query":"","reason":"<short reason, especially when flag=false>"}`;
 
 function trimmedString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -2080,7 +2080,7 @@ function parseClassifierResult(output: string): ClassifierResult | null {
       antecedent_source: trimmedString(parsed.antecedent_source),
       correction: {
         agent_did: trimmedString(correction.agent_did),
-        captain_verdict: trimmedString(correction.captain_verdict),
+        user_verdict: trimmedString(correction.user_verdict),
         redirect_target: trimmedString(correction.redirect_target),
       },
       supersedes_query: trimmedString(parsed.supersedes_query),

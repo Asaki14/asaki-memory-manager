@@ -8,6 +8,8 @@
 4. Set `ADMIN_API_KEY` with `npx wrangler secret put ADMIN_API_KEY`.
 5. Apply migrations with `npm run db:migrate:remote` and deploy with `npm run deploy`.
 
+Upgrading an existing deployment: run `npx wrangler d1 migrations apply asaki-memory-manager --remote` before `npm run deploy`. Migration `0007_rename_user_verdict.sql` rewrites the stored old verdict key to `user_verdict`. The Worker reads only `user_verdict`, so deploying before migrating shows empty verdicts for existing rows.
+
 Create the Vectorize index with 1024 dimensions and cosine metric. The template configures Workers AI embedding model `@cf/baai/bge-m3`, the merge-decision model `@cf/meta/llama-3.1-8b-instruct-fp8`, and an optional rate-limit binding. The rate limit is keyed by `user_id`; the sample allows 30 requests per minute. Without the rate-limit binding, the Worker skips those checks.
 
 For local development, copy the template, create local resources as needed, run `npm run db:migrate:local`, then `npm run dev`. Wrangler configuration and secrets are not committed.

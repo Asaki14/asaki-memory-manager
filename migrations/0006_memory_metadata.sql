@@ -1,4 +1,4 @@
--- Memory lifecycle metadata (captain decisions 4 + 9, 2026-07-31).
+-- Memory lifecycle metadata.
 --
 -- One free-form JSON TEXT column instead of new tables/columns per field, matching the
 -- memory_reviews.candidate_json precedent: the shapes here (reinforcement counters, correction
@@ -8,7 +8,7 @@
 -- Shape (all keys optional; see src/services/memoryLifecycle.ts for the canonical writers):
 --   {
 --     "reinforcement":     { "count": 2, "last_reinforced_at": "...", "last_signal_subtype": "...", "last_source": "..." },
---     "correction_origin": { "agent_did": "<=120", "captain_verdict": "<=120", "signal_subtype": "...",
+--     "correction_origin": { "agent_did": "<=120", "user_verdict": "<=120", "signal_subtype": "...",
 --                            "antecedent_source": "...", "review_id": "...", "recorded_at": "..." }
 --   }
 ALTER TABLE memories ADD COLUMN metadata_json TEXT;

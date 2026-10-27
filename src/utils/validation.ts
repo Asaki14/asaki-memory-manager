@@ -47,7 +47,7 @@ function coerceEnum<T extends string>(value: unknown, allowed: Set<T>, fallback:
 }
 
 // Threads the correction-classifier evidence fields through instead of letting the whitelist below
-// drop them. The sensitive gate applies to all four evidence strings (agent_did, captain_verdict,
+// drop them. The sensitive gate applies to all four evidence strings (agent_did, user_verdict,
 // redirect_target AND supersedes_query) and runs on the ORIGINAL string, before truncation, so a
 // cap can never bisect a credential into a non-matching prefix.
 function validateCandidateEvidence(input: CreateMemoryInput): { ok: true; data: CandidateEvidenceFields } | { ok: false; error: string } {
@@ -71,7 +71,7 @@ function validateCandidateEvidence(input: CreateMemoryInput): { ok: true; data: 
     const raw = (typeof input.correction === 'object' ? input.correction : {}) as Partial<CandidateCorrectionEvidence>;
     const parts: CandidateCorrectionEvidence = {
       agent_did: coerceEvidenceString(raw.agent_did),
-      captain_verdict: coerceEvidenceString(raw.captain_verdict),
+      user_verdict: coerceEvidenceString(raw.user_verdict),
       redirect_target: coerceEvidenceString(raw.redirect_target),
     };
     for (const part of Object.values(parts)) {
@@ -79,7 +79,7 @@ function validateCandidateEvidence(input: CreateMemoryInput): { ok: true; data: 
     }
     data.correction = {
       agent_did: truncate(parts.agent_did, EVIDENCE_MAX_CHARS),
-      captain_verdict: truncate(parts.captain_verdict, EVIDENCE_MAX_CHARS),
+      user_verdict: truncate(parts.user_verdict, EVIDENCE_MAX_CHARS),
       redirect_target: truncate(parts.redirect_target, EVIDENCE_MAX_CHARS),
     };
   }

@@ -77,7 +77,7 @@ const result = await purgeMemory(fakeEnv(), 'mem-1', 'eval-user', 'leaked creden
 
 check('returns purged row', result?.content === '[purged]' && result?.status === 'deleted', JSON.stringify(result));
 
-// Lifecycle metadata carries the captain's verdict quote (correction_origin), so purge has to blank
+// Lifecycle metadata carries the user's verdict quote (correction_origin), so purge has to blank
 // it with the content — otherwise the escape hatch leaves the very text behind it exists to destroy.
 const memoryBlank = recorded.find((entry) => entry.sql.includes("UPDATE memories SET content = '[purged]'"));
 check('purge blanks metadata_json with the content', memoryBlank?.sql.includes('metadata_json = NULL') === true, memoryBlank?.sql ?? '(missing)');
