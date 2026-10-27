@@ -1,0 +1,25 @@
+# Asaki Memory Manager
+
+> A Cloudflare-native, single-operator memory layer for AI agents.
+
+## Overview
+
+The Worker exposes a bearer-authenticated REST API and remote MCP endpoint. D1 stores memories, reviews, and events; Vectorize is a recoverable semantic index; Workers AI provides embeddings and candidate decisions. Claude Code, Pi, and Codex integrations are included. Unsupervised background classifier candidates enter human review rather than being written automatically.
+
+## Documentation
+
+- [README](README.md): overview, quick start, integrations, and project links.
+- [中文 README](README_CN.md): Chinese overview and setup.
+- [API reference](docs/api.md): routes and behavior.
+- [Configuration](docs/configuration.md): Cloudflare resources, client settings, and optional orchestrator attribution.
+- [Architecture](docs/architecture.md): data flow and component responsibilities.
+- [Security](docs/security.md): authentication, data scope, validation, and deletion semantics.
+- [Roadmap](ROADMAP.md): project priorities and deferred work.
+
+## Source of truth
+
+- `src/index.ts`: API routes and authentication.
+- `src/services/`: data and memory behavior.
+- `src/utils/validation.ts`: API validation.
+- `integrations/`: client implementations.
+- `package.json`: install scripts and test/eval commands.
